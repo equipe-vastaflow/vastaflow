@@ -22,9 +22,12 @@ O desenvolvimento e **incremental**: a fundacao vem antes das automacoes.
 | Swagger em `/docs`                | Funcionando                             |
 | Validacao de ambiente no boot     | Funcionando                             |
 | Tratamento global de erros        | Funcionando                             |
-| Banco de dados                    | Nao iniciado (Etapa 2)                  |
-| Autenticacao / JWT / RBAC         | Nao iniciado (Etapa 3)                  |
-| Frontend                          | Nao iniciado (Etapa 4)                  |
+| Banco de dados (TypeORM)          | Conexao e entities prontas; sem migrations ainda |
+| Usuarios, perfis e permissoes     | Funcionando                             |
+| Autenticacao (JWT + bcrypt)       | Funcionando                             |
+| Autorizacao (RBAC)                | Funcionando                             |
+| Auditoria basica                  | Funcionando                             |
+| Frontend: login + dashboard       | Funcionando (demais telas nao iniciadas) |
 | Integracoes externas              | Nao iniciado - apenas pastas reservadas |
 
 > Nenhuma integracao possui endpoint, token ou payload definido. Nada foi
@@ -72,9 +75,12 @@ O Prisma foi **descartado**: nao suporta Oracle e, na linha 8, ainda nao suporta
 MySQL. A analise completa esta no
 [ADR 0001](docs/adr/0001-escolha-do-orm-e-estrategia-de-banco.md).
 
-### Frontend (Etapa 4)
+Autenticacao: `@nestjs/jwt` (JWT HS256) e `bcrypt`. Validacao de DTOs com
+`class-validator`.
 
-React + TypeScript + Vite + React Router.
+### Frontend
+
+React 19 + TypeScript + Vite + React Router. Testes com Vitest e Testing Library.
 
 ---
 
@@ -86,10 +92,11 @@ vastaflow/
 │   ├── src/
 │   │   ├── config/         validacao de variaveis de ambiente
 │   │   ├── common/         filtros, DTOs e utilitarios compartilhados
-│   │   ├── modules/        modulos de dominio (health, auth, users, ...)
-│   │   └── main.ts         bootstrap, Swagger, pipes e filtros globais
-│   └── test/               testes end-to-end
-├── frontend/           React + Vite (Etapa 4)
+│   │   ├── database/       conexao TypeORM e seed (permissoes, perfis, admin)
+│   │   ├── modules/        health, auth, users, roles, permissions, audit
+│   │   └── main.ts         bootstrap, Swagger, CORS
+│   └── test/               testes end-to-end (SQLite em memoria)
+├── frontend/           React + Vite (login e dashboard)
 ├── integrations/       whatsapp, telegram, plantae, nfse, email (reservado)
 ├── database/           scripts de inicializacao e notas por banco
 ├── docs/               documentacao e decisoes arquiteturais (ADR)
@@ -119,8 +126,8 @@ npm -v
 
 ```bash
 git clone https://github.com/equipe-vastaflow/vastaflow.git
-cd vastaflow/backend
-npm install
+cd vastaflow/backend && npm install
+cd ../frontend && npm install
 ```
 
 ---
@@ -130,41 +137,53 @@ npm install
 Copie o modelo e preencha os valores do seu ambiente:
 
 ```bash
+# na raiz do repositorio
+
 # Windows (PowerShell)
 Copy-Item .env.example .env
+Copy-Item .env backend\.env      # o backend le backend/.env; o docker compose le o da raiz
 
 # Linux / macOS
 cp .env.example .env
+cp .env backend/.env
 ```
 
 O `.env` esta no `.gitignore` e **nunca** deve ser versionado.
 
-Variaveis em uso hoje:
+Para o backend subir voce **precisa preencher**: `JWT_SECRET` (minimo 32
+caracteres), `DATABASE_PASSWORD` e, para ter um usuario administrador,
+`SEED_ADMIN_EMAIL` e `SEED_ADMIN_PASSWORD`.
 
-| Variavel          | Padrao       | Descricao                              |
-| ----------------- | ------------ | -------------------------------------- |
-| `NODE_ENV`        | `development`| `development` \| `production` \| `test` |
-| `PORT`            | `3000`       | Porta HTTP do backend                   |
-| `APP_NAME`        | `vasta-flow` | Identificador devolvido por `/health`   |
-| `SWAGGER_ENABLED` | `true`       | Expor `/docs`. Use `false` em producao  |
+| Variavel                  | Padrao          | Descricao                                                    |
+| ------------------------- | --------------- | ------------------------------------------------------------ |
+| `NODE_ENV`                | `development`   | `development` \| `production` \| `test`                       |
+| `PORT`                    | `3000`          | Porta HTTP do backend                                         |
+| `APP_NAME`                | `vasta-flow`    | Identificador devolvido por `/health`                          |
+| `SWAGGER_ENABLED`         | `true`          | Expor `/docs`. Use `false` em producao                        |
+| `FRONTEND_ORIGIN`         | vazio (CORS off) | Origens autorizadas a chamar a API, separadas por virgula     |
+| `DATABASE_TYPE`           | `mysql`         | `mysql` \| `oracle`                                            |
+| `DATABASE_HOST/PORT/NAME/USER/PASSWORD` | -   | Conexao. Dispensadas se `DATABASE_URL` estiver preenchida     |
+| `DATABASE_SYNCHRONIZE`    | `false`         | Cria as tabelas a partir das entities. So dev; proibido em producao |
+| `JWT_SECRET`              | **obrigatorio** | Segredo de assinatura, >= 32 caracteres                        |
+| `JWT_EXPIRES_IN`          | `1h`            | Validade do token: `30s`, `15m`, `1h`, `7d`                    |
+| `BCRYPT_SALT_ROUNDS`      | `12`            | Custo do hash (4 a 15)                                        |
+| `SEED_ADMIN_EMAIL/PASSWORD/NAME` | -        | Administrador inicial, criado no boot se nao existir           |
 
-As demais variaveis do `.env.example` (banco, JWT, integracoes) estao
-documentadas mas **ainda nao sao lidas pelo codigo**. Elas passam a ser exigidas
-quando os modulos correspondentes forem implementados.
+Gerar um `JWT_SECRET`:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
+```
 
 A validacao ocorre no boot: uma configuracao invalida derruba o processo na
 inicializacao, com mensagem explicita, em vez de gerar erro obscuro no primeiro
 request.
 
-> O backend le o `.env` a partir de `backend/`. Se rodar `npm run start:dev`
-> dentro de `backend/`, o arquivo deve estar em `backend/.env`.
-
 ---
 
 ## Banco de dados
 
-Ainda nao implementado (Etapa 2). Para subir o MySQL de desenvolvimento quando
-chegar a hora:
+O backend usa **MySQL** em desenvolvimento. Suba-o com Docker:
 
 ```bash
 docker compose up -d
@@ -173,8 +192,14 @@ docker compose down      # preserva os dados
 docker compose down -v   # APAGA os dados do volume
 ```
 
-As credenciais vem do `.env` da raiz. O container so aceita conexoes de
+As credenciais vem do `.env` da raiz (`DATABASE_ROOT_PASSWORD`, `DATABASE_NAME`,
+`DATABASE_USER`, `DATABASE_PASSWORD`). O container so aceita conexoes de
 `127.0.0.1`.
+
+Com `DATABASE_SYNCHRONIZE=true` (padrao do `.env.example`), as tabelas
+`users`, `roles`, `permissions`, `role_permissions` e `audit_logs` sao criadas no
+primeiro boot, e o seed cria perfis, permissoes e o administrador inicial.
+**Migrations ainda nao existem** - ver [database/README.md](database/README.md).
 
 **Oracle nao esta containerizado** - as imagens oficiais exigem login no
 `container-registry.oracle.com` e aceite de licenca. Ver
@@ -210,13 +235,78 @@ Resposta esperada de `GET /health`:
 
 ## Execucao do frontend
 
-Nao iniciado. Ver [frontend/README.md](frontend/README.md).
+```bash
+cd frontend
+cp .env.example .env     # Windows: Copy-Item .env.example .env
+npm run dev              # http://localhost:5173
+```
+
+Detalhes em [frontend/README.md](frontend/README.md).
+
+---
+
+## Autenticacao e como testar o login
+
+### Rodar tudo localmente
+
+1. Configure o ambiente (secao acima) com `JWT_SECRET`, `DATABASE_PASSWORD`,
+   `SEED_ADMIN_EMAIL` e `SEED_ADMIN_PASSWORD`.
+2. `docker compose up -d` (aguarde o MySQL ficar `healthy`).
+3. `cd backend && npm run start:dev` — o log deve mostrar
+   `Administrador inicial criado: ...`.
+4. Em outro terminal, `cd frontend && npm run dev`.
+5. Abra http://localhost:5173 e entre com o e-mail/senha do administrador.
+
+### Endpoints
+
+| Metodo e rota          | Acesso               | Descricao                                                  |
+| ---------------------- | -------------------- | ---------------------------------------------------------- |
+| `POST /auth/register`  | publico              | Cadastra um usuario (sempre perfil `USUARIO`) e devolve o JWT |
+| `POST /auth/login`     | publico              | Autentica e devolve o JWT                                    |
+| `GET /auth/me`         | autenticado          | Usuario da sessao, com perfil e permissoes                    |
+| `POST /auth/logout`    | autenticado          | Registra o logout na auditoria (204)                          |
+| `GET /users`           | permissao `users:read` | Lista usuarios (ADMIN e GESTOR)                              |
+| `GET /audit-logs`      | permissao `audit:read` | Ultimos registros de auditoria (ADMIN e GESTOR)              |
+
+Respostas: `400` dados invalidos · `401` credenciais/token invalidos ·
+`403` usuario inativo (no login) ou sem permissao · `409` e-mail ja cadastrado.
+
+### Testar com curl
+
+```bash
+# cadastrar
+curl -X POST http://localhost:3000/auth/register -H "Content-Type: application/json" \
+  -d '{"nome":"Maria Silva","email":"maria@vasta.com.br","senha":"Senha1234"}'
+
+# login (guarde o accessToken)
+curl -X POST http://localhost:3000/auth/login -H "Content-Type: application/json" \
+  -d '{"email":"maria@vasta.com.br","senha":"Senha1234"}'
+
+# rota protegida
+curl http://localhost:3000/auth/me -H "Authorization: Bearer <accessToken>"
+
+# sem token -> 401
+curl -i http://localhost:3000/auth/me
+
+# RBAC: USUARIO recebe 403; o administrador do seed recebe 200
+curl -i http://localhost:3000/users -H "Authorization: Bearer <accessToken>"
+```
+
+No PowerShell use `Invoke-RestMethod` ou o Swagger em http://localhost:3000/docs
+(faça login em `POST /auth/login`, copie o `accessToken` e clique em
+**Authorize**).
+
+A senha precisa ter 8 a 72 caracteres, com maiuscula, minuscula e numero.
+
+Como a autenticacao e a autorizacao funcionam, e as limitacoes conhecidas (logout
+sem revogacao do JWT, sem rate limiting), estao em
+[docs/arquitetura.md](docs/arquitetura.md).
 
 ---
 
 ## Comandos disponiveis
 
-Todos executados dentro de `backend/`:
+Backend, executados dentro de `backend/`:
 
 | Comando                | Descricao                                       |
 | ---------------------- | ----------------------------------------------- |
@@ -233,6 +323,9 @@ Todos executados dentro de `backend/`:
 | `npm run lint:fix`     | ESLint corrigindo o que for automatico           |
 | `npm run format`       | Aplica Prettier                                  |
 | `npm run format:check` | Verifica formatacao sem alterar arquivos         |
+
+Frontend, dentro de `frontend/`: `npm run dev`, `npm run build`,
+`npm run typecheck`, `npm test`.
 
 ---
 

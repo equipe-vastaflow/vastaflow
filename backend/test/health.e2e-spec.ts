@@ -1,11 +1,9 @@
 import type { Server } from 'node:http';
-import { ValidationPipe, type INestApplication } from '@nestjs/common';
-import { Test } from '@nestjs/testing';
+import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { AppModule } from '../src/app.module';
-import { AllExceptionsFilter } from '../src/common/filters/all-exceptions.filter';
 import type { ErrorResponseDto } from '../src/common/dto/error-response.dto';
 import type { HealthResponseDto } from '../src/modules/health/dto/health-response.dto';
+import { createTestApp } from './support/test-app';
 
 describe('Health (e2e)', () => {
   let app: INestApplication;
@@ -13,14 +11,7 @@ describe('Health (e2e)', () => {
   const server = (): Server => app.getHttpServer() as Server;
 
   beforeAll(async () => {
-    const moduleRef = await Test.createTestingModule({
-      imports: [AppModule],
-    }).compile();
-
-    app = moduleRef.createNestApplication();
-    app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true }));
-    app.useGlobalFilters(new AllExceptionsFilter());
-    await app.init();
+    app = await createTestApp();
   });
 
   afterAll(async () => {
@@ -37,7 +28,13 @@ describe('Health (e2e)', () => {
     });
   });
 
+  it('GET /health continua publico mesmo com o guard de autenticacao global', async () => {
+    // Sem header Authorization: se o guard global barrasse, seria 401.
+    await request(server()).get('/health').expect(200);
+  });
+
   it('rota inexistente responde no formato padronizado de erro', async () => {
+    // Rota inexistente nao passa por guard: o roteador responde 404 antes.
     const response = await request(server()).get('/rota-que-nao-existe').expect(404);
     const body = response.body as ErrorResponseDto;
 

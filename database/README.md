@@ -9,7 +9,17 @@ A decisao de ORM e as limitacoes de portabilidade entre os dois bancos estao em
 
 ## Estado atual
 
-Nada implementado. A camada de persistencia entra na **Etapa 2**.
+Conexao TypeORM e entities de usuarios, perfis, permissoes e auditoria ja
+existem (`backend/src/database/` e `backend/src/modules/*/entities/`).
+
+**Ainda nao ha migrations.** Em desenvolvimento o schema e criado por
+`DATABASE_SYNCHRONIZE=true`, que a validacao de ambiente proibe em producao.
+Antes de ir para producao e preciso gerar as migrations de cada banco, em
+`backend/src/database/migrations/{mysql,oracle}/` (ver ADR 0001).
+
+As entities foram exercitadas apenas em testes com SQLite em memoria;
+**a conexao e o schema nao foram validados contra um MySQL real**. O caminho
+Oracle permanece preparado, porem nao verificado.
 
 ## Conteudo desta pasta
 
