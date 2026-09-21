@@ -1,0 +1,51 @@
+# ===========================================================================
+# VastaFlow - ambiente de desenvolvimento local
+# ---------------------------------------------------------------------------
+# Sobe APENAS o MySQL. O backend roda fora do container (`npm run start:dev`),
+# para manter hot reload e depuracao diretos.
+#
+#   docker compose up -d
+#   docker compose logs -f mysql
+#   docker compose down            # preserva os dados
+#   docker compose down -v         # APAGA os dados do volume
+#
+# Todas as credenciais vem do arquivo `.env` da raiz. Nenhum valor real neste
+# arquivo - ver `.env.example`.
+#
+# Oracle NAO esta aqui de proposito: as imagens oficiais exigem login no
+# container-registry.oracle.com e aceite de licenca. Ver
+# docs/adr/0001-escolha-do-orm-e-estrategia-de-banco.md
+# ===========================================================================
+
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: vastaflow-mysql
+    restart: unless-stopped
+    command:
+      # utf8mb4 para acentuacao e emoji vindos de WhatsApp/Telegram.
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DATABASE_ROOT_PASSWORD:?defina DATABASE_ROOT_PASSWORD no .env}
+      MYSQL_DATABASE: ${DATABASE_NAME:?defina DATABASE_NAME no .env}
+      MYSQL_USER: ${DATABASE_USER:?defina DATABASE_USER no .env}
+      MYSQL_PASSWORD: ${DATABASE_PASSWORD:?defina DATABASE_PASSWORD no .env}
+    ports:
+      # Exposto apenas em 127.0.0.1: o banco de desenvolvimento nao fica
+      # acessivel pela rede local.
+      - '127.0.0.1:${DATABASE_PORT:-3306}:3306'
+    volumes:
+      - vastaflow-mysql-data:/var/lib/mysql
+      # Scripts .sql/.sh daqui rodam UMA vez, na criacao do volume.
+      - ./database/mysql/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD', 'mysqladmin', 'ping', '-h', '127.0.0.1', '--silent']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+volumes:
+  vastaflow-mysql-data:
+    name: vastaflow-mysql-data

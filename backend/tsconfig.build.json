@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // O tsconfig raiz usa `rootDir: "."` para que o typecheck alcance `test/`.
+    // No build so `src/` e compilado, entao a raiz passa a ser `src/` e o
+    // artefato final fica em `dist/main.js`.
+    "rootDir": "./src",
+    "types": ["node"]
+  },
+  "exclude": ["node_modules", "test", "dist", "**/*.spec.ts"]
+}

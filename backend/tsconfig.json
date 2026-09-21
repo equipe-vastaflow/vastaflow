@@ -1,0 +1,40 @@
+{
+  "compilerOptions": {
+    // `nodenext` e o que os templates oficiais do NestJS 12 usam. Como o
+    // package.json NAO declara "type": "module", a saida e CommonJS - e o Node
+    // 22+ consegue carregar os pacotes do NestJS (que sao ESM) via require(esm).
+    // Ver docs/adr/0002-modulo-commonjs-vs-esm.md
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "resolvePackageJsonExports": true,
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "types": ["node", "jest"],
+
+    "declaration": true,
+    "removeComments": true,
+    "sourceMap": true,
+    "outDir": "./dist",
+    "rootDir": ".",
+    "incremental": true,
+
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+
+    "strict": true,
+    // Desligado porque entities (TypeORM, Etapa 2) e DTOs sao preenchidos por
+    // decorators/ORM, fora do construtor.
+    "strictPropertyInitialization": false,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src/**/*", "test/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
