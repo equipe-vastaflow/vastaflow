@@ -4,7 +4,7 @@ import { MemoryRouter } from 'react-router';
 import { App } from './App';
 import type { LoginResponse, User } from './api/client';
 import { AuthProvider } from './auth/AuthContext';
-import { formatRemaining } from './pages/DashboardPage';
+import { formatRemaining } from './pages/format-remaining';
 
 const USER: User = {
   id: 'user-1',

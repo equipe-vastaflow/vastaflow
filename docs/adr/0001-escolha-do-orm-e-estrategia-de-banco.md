@@ -100,3 +100,29 @@ antes de entrar no projeto. Decisao adiada ate haver instancia Oracle real.
   nativo pode ser usado e qual o limite de identificadores.
 - Acesso a uma instancia Oracle para validar a camada de persistencia. Ate la,
   o suporte a Oracle permanece **preparado, porem nao verificado**.
+
+## Atualizacao - 2026-09-21: migrations e primeira regressao de portabilidade
+
+**O que aconteceu.** A entity `User` declarava `ativo` com `type: 'boolean'`. O
+MySQL aceitava, e os testes (SQLite) tambem; o Oracle nem montava a metadata
+(`DataTypeNotSupportedError`). Ninguem percebeu porque nenhum teste exercitava o
+driver Oracle.
+
+**O que mudou.**
+
+- `ativo` passou a `type: Boolean` - o **construtor**, nao a string. So assim o
+  TypeORM escolhe o tipo nativo (`tinyint` / `NUMBER`) *e* converte 1/0 em
+  `true`/`false` nos dois bancos. `'number'` "resolveria" o erro devolvendo 1/0.
+- Criado `database-compatibility.spec.ts`, que monta a metadata com os drivers
+  MySQL e Oracle sem conectar e verifica tipos, conversao booleana, limite de
+  identificadores e as migrations. Confirmado que ele falha com o bug original.
+- Migrations iniciais criadas, uma por banco. A do MySQL foi gerada e validada
+  num MySQL 8.4 real; a do Oracle foi gerada pelo TypeORM sem banco e **nunca
+  executada** (detalhes em `database/README.md`).
+- A aplicacao passou a recusar iniciar com migration pendente.
+
+**Regras acrescentadas** as da secao "Consequencias":
+
+7. Booleano: `type: Boolean`. Nunca `'boolean'`, `'bool'` ou `'tinyint'`.
+8. JSON: `type: 'simple-json'` (`text`/`CLOB`). O `json` nativo exige Oracle 21c+.
+9. Toda mudanca de schema tem migration nos **dois** bancos, com o mesmo nome.

@@ -1,0 +1,27 @@
+# ---------------------------------------------------------------------------
+# Fim de linha: LF em todo o repositorio, em qualquer sistema operacional.
+#
+# Tem precedencia sobre o `core.autocrlf` da maquina. O Git for Windows vem com
+# `core.autocrlf=true` no gitconfig de sistema, o que fazia o checkout sair em
+# CRLF e o Prettier (endOfLine: lf) acusar todos os arquivos.
+# ---------------------------------------------------------------------------
+* text=auto eol=lf
+
+# Scripts do Windows precisam de CRLF para rodar no cmd/PowerShell.
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+*.ps1  text eol=crlf
+
+# Binarios: nunca converter nem tentar diff/merge textual.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.webp  binary
+*.pdf   binary
+*.zip   binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.eot   binary

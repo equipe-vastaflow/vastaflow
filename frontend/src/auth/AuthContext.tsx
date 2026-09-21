@@ -33,21 +33,25 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 const MAX_TIMEOUT_MS = 2 ** 31 - 1;
 
 export function AuthProvider({ children }: { children: ReactNode }): ReactNode {
+  // Lida uma unica vez, na montagem. Sem sessao guardada (ou ja expirada) o
+  // estado inicial ja e 'unauthenticated' - nao ha o que confirmar com o servidor.
+  const [stored] = useState(() => {
+    const saved = loadSession();
+    return saved && saved.expiresAt > Date.now() ? saved : null;
+  });
   const [session, setSession] = useState<Session | null>(null);
-  const [status, setStatus] = useState<AuthStatus>('loading');
+  const [status, setStatus] = useState<AuthStatus>(stored ? 'loading' : 'unauthenticated');
 
   // Ao abrir/recarregar a pagina, confirma com o servidor que o token guardado
   // ainda vale (nao expirou, usuario segue ativo) antes de liberar o dashboard.
   useEffect(() => {
-    let cancelled = false;
-    const stored = loadSession();
-
-    if (!stored || stored.expiresAt <= Date.now()) {
+    if (!stored) {
+      // Remove do armazenamento qualquer sessao expirada; o estado ja esta certo.
       clearSession();
-      setStatus('unauthenticated');
       return;
     }
 
+    let cancelled = false;
     api
       .me(stored.token)
       .then((user) => {
@@ -70,7 +74,7 @@ export function AuthProvider({ children }: { children: ReactNode }): ReactNode {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [stored]);
 
   // Encerra a sessao no navegador no instante em que o token expira.
   useEffect(() => {

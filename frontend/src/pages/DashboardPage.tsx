@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
 import type { RoleName } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
+import { formatRemaining } from './format-remaining';
 
 const ROLE_LABELS: Record<RoleName, string> = {
   ADMIN: 'Administrador',
@@ -9,16 +10,6 @@ const ROLE_LABELS: Record<RoleName, string> = {
   OPERADOR: 'Operador',
   USUARIO: 'Usuário',
 };
-
-/** Formata o tempo restante como `mm:ss` (ou `h:mm:ss`). */
-export function formatRemaining(ms: number): string {
-  const total = Math.max(0, Math.floor(ms / 1000));
-  const hours = Math.floor(total / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  const seconds = total % 60;
-  const pad = (value: number): string => String(value).padStart(2, '0');
-  return hours > 0 ? `${hours}:${pad(minutes)}:${pad(seconds)}` : `${pad(minutes)}:${pad(seconds)}`;
-}
 
 export function DashboardPage(): ReactNode {
   const { user, expiresAt, logout } = useAuth();

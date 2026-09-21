@@ -122,7 +122,7 @@ describe('validateEnv', () => {
 
   describe('administrador inicial', () => {
     it('exige e-mail e senha juntos', () => {
-      expect(() => validateEnv({ ...baseEnv, SEED_ADMIN_EMAIL: 'admin@vasta.com' })).toThrow(
+      expect(() => validateEnv({ ...baseEnv, SEED_ADMIN_EMAIL: 'admin@example.com' })).toThrow(
         /SEED_ADMIN_EMAIL e SEED_ADMIN_PASSWORD/,
       );
     });
@@ -130,10 +130,10 @@ describe('validateEnv', () => {
     it('aceita o par completo', () => {
       const env = validateEnv({
         ...baseEnv,
-        SEED_ADMIN_EMAIL: 'admin@vasta.com',
+        SEED_ADMIN_EMAIL: 'admin@example.com',
         SEED_ADMIN_PASSWORD: 'Senha@1234',
       });
-      expect(env.SEED_ADMIN_EMAIL).toBe('admin@vasta.com');
+      expect(env.SEED_ADMIN_EMAIL).toBe('admin@example.com');
     });
   });
 });

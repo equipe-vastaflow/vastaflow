@@ -454,6 +454,23 @@ describe('Auth, usuarios e RBAC (e2e)', () => {
       expect(find(inactiveEmail)?.usuarioId).toBe(inactiveUser.user.id);
       // E-mail inexistente: ha registro, mas sem usuario associado.
       expect(find(unknownEmail)).toMatchObject({ usuarioId: null, modulo: 'AUTH' });
+
+      // O motivo vai nos metadados, persistidos e devolvidos como objeto JSON.
+      expect(find(wrongPasswordEmail)?.metadados).toEqual({ motivo: 'CREDENCIAIS_INVALIDAS' });
+      expect(find(unknownEmail)?.metadados).toEqual({ motivo: 'CREDENCIAIS_INVALIDAS' });
+      expect(find(inactiveEmail)?.metadados).toEqual({ motivo: 'USUARIO_INATIVO' });
+    });
+
+    it('eventos sem detalhes adicionais tem metadados null', async () => {
+      const email = uniqueEmail('semmeta');
+      const { user } = await register({ email });
+
+      const registro = (await auditLogs()).find(
+        (log) => log.usuarioId === user.id && log.acao === 'REGISTER',
+      );
+
+      expect(registro).toBeDefined();
+      expect(registro?.metadados).toBeNull();
     });
 
     it('nunca grava senha na trilha de auditoria', async () => {

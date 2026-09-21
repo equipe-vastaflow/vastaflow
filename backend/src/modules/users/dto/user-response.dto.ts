@@ -10,7 +10,7 @@ export class UserResponseDto {
   @ApiProperty({ example: 'Maria Silva' })
   nome: string;
 
-  @ApiProperty({ example: 'maria@vasta.com.br' })
+  @ApiProperty({ example: 'maria@example.com' })
   email: string;
 
   @ApiProperty({ enum: RoleName, example: RoleName.Usuario })

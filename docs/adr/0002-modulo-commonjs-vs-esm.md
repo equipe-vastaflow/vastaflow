@@ -60,3 +60,8 @@ A maquina de desenvolvimento atual roda **Node 24.14.1**, logo abaixo do minimo.
 O `npm install` apenas emite `EBADENGINE` e o projeto compila, testa e executa
 normalmente, mas **recomenda-se atualizar para Node >= 24.15.0** para evitar
 problemas com `nest generate`.
+
+**Atualizacao - 2026-09-21.** O minimo passou a ser **obrigatorio**:
+`engines.node` agora e `>=24.15.0` em `backend/package.json` e
+`frontend/package.json` (o `jsdom` do frontend tem a mesma exigencia). Nenhuma
+dependencia foi rebaixada para acomodar um Node mais antigo.

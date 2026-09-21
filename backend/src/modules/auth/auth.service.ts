@@ -72,6 +72,7 @@ export class AuthService {
         modulo: AuditModuleName.Auth,
         descricao: `Login recusado: credenciais invalidas (${dto.email})`,
         ip,
+        metadados: { motivo: 'CREDENCIAIS_INVALIDAS' },
       });
       throw new UnauthorizedException('Credenciais invalidas');
     }
@@ -85,6 +86,7 @@ export class AuthService {
         modulo: AuditModuleName.Auth,
         descricao: `Login recusado: usuario inativo (${user.email})`,
         ip,
+        metadados: { motivo: 'USUARIO_INATIVO' },
       });
       throw new ForbiddenException('Usuario inativo');
     }

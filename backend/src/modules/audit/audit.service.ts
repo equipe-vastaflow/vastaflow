@@ -1,7 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import type { AuditAction, AuditModuleName } from './audit-action.enum';
+import { sanitizeAuditMetadata } from './audit-metadata';
 import { AuditRepository } from './audit.repository';
-import type { AuditLog } from './entities/audit-log.entity';
+import type { AuditLog, AuditMetadata } from './entities/audit-log.entity';
 
 export interface AuditEvent {
   /** Ausente quando nao ha usuario identificado (ex.: e-mail inexistente no login). */
@@ -10,6 +11,11 @@ export interface AuditEvent {
   modulo: AuditModuleName;
   descricao: string;
   ip?: string | null;
+  /**
+   * Detalhes adicionais da operacao. Chaves sensiveis (senha, token...) sao
+   * removidas e o tamanho e limitado - ver `sanitizeAuditMetadata`.
+   */
+  metadados?: AuditMetadata;
 }
 
 /** Tamanho da coluna `descricao`; textos maiores sao truncados, nao rejeitados. */
@@ -37,6 +43,7 @@ export class AuditService {
         modulo: event.modulo,
         descricao: event.descricao.slice(0, DESCRIPTION_MAX_LENGTH),
         ip: event.ip ?? null,
+        metadados: sanitizeAuditMetadata(event.metadados),
       });
     } catch (error) {
       this.logger.error(

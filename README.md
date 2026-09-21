@@ -22,7 +22,7 @@ O desenvolvimento e **incremental**: a fundacao vem antes das automacoes.
 | Swagger em `/docs`                | Funcionando                             |
 | Validacao de ambiente no boot     | Funcionando                             |
 | Tratamento global de erros        | Funcionando                             |
-| Banco de dados (TypeORM)          | Conexao e entities prontas; sem migrations ainda |
+| Banco de dados (TypeORM)          | Migrations MySQL validadas em banco real; Oracle preparado, nao executado |
 | Usuarios, perfis e permissoes     | Funcionando                             |
 | Autenticacao (JWT + bcrypt)       | Funcionando                             |
 | Autorizacao (RBAC)                | Funcionando                             |
@@ -61,7 +61,7 @@ Detalhes em [docs/arquitetura.md](docs/arquitetura.md).
 
 | Tecnologia | Versao | Observacao                                     |
 | ---------- | ------ | ---------------------------------------------- |
-| Node.js    | >= 24  | Recomendado >= 24.15.0 (ver ADR 0002)          |
+| Node.js    | >= 24.15.0 | Minimo exigido pelas dependencias (ver abaixo) |
 | TypeScript | 6.0.3  | TS 7 ainda nao e compativel com o ts-jest       |
 | NestJS     | 12.0.4 | Pacotes ESM, consumidos em CommonJS via nodenext |
 | Jest       | 30     | Testes unitarios e e2e                          |
@@ -119,6 +119,14 @@ Verifique:
 node -v
 npm -v
 ```
+
+**Por que 24.15.0.** E o menor Node 24 aceito por todas as dependencias
+instaladas. Quem exige sao ferramentas de desenvolvimento: `@nestjs/schematics`
+e `@angular-devkit/*` (backend) e `jsdom` (testes do frontend) declaram
+`^22.22.x || ^24.15.0 || >=26`. Com um Node mais antigo o `npm install` apenas
+avisa (`EBADENGINE`) e hoje tudo ainda funciona, mas nao ha garantia - atualize.
+O valor esta no campo `engines` de `backend/package.json` e
+`frontend/package.json`.
 
 ---
 
@@ -196,10 +204,43 @@ As credenciais vem do `.env` da raiz (`DATABASE_ROOT_PASSWORD`, `DATABASE_NAME`,
 `DATABASE_USER`, `DATABASE_PASSWORD`). O container so aceita conexoes de
 `127.0.0.1`.
 
-Com `DATABASE_SYNCHRONIZE=true` (padrao do `.env.example`), as tabelas
-`users`, `roles`, `permissions`, `role_permissions` e `audit_logs` sao criadas no
-primeiro boot, e o seed cria perfis, permissoes e o administrador inicial.
-**Migrations ainda nao existem** - ver [database/README.md](database/README.md).
+> O `docker-compose.yml` **ainda nao foi executado**: a maquina onde o projeto
+> foi montado nao tem Docker. O MySQL em si foi validado (veja abaixo), mas por
+> outro meio.
+
+### Migrations
+
+O schema e criado e evoluido **por migrations**, uma pasta por banco
+(`backend/src/database/migrations/{mysql,oracle}/`). Com o MySQL no ar:
+
+```bash
+cd backend
+npm run migration:run      # cria/atualiza as tabelas
+npm run start:dev          # o seed cria perfis, permissoes e o administrador inicial
+```
+
+A aplicacao **recusa iniciar** se houver migration pendente, com uma mensagem
+dizendo qual comando rodar - em vez de falhar depois com "tabela inexistente".
+
+| Comando                      | Descricao                                                  |
+| ---------------------------- | ---------------------------------------------------------- |
+| `npm run migration:show`     | Lista as migrations e quais ja rodaram                      |
+| `npm run migration:run`      | Executa as pendentes                                        |
+| `npm run migration:revert`   | Desfaz a ultima                                             |
+| `npm run migration:generate -- src/database/migrations/mysql/<Nome>` | Gera a partir da diferenca entre entities e banco |
+| `npm run schema:log`         | Mostra o SQL que faltaria para o banco bater com as entities (vazio = em dia) |
+
+`DATABASE_SYNCHRONIZE=true` (criar tabelas direto das entities) continua
+disponivel para prototipos locais, mas **nao e o fluxo padrao** e e proibido em
+producao. Detalhes e o procedimento para mudancas de schema em
+[database/README.md](database/README.md).
+
+### O que foi validado de verdade
+
+| Banco  | Situacao |
+| ------ | -------- |
+| MySQL 8.4 | Migrations executadas, revertidas e reexecutadas num MySQL real; `schema:log` sem divergencias; aplicacao subiu contra ele com seed, login, RBAC e auditoria funcionando. |
+| Oracle | **Nunca executado.** Metadata e DDL verificados por testes automatizados, sem banco. Falta uma instancia de homologacao. |
 
 **Oracle nao esta containerizado** - as imagens oficiais exigem login no
 `container-registry.oracle.com` e aceite de licenca. Ver
@@ -252,10 +293,10 @@ Detalhes em [frontend/README.md](frontend/README.md).
 1. Configure o ambiente (secao acima) com `JWT_SECRET`, `DATABASE_PASSWORD`,
    `SEED_ADMIN_EMAIL` e `SEED_ADMIN_PASSWORD`.
 2. `docker compose up -d` (aguarde o MySQL ficar `healthy`).
-3. `cd backend && npm run start:dev` — o log deve mostrar
-   `Administrador inicial criado: ...`.
-4. Em outro terminal, `cd frontend && npm run dev`.
-5. Abra http://localhost:5173 e entre com o e-mail/senha do administrador.
+3. `cd backend && npm run migration:run` — cria as tabelas.
+4. `npm run start:dev` — o log deve mostrar `Administrador inicial criado: ...`.
+5. Em outro terminal, `cd frontend && npm run dev`.
+6. Abra http://localhost:5173 e entre com o e-mail/senha do administrador.
 
 ### Endpoints
 
@@ -276,11 +317,11 @@ Respostas: `400` dados invalidos · `401` credenciais/token invalidos ·
 ```bash
 # cadastrar
 curl -X POST http://localhost:3000/auth/register -H "Content-Type: application/json" \
-  -d '{"nome":"Maria Silva","email":"maria@vasta.com.br","senha":"Senha1234"}'
+  -d '{"nome":"Maria Silva","email":"maria@example.com","senha":"Senha1234"}'
 
 # login (guarde o accessToken)
 curl -X POST http://localhost:3000/auth/login -H "Content-Type: application/json" \
-  -d '{"email":"maria@vasta.com.br","senha":"Senha1234"}'
+  -d '{"email":"maria@example.com","senha":"Senha1234"}'
 
 # rota protegida
 curl http://localhost:3000/auth/me -H "Authorization: Bearer <accessToken>"
@@ -323,9 +364,10 @@ Backend, executados dentro de `backend/`:
 | `npm run lint:fix`     | ESLint corrigindo o que for automatico           |
 | `npm run format`       | Aplica Prettier                                  |
 | `npm run format:check` | Verifica formatacao sem alterar arquivos         |
+| `npm run migration:*`  | Migrations - ver secao [Banco de dados](#banco-de-dados) |
 
 Frontend, dentro de `frontend/`: `npm run dev`, `npm run build`,
-`npm run typecheck`, `npm test`.
+`npm run typecheck`, `npm test`, `npm run lint`, `npm run lint:fix`.
 
 ---
 

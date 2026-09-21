@@ -3,7 +3,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { AuditLog } from './entities/audit-log.entity';
 
-export type NewAuditLog = Pick<AuditLog, 'usuarioId' | 'acao' | 'modulo' | 'descricao' | 'ip'>;
+export type NewAuditLog = Pick<
+  AuditLog,
+  'usuarioId' | 'acao' | 'modulo' | 'descricao' | 'ip' | 'metadados'
+>;
 
 @Injectable()
 export class AuditRepository {

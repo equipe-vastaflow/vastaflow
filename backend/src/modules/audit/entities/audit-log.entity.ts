@@ -1,5 +1,8 @@
 import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
 
+/** Objeto JSON livre com detalhes da operacao auditada. */
+export type AuditMetadata = Record<string, unknown>;
+
 /**
  * Registro imutavel de uma acao relevante.
  *
@@ -28,6 +31,17 @@ export class AuditLog {
   /** Cabe um IPv6 completo (45 caracteres). */
   @Column({ name: 'ip', type: 'varchar', length: 45, nullable: true })
   ip: string | null;
+
+  /**
+   * Informacoes adicionais da operacao, serializadas em JSON pelo TypeORM.
+   *
+   * `simple-json` em vez de `json`: vira `text` no MySQL e `CLOB` no Oracle,
+   * ambos suportados em qualquer versao. O tipo `json` nativo exigiria Oracle
+   * 21c+. O conteudo e higienizado e limitado pelo `AuditService` antes de
+   * chegar aqui - nunca grave objetos arbitrarios direto no repositorio.
+   */
+  @Column({ name: 'metadados', type: 'simple-json', nullable: true })
+  metadados: AuditMetadata | null;
 
   @Index('ix_audit_created')
   @CreateDateColumn({ name: 'created_at' })

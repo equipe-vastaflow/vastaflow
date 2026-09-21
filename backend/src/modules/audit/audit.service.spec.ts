@@ -26,10 +26,11 @@ describe('AuditService', () => {
       modulo: 'AUTH',
       descricao: 'Login realizado',
       ip: '10.0.0.5',
+      metadados: null,
     });
   });
 
-  it('grava null quando nao ha usuario nem IP', async () => {
+  it('grava null quando nao ha usuario, IP nem metadados', async () => {
     await service.record({
       acao: AuditAction.LoginFailed,
       modulo: AuditModuleName.Auth,
@@ -37,7 +38,22 @@ describe('AuditService', () => {
     });
 
     expect(repository.create).toHaveBeenCalledWith(
-      expect.objectContaining({ usuarioId: null, ip: null }),
+      expect.objectContaining({ usuarioId: null, ip: null, metadados: null }),
+    );
+  });
+
+  it('grava os metadados ja higienizados', async () => {
+    await service.record({
+      acao: AuditAction.LoginFailed,
+      modulo: AuditModuleName.Auth,
+      descricao: 'x',
+      metadados: { motivo: 'CREDENCIAIS_INVALIDAS', senha: 'Senha1234' },
+    });
+
+    expect(repository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadados: { motivo: 'CREDENCIAIS_INVALIDAS', senha: '[REMOVIDO]' },
+      }),
     );
   });
 

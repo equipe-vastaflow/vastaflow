@@ -58,13 +58,16 @@ backend/src/
 │   ├── decorators/            [x] @ClientIp
 │   ├── dto/                   [x] ErrorResponseDto - formato unico de erro
 │   └── filters/               [x] AllExceptionsFilter
-├── database/                  [~] conexao TypeORM e seed (sem migrations ainda)
+├── database/                  [x] conexao TypeORM, migrations e seed
 │   ├── database.config.ts     [x] DATABASE_* -> opcoes do TypeORM (MySQL | Oracle)
-│   ├── database.module.ts     [x]
+│   ├── database.module.ts     [x] conexao + recusa subir com migration pendente
+│   ├── data-source.ts         [x] DataSource do CLI de migrations
+│   ├── entities.ts            [x] lista unica de entities (app, CLI e testes)
 │   ├── seed/                  [x] permissoes, perfis e administrador inicial
 │   └── migrations/
-│       ├── mysql/             [ ] DDL especifico de MySQL
-│       └── oracle/            [ ] DDL especifico de Oracle (ver ADR 0001)
+│       ├── index.ts           [x] migrations registradas por banco
+│       ├── mysql/             [x] schema inicial - validado em MySQL 8.4 real
+│       └── oracle/            [~] schema inicial - gerado, NUNCA executado em Oracle
 ├── modules/
 │   ├── health/                [x] GET /health
 │   ├── auth/                  [x] login, register, me, logout, JWT, guards, decorators
@@ -90,7 +93,14 @@ AuditLog   (usuario_id sem FK, de proposito: a trilha sobrevive ao usuario)
 | `roles`            | `id`, `nome` (unico), `descricao`, `created_at`                                  |
 | `permissions`      | `id`, `code` (unico, ex.: `users:read`), `descricao`, `created_at`                |
 | `role_permissions` | `role_id`, `permission_id`                                                       |
-| `audit_logs`       | `id`, `usuario_id` (nulo se nao identificado), `acao`, `modulo`, `descricao`, `ip`, `created_at` |
+| `audit_logs`       | `id`, `usuario_id` (nulo se nao identificado), `acao`, `modulo`, `descricao`, `ip`, `metadados` (JSON, nulo), `created_at` |
+
+`metadados` guarda detalhes adicionais da operacao como JSON (`text` no MySQL,
+`CLOB` no Oracle). Antes de gravar, o `AuditService` remove valores de chaves
+sensiveis (senha, token, segredo, authorization, cookie...) em qualquer nivel e
+descarta conteudo acima de 8.000 caracteres, registrando apenas um aviso - a
+auditoria nunca falha por causa dos metadados. Hoje so `LOGIN_FAILED` os usa,
+com o `motivo` da recusa.
 
 Acoes de auditoria implementadas: `REGISTER`, `LOGIN`, `LOGIN_FAILED`, `LOGOUT`.
 Previstas para os proximos modulos: `CREATE`, `UPDATE`, `DELETE`, `EXECUTE`,
@@ -145,8 +155,8 @@ existente nunca tem as permissoes sobrescritas.
   Revogacao imediata exige lista de tokens revogados ou versao de token no usuario.
 - Sem limite de tentativas de login (rate limiting / bloqueio temporario).
 - Sem refresh token: ao expirar, o usuario faz login de novo.
-- Sem migrations: o schema e criado por `DATABASE_SYNCHRONIZE=true` (so em
-  desenvolvimento; a validacao de ambiente o proibe em producao).
+- Migration Oracle nunca executada em banco real, e sem caminho definido para
+  gerar as proximas (ver database/README.md).
 - Atras de proxy reverso, o IP registrado na auditoria e o do proxy, a menos que
   o Express seja configurado com `trust proxy`.
 
