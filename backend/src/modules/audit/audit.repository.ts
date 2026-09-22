@@ -23,6 +23,21 @@ export class AuditRepository {
     return this.repository.find({ order: { createdAt: 'DESC' }, take: limit });
   }
 
+  /**
+   * Pagina de eventos, do mais recente para o mais antigo.
+   *
+   * O `id` desempata: varios eventos podem cair no mesmo instante (um login
+   * gera registro junto de outras acoes), e sem um criterio estavel o mesmo
+   * evento poderia aparecer em duas paginas - ou em nenhuma.
+   */
+  findPage(skip: number, take: number): Promise<[AuditLog[], number]> {
+    return this.repository.findAndCount({
+      order: { createdAt: 'DESC', id: 'DESC' },
+      skip,
+      take,
+    });
+  }
+
   /** `COUNT` no banco: nenhuma linha e carregada. */
   count(): Promise<number> {
     return this.repository.count();

@@ -512,3 +512,14 @@ a.button {
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+/* Identificador tecnico (ex.: id do responsavel na auditoria). */
+.mono {
+  font-family: ui-monospace, 'Cascadia Mono', 'Segoe UI Mono', monospace;
+  font-size: 0.85rem;
+}
+
+/* E-mail do responsavel, abaixo do nome na tabela de auditoria. */
+.actor-email {
+  font-size: 0.85rem;
+}

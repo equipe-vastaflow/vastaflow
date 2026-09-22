@@ -4,24 +4,24 @@ React + TypeScript + Vite + React Router.
 
 ## Estado
 
-Implementado: **login**, **dashboard basico protegido** e **administracao de
-usuarios**. As demais telas (Permissoes, Logs, Integracoes, Configuracoes) ainda
+Implementado: **login**, **dashboard**, **administracao de usuarios** e
+**auditoria**. As demais telas (Permissoes, Integracoes, Configuracoes) ainda
 nao existem.
 
 | Rota         | Acesso   | O que faz                                                        |
 | ------------ | -------- | ---------------------------------------------------------------- |
 | `/login`     | publico  | E-mail e senha; quem ja esta autenticado e enviado ao dashboard   |
 | `/dashboard` | protegido | Cabecalho (usuario, perfil, sessao), cards de usuarios, auditoria recente e atalhos |
-
-> **Nao existe tela de auditoria.** O dashboard mostra apenas os 10 eventos mais
-> recentes, e o atalho "Auditoria recente" so desce ate essa secao da propria
-> pagina - nao ha rota `/audit`. O historico completo esta em `GET /audit-logs`
-> (API). Uma tela com filtros e paginacao seria uma etapa propria.
+| `/audit-logs` | `audit:read` | Historico completo de auditoria, paginado |
 | `/users`     | `users:read` | Tabela paginada com acoes (ver, editar, ativar/desativar, perfil) |
 | `/users/novo` | `users:create` | Formulario de novo usuario                                   |
 | `/users/:id` | `users:read` | Dados do usuario                                                |
 | `/users/:id/editar` | `users:update` | Edicao de nome e e-mail                                  |
 | qualquer outra | -      | redireciona para `/dashboard` (que exige login)                  |
+
+> O dashboard mostra os 10 eventos mais recentes; o historico completo fica em
+> `/audit-logs`, que pagina no backend. A tela ainda **nao tem filtros** (por
+> periodo, acao ou modulo) - o endpoint tambem nao os oferece.
 
 ## Como a protecao funciona
 
@@ -85,8 +85,9 @@ src/
 │   ├── AuthContext.tsx   estado da sessao (login, logout, expiracao)
 │   ├── ProtectedRoute.tsx
 │   └── session-storage.ts
-├── components/           AppShell (topbar + navegacao), ConfirmDialog, StatusLabel
+├── components/           AppShell (topbar + navegacao), ConfirmDialog, Pagination, StatusLabel
 ├── pages/                LoginPage
+│   ├── audit/            AuditLogsPage + tabela e testes da tela de auditoria
 │   ├── dashboard/        DashboardPage + cards, auditoria recente, atalhos e testes
 │   └── users/            lista, formulario, visualizacao e testes da area de usuarios
 └── App.test.tsx          testes de rota protegida, login e logout

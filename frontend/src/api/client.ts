@@ -69,6 +69,35 @@ export interface DashboardSummary {
   auditoria?: { total: number; recentes: DashboardAuditEvent[] };
 }
 
+/**
+ * Evento de auditoria como a tela de auditoria o usa.
+ *
+ * `GET /audit-logs` ainda devolve `ip` e `metadados`, que **nao** sao exibidos
+ * e por isso nao entram neste tipo: assim nenhuma tela os mostra por descuido.
+ */
+export interface AuditLogEntry {
+  id: string;
+  /** Id do responsavel. Nulo quando o evento nao tem usuario identificado. */
+  usuarioId: string | null;
+  /**
+   * Responsavel identificado. Nulo quando o evento nao tem usuario ou quando
+   * o usuario nao existe mais - nesse caso `usuarioId` continua preenchido.
+   */
+  usuario: { id: string; nome: string; email: string } | null;
+  acao: string;
+  modulo: string;
+  descricao: string;
+  createdAt: string;
+}
+
+export interface AuditLogPage {
+  items: AuditLogEntry[];
+  /** Total de eventos, em todas as paginas. Vem do backend. */
+  total: number;
+  page: number;
+  limit: number;
+}
+
 /** Erro devolvido pela API (status HTTP diferente de 2xx). */
 export class ApiError extends Error {
   constructor(
@@ -141,6 +170,14 @@ export const api = {
 
   dashboard: {
     summary: (token: string): Promise<DashboardSummary> => request('/dashboard/summary', { token }),
+  },
+
+  auditLogs: {
+    list: (token: string, page: number, limit: number): Promise<AuditLogPage> =>
+      request(
+        `/audit-logs?${new URLSearchParams({ page: String(page), limit: String(limit) }).toString()}`,
+        { token },
+      ),
   },
 
   users: {

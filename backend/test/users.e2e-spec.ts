@@ -2,6 +2,7 @@ import type { Server } from 'node:http';
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import type { ErrorResponseDto } from '../src/common/dto/error-response.dto';
+import type { AuditLogPageResponseDto } from '../src/modules/audit/dto/audit-log-page-response.dto';
 import type { AuditLogResponseDto } from '../src/modules/audit/dto/audit-log-response.dto';
 import { AuditRepository } from '../src/modules/audit/audit.repository';
 import type { AuthResponseDto } from '../src/modules/auth/dto/auth-response.dto';
@@ -63,13 +64,22 @@ describe('Administracao de usuarios (e2e)', () => {
     return request(server()).patch(path).set('Authorization', bearer(actor.token)).send(body);
   }
 
+  /** O endpoint e paginado (maximo 100 por pagina): percorre as paginas antes de filtrar. */
   async function auditFor(alvoId: string, acao?: string): Promise<AuditLogResponseDto[]> {
     const { accessToken } = await login(ADMIN.email, ADMIN.senha);
-    const response = await request(server())
-      .get('/audit-logs?limit=200')
-      .set('Authorization', bearer(accessToken))
-      .expect(200);
-    return (response.body as AuditLogResponseDto[]).filter(
+    const all: AuditLogResponseDto[] = [];
+    for (let page = 1; ; page += 1) {
+      const response = await request(server())
+        .get(`/audit-logs?page=${page}&limit=100`)
+        .set('Authorization', bearer(accessToken))
+        .expect(200);
+      const body = response.body as AuditLogPageResponseDto;
+      all.push(...body.items);
+      if (body.items.length === 0 || all.length >= body.total) {
+        break;
+      }
+    }
+    return all.filter(
       (log) => log.metadados?.alvoId === alvoId && (acao === undefined || log.acao === acao),
     );
   }

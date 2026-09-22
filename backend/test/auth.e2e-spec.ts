@@ -5,6 +5,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import request from 'supertest';
 import type { ErrorResponseDto } from '../src/common/dto/error-response.dto';
 import { SeedService } from '../src/database/seed/seed.service';
+import type { AuditLogPageResponseDto } from '../src/modules/audit/dto/audit-log-page-response.dto';
 import type { AuditLogResponseDto } from '../src/modules/audit/dto/audit-log-response.dto';
 import type { AuthResponseDto } from '../src/modules/auth/dto/auth-response.dto';
 import { RoleName } from '../src/modules/roles/role-name.enum';
@@ -60,13 +61,21 @@ describe('Auth, usuarios e RBAC (e2e)', () => {
     await repository.save(user);
   }
 
+  /** Todos os eventos: o endpoint e paginado (maximo 100 por pagina), entao percorre as paginas. */
   async function auditLogs(): Promise<AuditLogResponseDto[]> {
     const adminToken = (await login(ADMIN.email, ADMIN.senha)).accessToken;
-    const response = await request(server())
-      .get('/audit-logs?limit=200')
-      .set('Authorization', bearer(adminToken))
-      .expect(200);
-    return response.body as AuditLogResponseDto[];
+    const all: AuditLogResponseDto[] = [];
+    for (let page = 1; ; page += 1) {
+      const response = await request(server())
+        .get(`/audit-logs?page=${page}&limit=100`)
+        .set('Authorization', bearer(adminToken))
+        .expect(200);
+      const body = response.body as AuditLogPageResponseDto;
+      all.push(...body.items);
+      if (body.items.length === 0 || all.length >= body.total) {
+        return all;
+      }
+    }
   }
 
   beforeAll(async () => {

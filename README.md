@@ -29,6 +29,7 @@ O desenvolvimento e **incremental**: a fundacao vem antes das automacoes.
 | Auditoria basica                  | Funcionando                             |
 | Administracao de usuarios         | Funcionando (API + telas)               |
 | Dashboard administrativo          | Funcionando (usuarios e auditoria; sem dados de outros modulos) |
+| Tela de auditoria                 | Funcionando (listagem paginada; sem filtros)   |
 | Frontend: login, dashboard, usuarios | Funcionando (demais telas nao iniciadas) |
 | Integracoes externas              | Nao iniciado - apenas pastas reservadas |
 
@@ -326,7 +327,7 @@ Detalhes em [frontend/README.md](frontend/README.md).
 | `PATCH /users/:id`     | `users:update`       | Edita nome e e-mail. Senha, perfil e status sao recusados (400) |
 | `PATCH /users/:id/status` | `users:status`    | Ativa ou desativa (`{ "ativo": false }`)                     |
 | `PATCH /users/:id/role` | `users:role`        | Altera o perfil (`{ "role": "OPERADOR" }`)                   |
-| `GET /audit-logs`      | permissao `audit:read` | Ultimos registros de auditoria (ADMIN e GESTOR)              |
+| `GET /audit-logs?page=&limit=` | permissao `audit:read` | Registros de auditoria, paginado (padrao 20, maximo 100), do mais recente ao mais antigo |
 | `GET /dashboard/summary` | autenticado        | Indicadores do dashboard. Cada secao vem conforme a permissao (ver abaixo) |
 
 **Dashboard.** `GET /dashboard/summary` e somente leitura e **nao gera registro

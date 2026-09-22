@@ -310,7 +310,7 @@ describe('Dashboard', () => {
   });
 
   describe('atalhos', () => {
-    it('leva para Usuarios e para a secao de auditoria', async () => {
+    it('leva para Usuarios e para a tela de auditoria', async () => {
       renderDashboard(GESTOR);
 
       // O atalho de auditoria so existe depois que o resumo chega.
@@ -318,7 +318,10 @@ describe('Dashboard', () => {
       const atalhos = within(await shortcutsSection());
 
       expect(atalhos.getByRole('link', { name: /Usuários/ })).toHaveAttribute('href', '/users');
-      expect(atalhos.getByRole('link', { name: /Auditoria/ })).toHaveAttribute('href', '#auditoria');
+      expect(atalhos.getByRole('link', { name: /Auditoria/ })).toHaveAttribute(
+        'href',
+        '/audit-logs',
+      );
     });
 
     it('sem users:read nao ha atalho de Usuarios', async () => {

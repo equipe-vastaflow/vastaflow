@@ -6,6 +6,7 @@ import { useAuth } from '../../auth/AuthContext';
 import { hasPermission, Permission } from '../../auth/permissions';
 import { AppShell } from '../../components/AppShell';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
+import { Pagination } from '../../components/Pagination';
 import { StatusLabel } from '../../components/StatusLabel';
 import { ROLE_LABELS } from '../../roles';
 import { userCapabilities } from './capabilities';
@@ -262,6 +263,7 @@ export function UsersPage(): ReactNode {
             total={outcome.page.total}
             limit={outcome.page.limit}
             onChange={setPage}
+            label={{ singular: 'usuário', plural: 'usuários' }}
           />
         </>
       )}
@@ -315,46 +317,5 @@ export function UsersPage(): ReactNode {
         </ConfirmDialog>
       )}
     </AppShell>
-  );
-}
-
-function Pagination({
-  page,
-  total,
-  limit,
-  onChange,
-}: {
-  page: number;
-  total: number;
-  limit: number;
-  onChange: (page: number) => void;
-}): ReactNode {
-  const pages = Math.max(1, Math.ceil(total / limit));
-  return (
-    <nav className="pagination" aria-label="Paginação">
-      <button
-        type="button"
-        className="button button-secondary button-small"
-        disabled={page <= 1}
-        onClick={() => {
-          onChange(page - 1);
-        }}
-      >
-        Anterior
-      </button>
-      <span className="muted">
-        Página {page} de {pages} · {total} {total === 1 ? 'usuário' : 'usuários'}
-      </span>
-      <button
-        type="button"
-        className="button button-secondary button-small"
-        disabled={page >= pages}
-        onClick={() => {
-          onChange(page + 1);
-        }}
-      >
-        Próxima
-      </button>
-    </nav>
   );
 }

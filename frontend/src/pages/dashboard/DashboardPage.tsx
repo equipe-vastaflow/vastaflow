@@ -84,14 +84,12 @@ export function DashboardPage(): ReactNode {
     ...(hasPermission(user, Permission.UsersRead)
       ? [{ label: 'Usuários', descricao: 'Cadastro, perfis e status', to: '/users' }]
       : []),
-    // Auditoria ainda nao tem tela propria. O rotulo e a descricao deixam claro
-    // que o atalho apenas desce ate a secao desta pagina.
     ...(summary?.auditoria
       ? [
           {
-            label: 'Auditoria recente',
-            descricao: 'Ver os últimos eventos, aqui nesta página',
-            to: '#auditoria',
+            label: 'Auditoria',
+            descricao: 'Histórico completo de eventos',
+            to: '/audit-logs',
           },
         ]
       : []),

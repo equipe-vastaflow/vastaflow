@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from 'react-router';
 import { Permission } from './auth/permissions';
 import { ProtectedRoute } from './auth/ProtectedRoute';
 import { RequirePermission } from './auth/RequirePermission';
+import { AuditLogsPage } from './pages/audit/AuditLogsPage';
 import { DashboardPage } from './pages/dashboard/DashboardPage';
 import { LoginPage } from './pages/LoginPage';
 import { UserDetailPage } from './pages/users/UserDetailPage';
@@ -28,6 +29,11 @@ export function App(): ReactNode {
         </Route>
         <Route element={<RequirePermission permission={Permission.UsersUpdate} />}>
           <Route path="/users/:id/editar" element={<UserFormPage key="editar" />} />
+        </Route>
+
+        {/* Auditoria. O backend exige `audit:read` de novo em cada requisicao. */}
+        <Route element={<RequirePermission permission={Permission.AuditRead} />}>
+          <Route path="/audit-logs" element={<AuditLogsPage />} />
         </Route>
       </Route>
 

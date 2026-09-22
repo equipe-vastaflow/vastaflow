@@ -72,9 +72,11 @@ backend/src/
 │   ├── health/                [x] GET /health
 │   ├── auth/                  [x] login, register, me, logout, JWT, guards, decorators
 │   ├── users/                 [x] entity User, hash de senha, administracao (/users)
+│   │   └── user-directory     [x] modulo de fronteira: le id/nome/e-mail (sem regra de negocio)
 │   ├── roles/                 [x] entity Role, enum RoleName, permissoes padrao
 │   ├── permissions/           [x] entity Permission, catalogo PermissionCode
-│   ├── audit/                 [x] entity AuditLog, AuditService, GET /audit-logs
+│   ├── audit/                 [x] entity AuditLog, AuditService, GET /audit-logs (paginado)
+│   │                              usa UserDirectoryModule para nomear o responsavel
 │   └── dashboard/             [x] GET /dashboard/summary - agrega os modulos acima
 └── integrations/              [ ] Etapa 5 - apenas contratos
 ```
@@ -248,6 +250,57 @@ distintos na auditoria, e as mesmas 6 com 6 usuarios distintos.
 **Ainda nao existe** campo de "alvo" no `AuditLog`. Quando existir, entra como
 mais uma coluna da tabela do dashboard. Financeiro, automacoes e integracoes
 entram como novas secoes opcionais quando os modulos existirem.
+
+## Auditoria: dashboard x tela completa
+
+Sao duas leituras da mesma tabela, com contratos diferentes de proposito:
+
+| | `GET /dashboard/summary` | `GET /audit-logs` |
+| --- | --- | --- |
+| Quem usa | Cartao do dashboard | Tela `/audit-logs` |
+| Quantidade | 10 mais recentes, fixo | Pagina (padrao 20, maximo 100) + `total` |
+| Responsavel | `{ id, nome }` | `usuarioId` + `{ id, nome, email }` |
+| `ip` e `metadados` | Nao devolvidos | Devolvidos, mas **nao exibidos** na tela |
+
+### Como o responsavel e identificado sem criar ciclo
+
+`audit_logs.usuario_id` nao tem chave estrangeira **de proposito** - a trilha
+sobrevive ao usuario -, entao nao ha relacao para o TypeORM carregar junto: o
+nome precisa vir de outra consulta.
+
+O caminho obvio seria o `AuditModule` importar o `UsersModule`. Isso **nao
+funciona**: `UsersModule` ja importa `AuditModule` para gravar auditoria, e o
+import de volta fecharia o ciclo `UsersModule -> AuditModule -> UsersModule`.
+
+A saida foi um modulo de fronteira minusculo, `UserDirectoryModule`
+(`modules/users/user-directory.*`):
+
+```
+UsersModule ──> AuditModule ──> UserDirectoryModule ──> (so a entity User)
+```
+
+Ele expoe um unico metodo somente-leitura, `findByIds(ids)`, que devolve
+`id -> { id, nome, email }`. Nao importa `UsersModule` nem `AuditModule`, entao
+nao ha ciclo - e nao foi preciso `forwardRef` (o projeto nao usa nenhum). Criar,
+alterar e aplicar regra de negocio sobre usuarios continua exclusividade do
+`UsersModule`.
+
+**Sem N+1:** o `AuditService` junta os `usuario_id` da pagina e faz UMA busca em
+lote, independentemente de quantos eventos ou quantos usuarios distintos a
+pagina tenha. Sao sempre 2 consultas de dados por pagina (a pagina com `COUNT` e
+o lote de responsaveis).
+
+Tres situacoes possiveis na coluna "Responsavel" da tela:
+
+| Situacao | `usuarioId` | `usuario` | Tela mostra |
+| --- | --- | --- | --- |
+| Acao de um usuario existente | preenchido | `{ id, nome, email }` | nome + e-mail |
+| Evento sem usuario (ex.: login com e-mail inexistente) | `null` | `null` | "Não identificado" |
+| Usuario removido do sistema | preenchido | `null` | "Usuário removido (id curto)" |
+
+A paginacao usa `ORDER BY created_at DESC, id DESC`. O `id` desempata: varios
+eventos podem cair no mesmo instante, e sem criterio estavel o mesmo evento
+poderia aparecer em duas paginas - ou em nenhuma.
 
 ## Tratamento de erros
 

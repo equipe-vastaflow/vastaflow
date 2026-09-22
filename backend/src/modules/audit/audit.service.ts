@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { UserDirectoryService, type UserIdentity } from '../users/user-directory.service';
 import type { AuditAction, AuditModuleName } from './audit-action.enum';
 import { sanitizeAuditMetadata } from './audit-metadata';
 import { AuditRepository } from './audit.repository';
@@ -18,6 +19,17 @@ export interface AuditEvent {
   metadados?: AuditMetadata;
 }
 
+/** Evento com o responsavel ja resolvido. `autor` ausente = nao identificado. */
+export interface AuditLogWithActor {
+  log: AuditLog;
+  autor?: UserIdentity;
+}
+
+export interface AuditLogPage {
+  items: AuditLogWithActor[];
+  total: number;
+}
+
 /** Tamanho da coluna `descricao`; textos maiores sao truncados, nao rejeitados. */
 const DESCRIPTION_MAX_LENGTH = 500;
 
@@ -25,7 +37,10 @@ const DESCRIPTION_MAX_LENGTH = 500;
 export class AuditService {
   private readonly logger = new Logger(AuditService.name);
 
-  constructor(private readonly auditRepository: AuditRepository) {}
+  constructor(
+    private readonly auditRepository: AuditRepository,
+    private readonly userDirectory: UserDirectoryService,
+  ) {}
 
   /**
    * Registra um evento de auditoria.
@@ -55,6 +70,31 @@ export class AuditService {
 
   findLatest(limit: number): Promise<AuditLog[]> {
     return this.auditRepository.findLatest(limit);
+  }
+
+  /**
+   * Pagina de eventos (1-based), do mais recente para o mais antigo, com o
+   * responsavel de cada um ja identificado.
+   *
+   * Duas consultas por pagina, sempre: a pagina (com `COUNT` do total) e UMA
+   * busca em lote dos responsaveis. Nunca uma consulta por evento.
+   *
+   * `audit_logs.usuario_id` nao tem chave estrangeira de proposito - a trilha
+   * sobrevive ao usuario -, entao nao ha relacao para o TypeORM carregar junto.
+   */
+  async findPage(page: number, limit: number): Promise<AuditLogPage> {
+    const [items, total] = await this.auditRepository.findPage((page - 1) * limit, limit);
+    const ids = items.map((log) => log.usuarioId).filter((id): id is string => id !== null);
+    const autores = await this.userDirectory.findByIds(ids);
+
+    return {
+      items: items.map((log) => ({
+        log,
+        // Ausente quando o evento nao tem usuario ou o usuario nao existe mais.
+        autor: log.usuarioId === null ? undefined : autores.get(log.usuarioId),
+      })),
+      total,
+    };
   }
 
   /** Total de eventos registrados. */
