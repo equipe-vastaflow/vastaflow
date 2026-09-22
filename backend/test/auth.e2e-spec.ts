@@ -506,6 +506,7 @@ describe('Auth, usuarios e RBAC (e2e)', () => {
           '/auth/logout',
           '/auth/me',
           '/auth/register',
+          '/commands/execute',
           '/dashboard/summary',
           '/health',
           '/users',

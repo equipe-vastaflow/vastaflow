@@ -5,6 +5,7 @@ import { DatabaseModule } from './database/database.module';
 import { SeedModule } from './database/seed/seed.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { CommandsModule } from './modules/commands/commands.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { HealthModule } from './modules/health/health.module';
 import { PermissionsModule } from './modules/permissions/permissions.module';
@@ -36,6 +37,10 @@ import { UsersModule } from './modules/users/users.module';
 
     // Agrega os indicadores dos modulos acima. Nao tem dados proprios.
     DashboardModule,
+
+    // Nucleo do motor de comandos. Independe de canal: os adaptadores
+    // (Telegram, WhatsApp) entrarao como modulos proprios que o importam.
+    CommandsModule,
 
     // Modulos das proximas etapas:
     //   Etapa 5 - IntegrationsModule (apenas contratos)
