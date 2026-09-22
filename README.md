@@ -338,6 +338,11 @@ quem nao e ADMIN so gerencia e concede perfis com menos permissoes que as suas;
 ninguem altera o proprio status ou perfil; e o ultimo ADMIN ativo nao pode ser
 desativado nem rebaixado.
 
+Toda alteracao administrativa gera um registro de auditoria (modulo `USERS`).
+A auditoria e **best-effort**: se a gravacao do log falhar, a alteracao
+permanece e o erro vai apenas para o log da aplicacao. Detalhes e consequencias
+em [docs/arquitetura.md](docs/arquitetura.md#administracao-de-usuarios).
+
 ### Testar com curl
 
 ```bash

@@ -39,7 +39,12 @@ const HIERARCHY_MESSAGE = 'Voce nao pode gerenciar um usuario com perfil igual o
  *
  * Toda alteracao efetivada e registrada na auditoria. Operacoes que nao mudam
  * nada (ex.: ativar quem ja esta ativo) respondem normalmente e nao geram
- * registro.
+ * registro, assim como tentativas recusadas (403/409).
+ *
+ * A auditoria e BEST-EFFORT (comportamento do `AuditService`): o registro e
+ * gravado depois da alteracao, fora da transacao dela, e uma falha ao grava-lo
+ * vai para o log da aplicacao sem desfazer a operacao nem mudar a resposta.
+ * Portanto pode existir alteracao efetivada sem AuditLog correspondente.
  */
 @Injectable()
 export class UserManagementService {

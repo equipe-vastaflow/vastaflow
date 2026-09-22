@@ -172,6 +172,22 @@ O frontend usa `GET /users/assignable-roles` para saber quais acoes mostrar, sem
 reimplementar a hierarquia. Esconder botoes e so conveniencia: toda operacao e
 autorizada de novo no backend.
 
+**Auditoria.** Toda alteracao efetivada gera um AuditLog (modulo `USERS`) com o
+autor em `usuarioId` e o alvo em `metadados.alvoId`; `USER_UPDATED` guarda os
+valores anterior e novo de nome e e-mail. Nao geram registro: operacoes que nao
+mudam nada (ativar quem ja esta ativo, repetir o mesmo perfil) e tentativas
+recusadas (403, 409). Senha nunca e gravada - nem aparece nas operacoes, e o
+`sanitizeAuditMetadata` removeria de qualquer forma.
+
+> **A auditoria e best-effort.** O registro e gravado **depois** da alteracao,
+> fora da transacao dela. Se a gravacao do AuditLog falhar (ex.: banco
+> indisponivel naquele instante), o erro vai para o log da aplicacao, a
+> alteracao **permanece** e a resposta ao cliente e de sucesso. Consequencia: a
+> trilha pode ter lacunas e **nao serve, hoje, como prova de que uma alteracao
+> nao ocorreu**. Tornar a auditoria obrigatoria (gravar na mesma transacao e
+> desfazer a operacao se o log falhar) e uma decisao em aberto; o ponto de
+> mudanca e o `AuditService.record`.
+
 **Decisoes de seguranca.**
 
 - Senha: bcrypt (`BCRYPT_SALT_ROUNDS`), 8 a 72 caracteres com maiuscula, minuscula e numero

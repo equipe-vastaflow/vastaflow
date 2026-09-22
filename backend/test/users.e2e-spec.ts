@@ -3,6 +3,7 @@ import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import type { ErrorResponseDto } from '../src/common/dto/error-response.dto';
 import type { AuditLogResponseDto } from '../src/modules/audit/dto/audit-log-response.dto';
+import { AuditRepository } from '../src/modules/audit/audit.repository';
 import type { AuthResponseDto } from '../src/modules/auth/dto/auth-response.dto';
 import { RoleName } from '../src/modules/roles/role-name.enum';
 import type { UserPageResponseDto } from '../src/modules/users/dto/user-page-response.dto';
@@ -459,6 +460,31 @@ describe('Administracao de usuarios (e2e)', () => {
     it('perfil sem users:role recebe 403 e perfil invalido 400', async () => {
       await patch(operador, `/users/${usuario.id}/role`, { role: RoleName.Operador }).expect(403);
       await patch(admin, `/users/${usuario.id}/role`, { role: 'DONO' }).expect(400);
+    });
+  });
+
+  describe('auditoria best-effort', () => {
+    it('falha ao gravar o AuditLog nao desfaz nem recusa a operacao administrativa', async () => {
+      const target = await sessionFor(RoleName.Usuario);
+      const auditRepository = app.get(AuditRepository, { strict: false });
+      const failing = jest
+        .spyOn(auditRepository, 'create')
+        .mockRejectedValueOnce(new Error('banco de auditoria indisponivel'));
+
+      try {
+        const response = await patch(admin, `/users/${target.id}/status`, { ativo: false }).expect(
+          200,
+        );
+        expect(response.body).toMatchObject({ ativo: false });
+        expect(failing).toHaveBeenCalledTimes(1);
+      } finally {
+        failing.mockRestore();
+      }
+
+      // A alteracao permaneceu, e a trilha ficou sem o registro dela.
+      const stored = await app.get(UsersService, { strict: false }).findById(target.id);
+      expect(stored?.ativo).toBe(false);
+      expect(await auditFor(target.id, 'USER_DEACTIVATED')).toHaveLength(0);
     });
   });
 
