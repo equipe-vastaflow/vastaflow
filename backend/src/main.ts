@@ -66,6 +66,7 @@ function setupSwagger(app: INestApplication, appName: string): void {
     .addTag('Auth', 'Cadastro, login, sessao e logout')
     .addTag('Users', 'Usuarios')
     .addTag('Audit', 'Trilha de auditoria')
+    .addTag('Dashboard', 'Indicadores administrativos, somente leitura')
     .addBearerAuth({ type: 'http', scheme: 'bearer', bearerFormat: 'JWT' }, 'access-token')
     .build();
 

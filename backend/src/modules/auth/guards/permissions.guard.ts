@@ -6,9 +6,9 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { PermissionCode } from '../../permissions/permission-code.enum';
-import { RoleName } from '../../roles/role-name.enum';
 import type { AuthenticatedRequest } from '../auth.types';
 import { PERMISSIONS_KEY } from '../decorators/require-permissions.decorator';
+import { hasPermission } from '../has-permission';
 
 /**
  * Guard global de autorizacao por permissao granular. Roda depois do
@@ -32,11 +32,7 @@ export class PermissionsGuard implements CanActivate {
     }
 
     const user = context.switchToHttp().getRequest<AuthenticatedRequest>().user;
-    if (
-      user &&
-      (user.role === RoleName.Admin ||
-        required.every((permission) => user.permissions.includes(permission)))
-    ) {
+    if (required.every((permission) => hasPermission(user, permission))) {
       return true;
     }
 

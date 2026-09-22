@@ -74,7 +74,8 @@ backend/src/
 │   ├── users/                 [x] entity User, hash de senha, administracao (/users)
 │   ├── roles/                 [x] entity Role, enum RoleName, permissoes padrao
 │   ├── permissions/           [x] entity Permission, catalogo PermissionCode
-│   └── audit/                 [x] entity AuditLog, AuditService, GET /audit-logs
+│   ├── audit/                 [x] entity AuditLog, AuditService, GET /audit-logs
+│   └── dashboard/             [x] GET /dashboard/summary - agrega os modulos acima
 └── integrations/              [ ] Etapa 5 - apenas contratos
 ```
 
@@ -208,6 +209,45 @@ recusadas (403, 409). Senha nunca e gravada - nem aparece nas operacoes, e o
   gerar as proximas (ver database/README.md).
 - Atras de proxy reverso, o IP registrado na auditoria e o do proxy, a menos que
   o Express seja configurado com `trust proxy`.
+
+## Dashboard administrativo
+
+`GET /dashboard/summary` **agrega**: nao tem entity, tabela nem repositorio
+proprio, apenas consome `UsersService` e `AuditService`. Por isso o modulo nao
+exigiu nenhuma migration.
+
+**Autorizacao sem permissao nova.** Qualquer usuario autenticado chama o
+endpoint; cada secao e incluida apenas para quem tem a permissao correspondente:
+
+| Secao       | Permissao    | Conteudo                                    |
+| ----------- | ------------ | ------------------------------------------- |
+| `usuarios`  | `users:read` | total, ativos, inativos                      |
+| `auditoria` | `audit:read` | total de eventos e os 10 mais recentes       |
+
+A decisao usa `hasPermission()` (`modules/auth/has-permission.ts`), a **mesma**
+funcao do `PermissionsGuard` - assim a regra de ADMIN e de permissao granular
+nao diverge entre "barrar a rota" e "montar a resposta". Um perfil sem nenhuma
+das duas recebe `{}` com 200: o dashboard e a pagina inicial de todo usuario
+autenticado, entao um 403 quebraria a navegacao de quem so tem acesso basico.
+
+**Somente leitura.** Abrir o dashboard nao gera `AuditLog`.
+
+**Consultas (por requisicao, independentemente do volume de dados):**
+
+1. contagem de usuarios: uma agregacao (`COUNT` + `SUM(CASE ...)`), sem carregar linhas;
+2. `COUNT` de `audit_logs`;
+3. os 10 eventos mais recentes (`ORDER BY created_at DESC` + `LIMIT`);
+4. nomes dos responsaveis: uma consulta `WHERE id IN (...)` para todos de uma vez.
+
+O passo 4 existe porque `audit_logs.usuario_id` **nao** tem chave estrangeira -
+de proposito, para a trilha sobreviver ao usuario -, entao nao ha relacao para o
+TypeORM carregar junto. Resolver nome por evento seria N+1; a consulta em lote
+evita isso. Medido contra MySQL real: 6 consultas por requisicao com 2 usuarios
+distintos na auditoria, e as mesmas 6 com 6 usuarios distintos.
+
+**Ainda nao existe** campo de "alvo" no `AuditLog`. Quando existir, entra como
+mais uma coluna da tabela do dashboard. Financeiro, automacoes e integracoes
+entram como novas secoes opcionais quando os modulos existirem.
 
 ## Tratamento de erros
 

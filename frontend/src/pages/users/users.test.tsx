@@ -74,6 +74,9 @@ function renderAt(path: string): void {
 function session(me: User, extra: Record<string, Handler> = {}): Record<string, Handler> {
   return {
     'GET /auth/me': { status: 200, body: me },
+    // O dashboard e a pagina inicial destes testes; os indicadores em si tem
+    // cobertura propria em pages/dashboard/dashboard.test.tsx.
+    'GET /dashboard/summary': { status: 200, body: {} },
     'GET /users/assignable-roles': {
       status: 200,
       body: me.role === 'ADMIN' ? ['ADMIN', 'GESTOR', 'OPERADOR', 'USUARIO'] : ['OPERADOR', 'USUARIO'],
@@ -205,7 +208,7 @@ describe('acoes condicionadas por permissao', () => {
     mockApi(session(semAcesso));
 
     renderAt('/dashboard');
-    expect(await screen.findByText('Status da sessão')).toBeInTheDocument();
+    expect(await screen.findByText(/Status da sessão/)).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Usuários' })).not.toBeInTheDocument();
   });
 

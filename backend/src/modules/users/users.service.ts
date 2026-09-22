@@ -13,6 +13,12 @@ export interface CreateUserInput {
   role: RoleName;
 }
 
+export interface UserCounts {
+  total: number;
+  ativos: number;
+  inativos: number;
+}
+
 const DEFAULT_LIST_LIMIT = 100;
 
 /** E-mail e case-insensitive na pratica; guardamos sempre em minusculas. */
@@ -38,6 +44,17 @@ export class UsersService {
 
   findAll(limit: number = DEFAULT_LIST_LIMIT): Promise<User[]> {
     return this.usersRepository.findAll(limit);
+  }
+
+  /** Quantidade de usuarios por status, sem carregar nenhuma linha. */
+  async countByStatus(): Promise<UserCounts> {
+    const { total, ativos } = await this.usersRepository.countByStatus();
+    return { total, ativos, inativos: total - ativos };
+  }
+
+  /** Nome dos usuarios informados, numa consulta so. Ids desconhecidos ficam de fora. */
+  findNamesByIds(ids: readonly string[]): Promise<Map<string, string>> {
+    return this.usersRepository.findNamesByIds(ids);
   }
 
   /**

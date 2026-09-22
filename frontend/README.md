@@ -11,7 +11,12 @@ nao existem.
 | Rota         | Acesso   | O que faz                                                        |
 | ------------ | -------- | ---------------------------------------------------------------- |
 | `/login`     | publico  | E-mail e senha; quem ja esta autenticado e enviado ao dashboard   |
-| `/dashboard` | protegido | Nome, e-mail, perfil e status da sessao; navegacao e botao **Sair** |
+| `/dashboard` | protegido | Cabecalho (usuario, perfil, sessao), cards de usuarios, auditoria recente e atalhos |
+
+> **Nao existe tela de auditoria.** O dashboard mostra apenas os 10 eventos mais
+> recentes, e o atalho "Auditoria recente" so desce ate essa secao da propria
+> pagina - nao ha rota `/audit`. O historico completo esta em `GET /audit-logs`
+> (API). Uma tela com filtros e paginacao seria uma etapa propria.
 | `/users`     | `users:read` | Tabela paginada com acoes (ver, editar, ativar/desativar, perfil) |
 | `/users/novo` | `users:create` | Formulario de novo usuario                                   |
 | `/users/:id` | `users:read` | Dados do usuario                                                |
@@ -31,6 +36,10 @@ nao existem.
   `users:read`, a navegacao "Usuarios" nem aparece.
 - Desativar pede confirmacao. Recusas do backend (ex.: ultimo ADMIN ativo) sao
   mostradas como erro, nunca como sucesso.
+- No dashboard, quem decide o que aparece e o backend: ele devolve apenas as
+  secoes permitidas ao perfil (`users:read` para os cards de usuarios,
+  `audit:read` para a auditoria recente). Um perfil sem nenhuma das duas ve a
+  pagina com um aviso, e nao um erro.
 - **A protecao real e a do backend.** O frontend apenas evita mostrar telas a quem
   nao tem sessao; toda API continua exigindo o JWT.
 
@@ -77,7 +86,8 @@ src/
 │   ├── ProtectedRoute.tsx
 │   └── session-storage.ts
 ├── components/           AppShell (topbar + navegacao), ConfirmDialog, StatusLabel
-├── pages/                LoginPage, DashboardPage
+├── pages/                LoginPage
+│   ├── dashboard/        DashboardPage + cards, auditoria recente, atalhos e testes
 │   └── users/            lista, formulario, visualizacao e testes da area de usuarios
 └── App.test.tsx          testes de rota protegida, login e logout
 ```

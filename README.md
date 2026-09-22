@@ -28,6 +28,7 @@ O desenvolvimento e **incremental**: a fundacao vem antes das automacoes.
 | Autorizacao (RBAC)                | Funcionando                             |
 | Auditoria basica                  | Funcionando                             |
 | Administracao de usuarios         | Funcionando (API + telas)               |
+| Dashboard administrativo          | Funcionando (usuarios e auditoria; sem dados de outros modulos) |
 | Frontend: login, dashboard, usuarios | Funcionando (demais telas nao iniciadas) |
 | Integracoes externas              | Nao iniciado - apenas pastas reservadas |
 
@@ -326,6 +327,37 @@ Detalhes em [frontend/README.md](frontend/README.md).
 | `PATCH /users/:id/status` | `users:status`    | Ativa ou desativa (`{ "ativo": false }`)                     |
 | `PATCH /users/:id/role` | `users:role`        | Altera o perfil (`{ "role": "OPERADOR" }`)                   |
 | `GET /audit-logs`      | permissao `audit:read` | Ultimos registros de auditoria (ADMIN e GESTOR)              |
+| `GET /dashboard/summary` | autenticado        | Indicadores do dashboard. Cada secao vem conforme a permissao (ver abaixo) |
+
+**Dashboard.** `GET /dashboard/summary` e somente leitura e **nao gera registro
+de auditoria**. Nao ha permissao propria de dashboard: qualquer usuario
+autenticado acessa, e cada secao so vem para quem tem a permissao
+correspondente - `usuarios` exige `users:read`, `auditoria` exige `audit:read`.
+Um perfil sem nenhuma das duas recebe `{}` com status 200 (a pagina existe, sem
+indicadores). Consultas agregadas: nenhuma lista completa e carregada para
+contar, e os nomes dos responsaveis pelos eventos saem numa unica consulta.
+
+```json
+{
+  "usuarios": { "total": 12, "ativos": 10, "inativos": 2 },
+  "auditoria": {
+    "total": 128,
+    "recentes": [
+      {
+        "id": "…",
+        "acao": "LOGIN",
+        "modulo": "AUTH",
+        "descricao": "Login realizado por maria@example.com",
+        "usuario": { "id": "…", "nome": "Maria Silva" },
+        "createdAt": "2026-09-22T12:30:00.000Z"
+      }
+    ]
+  }
+}
+```
+
+Financeiro, automacoes e integracoes entrarao como novas secoes opcionais quando
+esses modulos existirem - nenhum dado foi inventado para ocupar espaco.
 
 Respostas: `400` dados invalidos · `401` credenciais/token invalidos ·
 `403` usuario inativo (no login), sem permissao ou alvo fora do seu alcance ·

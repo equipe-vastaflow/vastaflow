@@ -24,6 +24,9 @@ const LOGIN_RESPONSE: LoginResponse = {
   user: USER,
 };
 
+/** Resumo minimo: estes testes cobrem sessao e login, nao os indicadores. */
+const SUMMARY = { usuarios: { total: 1, ativos: 1, inativos: 0 } };
+
 type Route = { status: number; body?: unknown };
 
 /** Substitui o `fetch` por respostas fixas, indexadas por "METODO /caminho". */
@@ -110,16 +113,19 @@ describe('rota protegida /dashboard', () => {
 
   it('token guardado valido mostra nome, perfil e status da sessao', async () => {
     storeSession();
-    const fetchMock = mockApi({ 'GET /auth/me': { status: 200, body: USER } });
+    const fetchMock = mockApi({
+      'GET /auth/me': { status: 200, body: USER },
+      'GET /dashboard/summary': { status: 200, body: SUMMARY },
+    });
 
     renderAt('/dashboard');
 
-    expect(await screen.findByRole('heading', { name: 'Olá, Maria Silva' })).toBeInTheDocument();
-    expect(screen.getByText('maria@vasta.test')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Dashboard' })).toBeInTheDocument();
+    expect(screen.getByText(/Maria Silva/)).toBeInTheDocument();
+    expect(screen.getByText(/maria@vasta.test/)).toBeInTheDocument();
     expect(screen.getByText('Gestor')).toBeInTheDocument();
     expect(screen.getByText('(GESTOR)')).toBeInTheDocument();
-    expect(screen.getByText('Status da sessão')).toBeInTheDocument();
-    expect(screen.getByText('Ativa')).toBeInTheDocument();
+    expect(screen.getByText(/Status da sessão: Ativa/)).toBeInTheDocument();
     expect(screen.getByText(/expira em/)).toBeInTheDocument();
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -137,7 +143,10 @@ describe('rota protegida /dashboard', () => {
 
 describe('login', () => {
   it('credenciais validas levam ao dashboard e guardam a sessao', async () => {
-    const fetchMock = mockApi({ 'POST /auth/login': { status: 200, body: LOGIN_RESPONSE } });
+    const fetchMock = mockApi({
+      'POST /auth/login': { status: 200, body: LOGIN_RESPONSE },
+      'GET /dashboard/summary': { status: 200, body: SUMMARY },
+    });
     const user = userEvent.setup();
 
     renderAt('/login');
@@ -145,7 +154,8 @@ describe('login', () => {
     await user.type(screen.getByLabelText('Senha'), 'Senha1234');
     await user.click(screen.getByRole('button', { name: 'Entrar' }));
 
-    expect(await screen.findByRole('heading', { name: 'Olá, Maria Silva' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Dashboard' })).toBeInTheDocument();
+    expect(screen.getByText(/Maria Silva/)).toBeInTheDocument();
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(JSON.parse(init.body as string)).toEqual({
@@ -202,11 +212,14 @@ describe('login', () => {
 
   it('quem ja esta autenticado nao ve o formulario de login', async () => {
     storeSession();
-    mockApi({ 'GET /auth/me': { status: 200, body: USER } });
+    mockApi({
+      'GET /auth/me': { status: 200, body: USER },
+      'GET /dashboard/summary': { status: 200, body: SUMMARY },
+    });
 
     renderAt('/login');
 
-    expect(await screen.findByRole('heading', { name: 'Olá, Maria Silva' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Dashboard' })).toBeInTheDocument();
   });
 });
 

@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { type EntityManager, QueryFailedError, Repository } from 'typeorm';
+import { type EntityManager, In, QueryFailedError, Repository } from 'typeorm';
 import type { Role } from '../roles/entities/role.entity';
 import { RoleName } from '../roles/role-name.enum';
 import { User } from './entities/user.entity';
@@ -54,6 +54,45 @@ export class UsersRepository {
 
   findAll(limit: number): Promise<User[]> {
     return this.repository.find({ relations: WITH_ROLE, order: { nome: 'ASC' }, take: limit });
+  }
+
+  /**
+   * Contagem de usuarios por status, em UMA consulta agregada.
+   *
+   * Nenhuma linha e carregada. A consulta unica tambem garante que total e
+   * ativos venham do mesmo instante - com dois COUNT separados, um cadastro
+   * entre eles produziria `inativos` negativo.
+   *
+   * `ativo = 1` literal em vez de parametro booleano: o valor e 1/0 nos tres
+   * drivers (tinyint no MySQL, NUMBER no Oracle, integer no SQLite dos testes)
+   * e assim nao dependemos de como cada driver converte um parametro booleano.
+   */
+  async countByStatus(): Promise<{ total: number; ativos: number }> {
+    const raw = await this.repository
+      .createQueryBuilder('u')
+      .select('COUNT(1)', 'total')
+      .addSelect('SUM(CASE WHEN u.ativo = 1 THEN 1 ELSE 0 END)', 'ativos')
+      .getRawOne<Record<string, unknown>>();
+
+    return { total: readCount(raw, 'total'), ativos: readCount(raw, 'ativos') };
+  }
+
+  /**
+   * Nome dos usuarios informados, numa unica consulta (`WHERE id IN (...)`).
+   *
+   * Usada para dar nome aos autores dos eventos de auditoria sem uma consulta
+   * por evento. Le so as colunas necessarias: sem perfil, sem permissoes e sem
+   * o hash da senha.
+   */
+  async findNamesByIds(ids: readonly string[]): Promise<Map<string, string>> {
+    if (ids.length === 0) {
+      return new Map();
+    }
+    const rows = await this.repository.find({
+      where: { id: In([...new Set(ids)]) },
+      select: { id: true, nome: true },
+    });
+    return new Map(rows.map((row) => [row.id, row.nome]));
   }
 
   /** Pagina ordenada por nome; o e-mail (unico) desempata e deixa a ordem estavel entre paginas. */
@@ -126,6 +165,18 @@ export class UsersRepository {
   save(user: User): Promise<User> {
     return this.repository.save(user);
   }
+}
+
+/**
+ * Le um valor agregado do resultado cru.
+ *
+ * Dois cuidados de portabilidade: o MySQL devolve `SUM` como string (decimal) e
+ * o Oracle devolve o alias em maiusculas quando ele nao chega citado. `SUM` de
+ * tabela vazia e NULL, que vira 0.
+ */
+function readCount(raw: Record<string, unknown> | null | undefined, alias: string): number {
+  const value = raw?.[alias] ?? raw?.[alias.toUpperCase()];
+  return value === null || value === undefined ? 0 : Number(value);
 }
 
 async function saveTranslatingDuplicates(repository: Repository<User>, user: User): Promise<User> {

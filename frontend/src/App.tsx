@@ -3,7 +3,7 @@ import { Navigate, Route, Routes } from 'react-router';
 import { Permission } from './auth/permissions';
 import { ProtectedRoute } from './auth/ProtectedRoute';
 import { RequirePermission } from './auth/RequirePermission';
-import { DashboardPage } from './pages/DashboardPage';
+import { DashboardPage } from './pages/dashboard/DashboardPage';
 import { LoginPage } from './pages/LoginPage';
 import { UserDetailPage } from './pages/users/UserDetailPage';
 import { UserFormPage } from './pages/users/UserFormPage';

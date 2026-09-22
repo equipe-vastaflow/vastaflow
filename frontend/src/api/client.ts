@@ -41,6 +41,34 @@ export interface UpdateUserInput {
   email?: string;
 }
 
+export interface UserCounts {
+  total: number;
+  ativos: number;
+  inativos: number;
+}
+
+/** Evento de auditoria reduzido ao que o dashboard mostra (sem IP nem metadados). */
+export interface DashboardAuditEvent {
+  id: string;
+  acao: string;
+  modulo: string;
+  descricao: string;
+  /** Nulo quando o evento nao tem usuario identificado. */
+  usuario: { id: string; nome: string } | null;
+  createdAt: string;
+}
+
+/**
+ * Cada secao vem apenas para quem tem a permissao correspondente
+ * (`usuarios` exige `users:read`; `auditoria` exige `audit:read`), entao as
+ * duas sao opcionais. Financeiro, automacoes e integracoes entrarao como novas
+ * secoes quando esses modulos existirem no backend.
+ */
+export interface DashboardSummary {
+  usuarios?: UserCounts;
+  auditoria?: { total: number; recentes: DashboardAuditEvent[] };
+}
+
 /** Erro devolvido pela API (status HTTP diferente de 2xx). */
 export class ApiError extends Error {
   constructor(
@@ -110,6 +138,10 @@ export const api = {
   me: (token: string): Promise<User> => request('/auth/me', { token }),
 
   logout: (token: string): Promise<void> => request('/auth/logout', { method: 'POST', token }),
+
+  dashboard: {
+    summary: (token: string): Promise<DashboardSummary> => request('/dashboard/summary', { token }),
+  },
 
   users: {
     list: (token: string, page: number, limit: number): Promise<UserPage> =>

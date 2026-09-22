@@ -7,6 +7,7 @@ export const Permission = {
   UsersUpdate: 'users:update',
   UsersStatus: 'users:status',
   UsersRole: 'users:role',
+  AuditRead: 'audit:read',
 } as const;
 
 export type PermissionCode = (typeof Permission)[keyof typeof Permission];

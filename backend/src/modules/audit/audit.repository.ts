@@ -22,4 +22,9 @@ export class AuditRepository {
   findLatest(limit: number): Promise<AuditLog[]> {
     return this.repository.find({ order: { createdAt: 'DESC' }, take: limit });
   }
+
+  /** `COUNT` no banco: nenhuma linha e carregada. */
+  count(): Promise<number> {
+    return this.repository.count();
+  }
 }

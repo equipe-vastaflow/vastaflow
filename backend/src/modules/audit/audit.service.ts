@@ -56,4 +56,9 @@ export class AuditService {
   findLatest(limit: number): Promise<AuditLog[]> {
     return this.auditRepository.findLatest(limit);
   }
+
+  /** Total de eventos registrados. */
+  count(): Promise<number> {
+    return this.auditRepository.count();
+  }
 }
