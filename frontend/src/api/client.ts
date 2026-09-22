@@ -10,6 +10,7 @@ export interface User {
   permissions: string[];
   ativo: boolean;
   createdAt: string;
+  updatedAt: string;
 }
 
 export interface LoginResponse {
@@ -18,6 +19,26 @@ export interface LoginResponse {
   /** Validade do token, em segundos. */
   expiresIn: number;
   user: User;
+}
+
+export interface UserPage {
+  items: User[];
+  /** Total de usuarios, em todas as paginas. */
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export interface CreateUserInput {
+  nome: string;
+  email: string;
+  senha: string;
+  role: RoleName;
+}
+
+export interface UpdateUserInput {
+  nome?: string;
+  email?: string;
 }
 
 /** Erro devolvido pela API (status HTTP diferente de 2xx). */
@@ -41,7 +62,7 @@ export class NetworkError extends Error {
 
 async function request<T>(
   path: string,
-  options: { method?: 'GET' | 'POST'; body?: unknown; token?: string } = {},
+  options: { method?: 'GET' | 'POST' | 'PATCH'; body?: unknown; token?: string } = {},
 ): Promise<T> {
   const headers: Record<string, string> = {};
   if (options.body !== undefined) {
@@ -80,6 +101,8 @@ async function readErrorMessage(response: Response): Promise<string> {
   }
 }
 
+const userPath = (id: string): string => `/users/${encodeURIComponent(id)}`;
+
 export const api = {
   login: (email: string, senha: string): Promise<LoginResponse> =>
     request('/auth/login', { method: 'POST', body: { email, senha } }),
@@ -87,4 +110,29 @@ export const api = {
   me: (token: string): Promise<User> => request('/auth/me', { token }),
 
   logout: (token: string): Promise<void> => request('/auth/logout', { method: 'POST', token }),
+
+  users: {
+    list: (token: string, page: number, limit: number): Promise<UserPage> =>
+      request(`/users?${new URLSearchParams({ page: String(page), limit: String(limit) }).toString()}`, {
+        token,
+      }),
+
+    get: (token: string, id: string): Promise<User> => request(userPath(id), { token }),
+
+    /** Perfis que o usuario autenticado pode conceder (e, portanto, gerenciar). */
+    assignableRoles: (token: string): Promise<RoleName[]> =>
+      request('/users/assignable-roles', { token }),
+
+    create: (token: string, input: CreateUserInput): Promise<User> =>
+      request('/users', { method: 'POST', body: input, token }),
+
+    update: (token: string, id: string, input: UpdateUserInput): Promise<User> =>
+      request(userPath(id), { method: 'PATCH', body: input, token }),
+
+    setStatus: (token: string, id: string, ativo: boolean): Promise<User> =>
+      request(`${userPath(id)}/status`, { method: 'PATCH', body: { ativo }, token }),
+
+    setRole: (token: string, id: string, role: RoleName): Promise<User> =>
+      request(`${userPath(id)}/role`, { method: 'PATCH', body: { role }, token }),
+  },
 };

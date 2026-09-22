@@ -8,7 +8,11 @@
   --primary-hover: #184bd1;
   --danger-bg: #fdecec;
   --danger-text: #a12222;
+  --danger: #c62828;
   --ok: #1a9c55;
+  --ok-bg: #e7f6ee;
+  --ok-text: #11663a;
+  --off: #98a2b3;
 
   color-scheme: light;
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
@@ -26,7 +30,11 @@
     --primary-hover: #7aa2ff;
     --danger-bg: #3a1c1f;
     --danger-text: #ff9b9b;
+    --danger: #ef5350;
     --ok: #3ddc84;
+    --ok-bg: #173325;
+    --ok-text: #8ee6b4;
+    --off: #667085;
 
     color-scheme: dark;
   }
@@ -207,4 +215,203 @@ h1 {
   margin-right: 0.4rem;
   background: var(--ok);
   border-radius: 50%;
+}
+
+.status-dot-off {
+  background: var(--off);
+}
+
+/* ---------------------------------------------------------------------------
+ * Navegacao e paginas administrativas
+ * ------------------------------------------------------------------------- */
+
+h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.15rem;
+}
+
+a {
+  color: var(--primary);
+}
+
+a.button {
+  display: inline-block;
+  text-decoration: none;
+}
+
+.topbar-start {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+.nav {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.nav-link {
+  padding: 0.35rem 0.75rem;
+  color: var(--muted);
+  font-weight: 500;
+  text-decoration: none;
+  border-radius: 8px;
+}
+
+.nav-link:hover {
+  color: var(--text);
+  background: var(--bg);
+}
+
+.nav-link.active {
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+}
+
+.content-wide {
+  max-width: 1100px;
+}
+
+.page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.page-header p {
+  margin: 0;
+}
+
+.notice {
+  padding: 0.6rem 0.75rem;
+  color: var(--ok-text);
+  background: var(--ok-bg);
+  border-radius: 8px;
+  font-size: 0.9rem;
+}
+
+.alert p {
+  margin: 0 0 0.5rem;
+}
+
+.button-small {
+  padding: 0.3rem 0.65rem;
+  font-size: 0.85rem;
+}
+
+.button-danger {
+  background: var(--danger);
+}
+
+.button-danger:hover:not(:disabled) {
+  background: var(--danger);
+  filter: brightness(0.92);
+}
+
+.table-wrapper {
+  padding: 0;
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.table th,
+.table td {
+  padding: 0.65rem 0.9rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.table th {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.row-actions {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.form-card {
+  display: grid;
+  gap: 1rem;
+  max-width: 480px;
+}
+
+.form-card p {
+  margin: 0;
+}
+
+.field select {
+  font: inherit;
+  padding: 0.6rem 0.75rem;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.field select:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.field small {
+  font-weight: 400;
+}
+
+.form-actions,
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgb(0 0 0 / 45%);
+}
+
+.dialog {
+  width: 100%;
+  max-width: 440px;
+  display: grid;
+  gap: 1rem;
+}
+
+.dialog h2,
+.dialog-body p {
+  margin: 0;
+}
+
+.dialog-body {
+  display: grid;
+  gap: 0.75rem;
 }

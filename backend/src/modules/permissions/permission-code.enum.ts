@@ -10,10 +10,18 @@
  */
 export enum PermissionCode {
   UsersRead = 'users:read',
+  UsersCreate = 'users:create',
+  UsersUpdate = 'users:update',
+  UsersStatus = 'users:status',
+  UsersRole = 'users:role',
   AuditRead = 'audit:read',
 }
 
 export const PERMISSION_DESCRIPTIONS: Record<PermissionCode, string> = {
-  [PermissionCode.UsersRead]: 'Listar usuarios',
+  [PermissionCode.UsersRead]: 'Listar e consultar usuarios',
+  [PermissionCode.UsersCreate]: 'Criar usuarios',
+  [PermissionCode.UsersUpdate]: 'Editar nome e e-mail de usuarios',
+  [PermissionCode.UsersStatus]: 'Ativar e desativar usuarios',
+  [PermissionCode.UsersRole]: 'Alterar o perfil de usuarios',
   [PermissionCode.AuditRead]: 'Consultar o log de auditoria',
 };

@@ -136,6 +136,7 @@ describe('JwtAuthGuard', () => {
       permissions: ['users:read'],
       ativo: true,
       createdAt: activeUser.createdAt,
+      updatedAt: activeUser.updatedAt,
     });
   });
 });

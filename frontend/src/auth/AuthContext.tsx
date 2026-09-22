@@ -15,10 +15,14 @@ export type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated';
 interface AuthContextValue {
   status: AuthStatus;
   user: User | null;
+  /** JWT da sessao, para as chamadas autenticadas; `null` sem sessao. */
+  token: string | null;
   /** Instante (ms) em que o token expira; `null` sem sessao. */
   expiresAt: number | null;
   login: (email: string, senha: string) => Promise<void>;
   logout: () => Promise<void>;
+  /** Rele o usuario da sessao no servidor (ex.: depois de ele editar os proprios dados). */
+  refreshUser: () => Promise<void>;
 }
 
 interface Session {
@@ -112,15 +116,25 @@ export function AuthProvider({ children }: { children: ReactNode }): ReactNode {
     }
   }, [session]);
 
+  const refreshUser = useCallback(async (): Promise<void> => {
+    if (!session) {
+      return;
+    }
+    const user = await api.me(session.token);
+    setSession((current) => (current?.token === session.token ? { ...current, user } : current));
+  }, [session]);
+
   const value = useMemo<AuthContextValue>(
     () => ({
       status,
       user: session?.user ?? null,
+      token: session?.token ?? null,
       expiresAt: session?.expiresAt ?? null,
       login,
       logout,
+      refreshUser,
     }),
-    [status, session, login, logout],
+    [status, session, login, logout, refreshUser],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

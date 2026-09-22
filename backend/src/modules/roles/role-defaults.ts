@@ -15,10 +15,20 @@ export const ROLE_DESCRIPTIONS: Record<RoleName, string> = {
  * banco, entao ajustes feitos depois nao sao desfeitos no proximo boot.
  * ADMIN recebe tudo aqui apenas por consistencia - a autorizacao ja o libera
  * incondicionalmente (ver PermissionsGuard).
+ *
+ * GESTOR administra usuarios, mas a regra de hierarquia (`user-access.policy.ts`)
+ * o limita a perfis com menos permissoes que o dele: OPERADOR e USUARIO.
  */
 export const DEFAULT_ROLE_PERMISSIONS: Record<RoleName, PermissionCode[]> = {
   [RoleName.Admin]: Object.values(PermissionCode),
-  [RoleName.Gestor]: [PermissionCode.UsersRead, PermissionCode.AuditRead],
+  [RoleName.Gestor]: [
+    PermissionCode.UsersRead,
+    PermissionCode.UsersCreate,
+    PermissionCode.UsersUpdate,
+    PermissionCode.UsersStatus,
+    PermissionCode.UsersRole,
+    PermissionCode.AuditRead,
+  ],
   [RoleName.Operador]: [],
   [RoleName.Usuario]: [],
 };

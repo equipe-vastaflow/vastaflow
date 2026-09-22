@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { QueryFailedError, Repository } from 'typeorm';
+import { type EntityManager, QueryFailedError, Repository } from 'typeorm';
 import type { Role } from '../roles/entities/role.entity';
+import { RoleName } from '../roles/role-name.enum';
 import { User } from './entities/user.entity';
 
 /** Violacao da unicidade de e-mail, traduzida do erro especifico de cada banco. */
@@ -20,6 +21,21 @@ export interface NewUser {
 }
 
 const WITH_ROLE = { role: { permissions: true } } as const;
+
+/** Drivers em que `SELECT ... FOR UPDATE` existe. O SQLite dos testes ja serializa as escritas. */
+const ROW_LOCK_DRIVERS = new Set(['mysql', 'mariadb', 'oracle']);
+
+/**
+ * Visao do banco dentro de `UsersRepository.runLockedAdminChange`: o alvo e os
+ * ADMINs foram lidos com as linhas travadas ate o fim da transacao.
+ */
+export interface LockedAdminChange {
+  /** `null` quando o usuario nao existe. */
+  target: User | null;
+  /** Quantos ADMINs ativos existem agora, contando o alvo se ele for um. */
+  activeAdminCount: number;
+  save(user: User): Promise<User>;
+}
 
 @Injectable()
 export class UsersRepository {
@@ -40,6 +56,60 @@ export class UsersRepository {
     return this.repository.find({ relations: WITH_ROLE, order: { nome: 'ASC' }, take: limit });
   }
 
+  /** Pagina ordenada por nome; o e-mail (unico) desempata e deixa a ordem estavel entre paginas. */
+  findPage(skip: number, take: number): Promise<[User[], number]> {
+    return this.repository.findAndCount({
+      relations: WITH_ROLE,
+      order: { nome: 'ASC', email: 'ASC' },
+      skip,
+      take,
+    });
+  }
+
+  /** @throws DuplicateEmailError quando o e-mail novo pertence a outro usuario. */
+  async update(user: User): Promise<User> {
+    return saveTranslatingDuplicates(this.repository, user);
+  }
+
+  /**
+   * Executa uma alteracao de status ou de perfil sob lock, para que a regra do
+   * "ultimo ADMIN ativo" valha tambem sob concorrencia.
+   *
+   * Sem o lock, dois ADMINs desativando um ao outro ao mesmo tempo passariam os
+   * dois pela checagem (cada um ve 2 ADMINs ativos) e o sistema ficaria sem
+   * nenhum. Aqui as linhas dos ADMINs e do alvo ficam travadas (`FOR UPDATE`)
+   * ate o commit: a segunda transacao espera a primeira e entao le o estado
+   * ja atualizado.
+   *
+   * O lock vem ANTES de qualquer leitura comum: no MySQL (REPEATABLE READ) a
+   * foto da transacao so e tirada na primeira leitura sem lock, que assim ja
+   * enxerga o que a transacao concorrente gravou.
+   */
+  runLockedAdminChange<T>(
+    targetId: string,
+    work: (change: LockedAdminChange) => Promise<T>,
+  ): Promise<T> {
+    return this.repository.manager.transaction(async (manager) => {
+      await lockAdminsAndTarget(manager, targetId);
+
+      // Leituras sequenciais: dentro da transacao todas usam a mesma conexao.
+      const repository = manager.getRepository(User);
+      const target = await repository.findOne({ where: { id: targetId }, relations: WITH_ROLE });
+      // Filtra `ativo` em memoria: evita depender de como cada driver converte
+      // o booleano num parametro (NUMBER 1/0 no Oracle). Sao poucos ADMINs.
+      const admins = await repository.find({
+        where: { role: { nome: RoleName.Admin } },
+        relations: { role: true },
+      });
+
+      return work({
+        target,
+        activeAdminCount: admins.filter((admin) => admin.ativo).length,
+        save: (user) => saveTranslatingDuplicates(repository, user),
+      });
+    });
+  }
+
   async create(data: NewUser): Promise<User> {
     try {
       // `role` ja vem carregado (com permissoes) em `data`, entao a entidade
@@ -56,6 +126,35 @@ export class UsersRepository {
   save(user: User): Promise<User> {
     return this.repository.save(user);
   }
+}
+
+async function saveTranslatingDuplicates(repository: Repository<User>, user: User): Promise<User> {
+  try {
+    return await repository.save(user);
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      throw new DuplicateEmailError();
+    }
+    throw error;
+  }
+}
+
+/**
+ * Trava as linhas dos ADMINs e do alvo. Seleciona so o id e nao usa LIMIT: o
+ * Oracle recusa `FOR UPDATE` junto de `FETCH FIRST` (ORA-02014).
+ */
+async function lockAdminsAndTarget(manager: EntityManager, targetId: string): Promise<void> {
+  if (!ROW_LOCK_DRIVERS.has(manager.connection.options.type)) {
+    return;
+  }
+  await manager
+    .getRepository(User)
+    .createQueryBuilder('u')
+    .innerJoin('u.role', 'r')
+    .select('u.id', 'id')
+    .where('r.nome = :admin OR u.id = :targetId', { admin: RoleName.Admin, targetId })
+    .setLock('pessimistic_write')
+    .getRawMany();
 }
 
 /**

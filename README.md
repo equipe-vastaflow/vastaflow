@@ -27,7 +27,8 @@ O desenvolvimento e **incremental**: a fundacao vem antes das automacoes.
 | Autenticacao (JWT + bcrypt)       | Funcionando                             |
 | Autorizacao (RBAC)                | Funcionando                             |
 | Auditoria basica                  | Funcionando                             |
-| Frontend: login + dashboard       | Funcionando (demais telas nao iniciadas) |
+| Administracao de usuarios         | Funcionando (API + telas)               |
+| Frontend: login, dashboard, usuarios | Funcionando (demais telas nao iniciadas) |
 | Integracoes externas              | Nao iniciado - apenas pastas reservadas |
 
 > Nenhuma integracao possui endpoint, token ou payload definido. Nada foi
@@ -96,7 +97,7 @@ vastaflow/
 │   │   ├── modules/        health, auth, users, roles, permissions, audit
 │   │   └── main.ts         bootstrap, Swagger, CORS
 │   └── test/               testes end-to-end (SQLite em memoria)
-├── frontend/           React + Vite (login e dashboard)
+├── frontend/           React + Vite (login, dashboard e administracao de usuarios)
 ├── integrations/       whatsapp, telegram, plantae, nfse, email (reservado)
 ├── database/           scripts de inicializacao e notas por banco
 ├── docs/               documentacao e decisoes arquiteturais (ADR)
@@ -317,11 +318,25 @@ Detalhes em [frontend/README.md](frontend/README.md).
 | `POST /auth/login`     | publico              | Autentica e devolve o JWT                                    |
 | `GET /auth/me`         | autenticado          | Usuario da sessao, com perfil e permissoes                    |
 | `POST /auth/logout`    | autenticado          | Registra o logout na auditoria (204)                          |
-| `GET /users`           | permissao `users:read` | Lista usuarios (ADMIN e GESTOR)                              |
+| `GET /users?page=&limit=` | `users:read`      | Lista paginada (padrao 20, maximo 100), ordenada por nome      |
+| `GET /users/:id`       | `users:read`         | Consulta um usuario                                          |
+| `GET /users/assignable-roles` | `users:read`  | Perfis que voce pode conceder (usado pelo frontend)          |
+| `POST /users`          | `users:create`       | Cria usuario ativo (senha obrigatoria, perfil padrao `USUARIO`) |
+| `PATCH /users/:id`     | `users:update`       | Edita nome e e-mail. Senha, perfil e status sao recusados (400) |
+| `PATCH /users/:id/status` | `users:status`    | Ativa ou desativa (`{ "ativo": false }`)                     |
+| `PATCH /users/:id/role` | `users:role`        | Altera o perfil (`{ "role": "OPERADOR" }`)                   |
 | `GET /audit-logs`      | permissao `audit:read` | Ultimos registros de auditoria (ADMIN e GESTOR)              |
 
 Respostas: `400` dados invalidos · `401` credenciais/token invalidos ·
-`403` usuario inativo (no login) ou sem permissao · `409` e-mail ja cadastrado.
+`403` usuario inativo (no login), sem permissao ou alvo fora do seu alcance ·
+`404` usuario inexistente · `409` e-mail ja cadastrado ou operacao que deixaria o
+sistema sem ADMIN ativo.
+
+Alem da permissao, a administracao de usuarios aplica regras sobre o **alvo**
+(detalhes em [docs/arquitetura.md](docs/arquitetura.md#administracao-de-usuarios)):
+quem nao e ADMIN so gerencia e concede perfis com menos permissoes que as suas;
+ninguem altera o proprio status ou perfil; e o ultimo ADMIN ativo nao pode ser
+desativado nem rebaixado.
 
 ### Testar com curl
 

@@ -362,7 +362,7 @@ describe('Auth, usuarios e RBAC (e2e)', () => {
         .get('/users')
         .set('Authorization', bearer(token))
         .expect(200);
-      const users = response.body as UserResponseDto[];
+      const users = (response.body as { items: UserResponseDto[] }).items;
 
       expect(users.length).toBeGreaterThan(0);
       expect(JSON.stringify(users)).not.toMatch(/senha|hash|password/i);
@@ -499,6 +499,10 @@ describe('Auth, usuarios e RBAC (e2e)', () => {
           '/auth/register',
           '/health',
           '/users',
+          '/users/assignable-roles',
+          '/users/{id}',
+          '/users/{id}/role',
+          '/users/{id}/status',
         ].sort(),
       );
     });
@@ -522,8 +526,16 @@ describe('Auth, usuarios e RBAC (e2e)', () => {
       expect(roles.map((role) => role.nome).sort()).toEqual(
         [RoleName.Admin, RoleName.Gestor, RoleName.Operador, RoleName.Usuario].sort(),
       );
-      expect(permissionsOf(RoleName.Admin)).toEqual(['audit:read', 'users:read']);
-      expect(permissionsOf(RoleName.Gestor)).toEqual(['audit:read', 'users:read']);
+      const allUsersPermissions = [
+        'audit:read',
+        'users:create',
+        'users:read',
+        'users:role',
+        'users:status',
+        'users:update',
+      ];
+      expect(permissionsOf(RoleName.Admin)).toEqual(allUsersPermissions);
+      expect(permissionsOf(RoleName.Gestor)).toEqual(allUsersPermissions);
       expect(permissionsOf(RoleName.Operador)).toEqual([]);
       expect(permissionsOf(RoleName.Usuario)).toEqual([]);
     });

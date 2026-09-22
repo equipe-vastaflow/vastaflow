@@ -201,6 +201,7 @@ describe('AuthService', () => {
           permissions: [],
           ativo: true,
           createdAt: new Date(),
+          updatedAt: new Date(),
         },
         IP,
       );

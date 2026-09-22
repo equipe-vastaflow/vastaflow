@@ -71,7 +71,7 @@ backend/src/
 ├── modules/
 │   ├── health/                [x] GET /health
 │   ├── auth/                  [x] login, register, me, logout, JWT, guards, decorators
-│   ├── users/                 [x] entity User, hash de senha, GET /users
+│   ├── users/                 [x] entity User, hash de senha, administracao (/users)
 │   ├── roles/                 [x] entity Role, enum RoleName, permissoes padrao
 │   ├── permissions/           [x] entity Permission, catalogo PermissionCode
 │   └── audit/                 [x] entity AuditLog, AuditService, GET /audit-logs
@@ -99,11 +99,13 @@ AuditLog   (usuario_id sem FK, de proposito: a trilha sobrevive ao usuario)
 `CLOB` no Oracle). Antes de gravar, o `AuditService` remove valores de chaves
 sensiveis (senha, token, segredo, authorization, cookie...) em qualquer nivel e
 descarta conteudo acima de 8.000 caracteres, registrando apenas um aviso - a
-auditoria nunca falha por causa dos metadados. Hoje so `LOGIN_FAILED` os usa,
-com o `motivo` da recusa.
+auditoria nunca falha por causa dos metadados. Usados por `LOGIN_FAILED` (o `motivo`
+da recusa) e pelas acoes de administracao de usuarios (o `alvoId` e o que mudou).
 
-Acoes de auditoria implementadas: `REGISTER`, `LOGIN`, `LOGIN_FAILED`, `LOGOUT`.
-Previstas para os proximos modulos: `CREATE`, `UPDATE`, `DELETE`, `EXECUTE`,
+Acoes de auditoria implementadas: `REGISTER`, `LOGIN`, `LOGIN_FAILED`, `LOGOUT`
+(modulo `AUTH`) e `USER_CREATED`, `USER_UPDATED`, `USER_ACTIVATED`,
+`USER_DEACTIVATED`, `USER_ROLE_CHANGED` (modulo `USERS`). Previstas para os
+proximos modulos: `DELETE`, `EXECUTE`,
 `INTEGRATION_REQUEST`, `INTEGRATION_RESPONSE`, `ERROR`.
 
 Perfis: `ADMIN`, `GESTOR`, `OPERADOR`, `USUARIO`.
@@ -130,14 +132,45 @@ exige estar autenticado.
 | Perfil     | Permissoes iniciais                          |
 | ---------- | -------------------------------------------- |
 | `ADMIN`    | todas (e ignora a checagem)                   |
-| `GESTOR`   | `users:read`, `audit:read`                    |
+| `GESTOR`   | `users:read`, `users:create`, `users:update`, `users:status`, `users:role`, `audit:read` |
 | `OPERADOR` | nenhuma ainda (definidas junto com os modulos) |
 | `USUARIO`  | nenhuma (acesso basico: `/auth/me`, logout)   |
 
 **Dados iniciais (seed).** A cada boot, e de forma idempotente, o `SeedService`
 cria as permissoes e os perfis que faltam e, se `SEED_ADMIN_EMAIL` e
 `SEED_ADMIN_PASSWORD` estiverem definidos, o administrador inicial. Perfil ja
-existente nunca tem as permissoes sobrescritas.
+existente nunca perde permissoes nem tem ajustes desfeitos, mas **recebe as
+permissoes novas do catalogo** que constem no seu padrao (`role-defaults.ts`).
+Exemplo: num banco criado antes da administracao de usuarios, o `GESTOR` ganha
+`users:create`, `users:update`, `users:status` e `users:role` no primeiro boot
+da versao nova.
+
+## Administracao de usuarios
+
+Rotas em `/users`, cada uma com a sua permissao granular (ver README). O guard
+de permissao nao conhece o usuario-alvo, entao o `UserManagementService` aplica
+mais tres regras:
+
+1. **Hierarquia** (`user-access.policy.ts`). Quem nao e ADMIN so gerencia
+   usuarios - e so concede perfis - cujas permissoes sejam um subconjunto
+   **estrito** das suas. Com os padroes: GESTOR gerencia OPERADOR e USUARIO, mas
+   nao outro GESTOR nem ADMIN. Ninguem concede permissao que nao tem. ADMIN e
+   reconhecido pelo nome: so ADMIN concede ADMIN ou gerencia quem o tem.
+2. **Auto-alteracao.** Ninguem altera o proprio status nem o proprio perfil. Os
+   proprios nome e e-mail podem ser editados por quem tem `users:update`.
+3. **Ultimo ADMIN ativo.** Desativar ou rebaixar um ADMIN ativo e recusado (409)
+   se nao houver outro ADMIN ativo. A checagem roda numa transacao com as linhas
+   dos ADMINs travadas (`SELECT ... FOR UPDATE` no MySQL e no Oracle), para que
+   dois ADMINs desativando um ao outro ao mesmo tempo nao deixem o sistema sem
+   nenhum. O SQLite dos testes nao tem esse lock; o comportamento concorrente so
+   pode ser verificado em MySQL/Oracle reais.
+
+O `PATCH /users/:id` generico so aceita nome e e-mail: senha, perfil e status
+sao recusados com 400. Nao ha fluxo de troca de senha ainda.
+
+O frontend usa `GET /users/assignable-roles` para saber quais acoes mostrar, sem
+reimplementar a hierarquia. Esconder botoes e so conveniencia: toda operacao e
+autorizada de novo no backend.
 
 **Decisoes de seguranca.**
 

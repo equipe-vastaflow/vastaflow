@@ -2,7 +2,13 @@ import { ApiProperty } from '@nestjs/swagger';
 import { RoleName } from '../../roles/role-name.enum';
 import type { User } from '../entities/user.entity';
 
-/** Representacao publica de um usuario. Nunca inclui o hash da senha. */
+/**
+ * Representacao publica de um usuario.
+ *
+ * Lista explicita de campos (nunca `...user`): o hash da senha, e qualquer
+ * coluna sensivel acrescentada no futuro, so aparece aqui se alguem o incluir
+ * de proposito.
+ */
 export class UserResponseDto {
   @ApiProperty({ format: 'uuid' })
   id: string;
@@ -28,6 +34,9 @@ export class UserResponseDto {
 
   @ApiProperty({ format: 'date-time' })
   createdAt: Date;
+
+  @ApiProperty({ format: 'date-time' })
+  updatedAt: Date;
 }
 
 /** Espera `role` e `role.permissions` carregados. */
@@ -40,5 +49,6 @@ export function toUserResponse(user: User): UserResponseDto {
     permissions: user.role.permissions.map((permission) => permission.code),
     ativo: user.ativo,
     createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
   };
 }
