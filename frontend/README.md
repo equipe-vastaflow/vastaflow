@@ -30,11 +30,11 @@ cookie e protecao CSRF) e fica para o hardening.
 
 ## Executar
 
-Requer Node.js >= 24 e o backend no ar (ver [README da raiz](../README.md)).
+Requer Node.js >= 24.15.0 e o backend no ar (ver [README da raiz](../README.md)).
 
 ```bash
 cd frontend
-npm install
+npm ci
 cp .env.example .env      # Windows: Copy-Item .env.example .env
 npm run dev               # http://localhost:5173
 ```
@@ -52,6 +52,8 @@ so aceita chamadas da origem informada em `FRONTEND_ORIGIN` (CORS); o padrao do
 | `npm run preview`   | Serve o build localmente                         |
 | `npm run typecheck` | Verifica tipos                                   |
 | `npm test`          | Testes (Vitest + Testing Library)                |
+| `npm run lint`      | ESLint (falha com qualquer aviso)                |
+| `npm run lint:fix`  | ESLint corrigindo o que for automatico           |
 
 ## Estrutura
 

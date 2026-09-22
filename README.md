@@ -111,7 +111,8 @@ vastaflow/
 
 - **Node.js >= 24.15.0** e npm 11+
 - **Git**
-- **Docker** (opcional - somente para subir o MySQL local)
+- **Docker** (opcional - somente para subir o MySQL local) **ou** um MySQL 8.4
+  ja instalado na maquina, com um banco e um usuario criados para o VastaFlow
 
 Verifique:
 
@@ -134,9 +135,19 @@ O valor esta no campo `engines` de `backend/package.json` e
 
 ```bash
 git clone https://github.com/equipe-vastaflow/vastaflow.git
-cd vastaflow/backend && npm install
-cd ../frontend && npm install
+cd vastaflow/backend && npm ci
+cd ../frontend && npm ci
 ```
+
+`npm ci` instala exatamente as versoes do `package-lock.json`. Use `npm install`
+apenas quando for adicionar ou atualizar uma dependencia.
+
+**Aviso esperado do npm 11 (`install-scripts`).** O npm bloqueia por padrao os
+scripts de instalacao de `bcrypt`, `oracledb`, `@parcel/watcher`,
+`unrs-resolver` e `@scarf/scarf` e lista-os ao final do `npm ci`. Nao e erro e
+nao precisa aprovar nada: `bcrypt` usa o binario pre-compilado que ja vem no
+pacote, `oracledb` roda em modo Thin (sem Oracle Instant Client) e `@scarf/scarf`
+e apenas telemetria.
 
 ---
 
@@ -403,6 +414,17 @@ pasta vazia.
 
 A entrada foi removida. Quem tinha o repositorio clonado antes dessa correcao
 deve sincronizar e apagar a pasta `vastaflow/vastaflow/` residual, se existir.
+
+**Fim de linha e dependencias.** O `.gitattributes` (LF em todo o repositorio)
+entrou depois do primeiro clone. Numa copia antiga, arquivos podem continuar em
+CRLF no disco e o `npm run format:check` acusa-los, mesmo com `git status`
+limpo. Com a arvore limpa (sem alteracoes pendentes), recrie-os a partir do
+indice e reinstale as dependencias:
+
+```bash
+git rm -r --cached --quiet . && git reset --hard   # APAGA alteracoes nao commitadas
+cd backend && npm ci && cd ../frontend && npm ci
+```
 
 ---
 
