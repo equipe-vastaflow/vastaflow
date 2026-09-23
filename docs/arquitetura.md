@@ -75,6 +75,7 @@ backend/src/
 │   │   └── user-directory     [x] modulo de fronteira: le id/nome/e-mail (sem regra de negocio)
 │   ├── roles/                 [x] entity Role, enum RoleName, permissoes padrao
 │   ├── permissions/           [x] entity Permission, catalogo PermissionCode
+│   ├── finance/               [x] lancamentos financeiros - primeiro dominio de negocio
 │   ├── audit/                 [x] entity AuditLog, AuditService, GET /audit-logs (paginado)
 │   │                              usa UserDirectoryModule para nomear o responsavel
 │   └── dashboard/             [x] GET /dashboard/summary - agrega os modulos acima
@@ -97,6 +98,7 @@ AuditLog   (usuario_id sem FK, de proposito: a trilha sobrevive ao usuario)
 | `permissions`      | `id`, `code` (unico, ex.: `users:read`), `descricao`, `created_at`                |
 | `role_permissions` | `role_id`, `permission_id`                                                       |
 | `audit_logs`       | `id`, `usuario_id` (nulo se nao identificado), `acao`, `modulo`, `descricao`, `ip`, `metadados` (JSON, nulo), `created_at` |
+| `financial_entries` | `id`, `tipo`, `descricao`, `valor` DECIMAL(15,2), `data` DATE, `categoria`, `status`, `observacao` (nulo), `criado_por_id` (sem FK), `created_at`, `updated_at` |
 
 `metadados` guarda detalhes adicionais da operacao como JSON (`text` no MySQL,
 `CLOB` no Oracle). Antes de gravar, o `AuditService` remove valores de chaves
@@ -106,10 +108,12 @@ auditoria nunca falha por causa dos metadados. Usados por `LOGIN_FAILED` (o `mot
 da recusa) e pelas acoes de administracao de usuarios (o `alvoId` e o que mudou).
 
 Acoes de auditoria implementadas: `REGISTER`, `LOGIN`, `LOGIN_FAILED`, `LOGOUT`
-(modulo `AUTH`) e `USER_CREATED`, `USER_UPDATED`, `USER_ACTIVATED`,
-`USER_DEACTIVATED`, `USER_ROLE_CHANGED` (modulo `USERS`). Previstas para os
-proximos modulos: `DELETE`, `EXECUTE`,
-`INTEGRATION_REQUEST`, `INTEGRATION_RESPONSE`, `ERROR`.
+(modulo `AUTH`); `USER_CREATED`, `USER_UPDATED`, `USER_ACTIVATED`,
+`USER_DEACTIVATED`, `USER_ROLE_CHANGED` (modulo `USERS`); e
+`FINANCE_ENTRY_CREATED`, `FINANCE_ENTRY_UPDATED`,
+`FINANCE_ENTRY_STATUS_CHANGED` (modulo `FINANCE`). Previstas
+para os proximos modulos: `DELETE`, `EXECUTE`, `INTEGRATION_REQUEST`,
+`INTEGRATION_RESPONSE`, `ERROR`.
 
 Perfis: `ADMIN`, `GESTOR`, `OPERADOR`, `USUARIO`.
 
@@ -135,7 +139,7 @@ exige estar autenticado.
 | Perfil     | Permissoes iniciais                          |
 | ---------- | -------------------------------------------- |
 | `ADMIN`    | todas (e ignora a checagem)                   |
-| `GESTOR`   | `users:read`, `users:create`, `users:update`, `users:status`, `users:role`, `audit:read` |
+| `GESTOR`   | `users:*`, `audit:read` e `finance:read/create/update/status` |
 | `OPERADOR` | nenhuma ainda (definidas junto com os modulos) |
 | `USUARIO`  | nenhuma (acesso basico: `/auth/me`, logout)   |
 
@@ -301,6 +305,87 @@ Tres situacoes possiveis na coluna "Responsavel" da tela:
 A paginacao usa `ORDER BY created_at DESC, id DESC`. O `id` desempata: varios
 eventos podem cair no mesmo instante, e sem criterio estavel o mesmo evento
 poderia aparecer em duas paginas - ou em nenhuma.
+
+## Financeiro
+
+Primeiro dominio de negocio. Deliberadamente pequeno: apenas lancamentos
+internos, sem fornecedor, cliente, conta bancaria, centro de custo, parcela,
+recorrencia, moeda nem documento fiscal.
+
+| Permissao         | Rota                                  |
+| ----------------- | ------------------------------------- |
+| `finance:read`    | `GET /finance/entries`, `GET /finance/entries/:id`, comando `/financeiro` |
+| `finance:create`  | `POST /finance/entries`               |
+| `finance:update`  | `PATCH /finance/entries/:id`          |
+| `finance:status`  | `PATCH /finance/entries/:id/status`   |
+
+**Status.** Todo lancamento nasce `PENDENTE`. Transicoes permitidas:
+`PENDENTE -> PAGO`, `PENDENTE -> CANCELADO` e `PAGO -> CANCELADO`. `CANCELADO` e
+terminal, e `PAGO -> PENDENTE` e recusado (409) porque apagaria o fato de que o
+lancamento foi pago. Repetir o status atual nao e transicao: responde 200 sem
+gravar nem auditar, mesmo criterio de ativar um usuario que ja esta ativo.
+
+**Edicao por status** (`entry-status.policy.ts`), para preservar a integridade
+do fato financeiro ja consumado:
+
+| Status      | `tipo`, `valor` e `data` | `descricao`, `categoria`, `observacao` | Observacao |
+| ----------- | ------------------------ | -------------------------------------- | ---------- |
+| `PENDENTE`  | editaveis                | editaveis                              | ainda e uma previsao |
+| `PAGO`      | **congelados**           | editaveis                              | corrige-se o texto sem apagar o fato |
+| `CANCELADO` | **congelados**           | **congelados**                         | terminal tambem para a edicao |
+
+Em `PAGO`, os tres campos congelados sao os que respondem *o que* foi pago,
+quanto e quando. `tipo` entra nessa lista porque trocar `RECEITA` por `DESPESA`
+inverte o sinal de um pagamento que ja aconteceu - nao e correcao de texto.
+
+`CANCELADO` bloqueia tudo pela mesma razao que nenhuma transicao sai dele: o
+registro esta encerrado e serve de historico. Para corrigir algo depois do
+cancelamento, cria-se um lancamento novo - o anterior permanece.
+
+A recusa vem como **409**, ANTES de qualquer escrita: o banco nao muda e nenhum
+`FINANCE_ENTRY_UPDATED` e gravado. Corpo vazio continua sendo operacao sem
+efeito (200), em qualquer status.
+
+**Autoria.** O autor e sempre o usuario autenticado; o corpo nao aceita
+identificador de usuario. `criado_por_id` nao tem FK (mesmo motivo de
+`audit_logs.usuario_id`) e o nome do autor e resolvido em lote pelo
+`UserDirectoryService` - uma consulta por pagina, nunca uma por lancamento.
+
+**Auditoria.** Apenas o que MUDA entra na trilha - criacao, edicao e mudanca de status -, com
+metadados minimos: `alvoId`, e conforme o caso `tipo`/`status`, os NOMES dos
+campos alterados, ou `de`/`para`. Valor e descricao do lancamento **nao** vao
+para a trilha - sao dados de negocio, e quem tem `finance:read` os consulta pela
+API. **Nenhuma leitura audita**: nem `GET /finance/entries`, nem `GET /finance/entries/:id`, nem o comando `/financeiro`.
+
+### Dinheiro e data: duas armadilhas de portabilidade, ambas verificadas
+
+**`valor` e `DECIMAL(15,2)`** (`NUMBER(15,2)` no Oracle) - nunca ponto
+flutuante. Os drivers divergem na LEITURA e o TypeORM nao normaliza isso: MySQL
+devolve `string`, Oracle e SQLite devolvem `number`. Sem tratamento, o mesmo
+codigo se comportaria diferente em teste e em producao. O `moneyTransformer`
+uniformiza para `number` e arredonda para 2 casas na escrita.
+
+**`data` usa `utc: true`.** O MySQL devolve a coluna DATE como um `Date` em
+00:00 UTC e, sem essa opcao, o TypeORM a formata no fuso LOCAL do servidor: em
+qualquer fuso negativo - o do Brasil, por exemplo - o dia volta um. Isso foi
+observado na pratica contra um MySQL real: gravou-se `2026-09-23` e leu-se
+`2026-09-22`. Com `utc: true` a leitura usa os getters UTC e o dia se preserva.
+A opcao nao altera o DDL. O `database-compatibility.spec.ts` falha se ela for
+removida, em qualquer fuso.
+
+### Comando `/financeiro`
+
+Primeiro comando de negocio do motor. Exige `finance:read` - a mesma permissao
+de quem lista pela API - e responde com o total de lancamentos e os 5 mais
+recentes, lidos do banco. Sem lancamentos, diz exatamente isso: nao ha numero
+inventado nem exemplo ficticio. Depende do `FinanceService`, nunca do
+repositorio, e nao conhece HTTP, Telegram nem WhatsApp.
+
+A execucao **nao** entra na trilha: a auditoria do motor e opt-in e este comando
+so consulta, como `/ajuda` e `/status`. A trilha registra o que muda.
+
+Nao existe `/receitas`, `/despesas`, `/pagar`, `/saldo` nem relatorio: este
+comando e apenas o ponto de entrada do dominio.
 
 ## Tratamento de erros
 

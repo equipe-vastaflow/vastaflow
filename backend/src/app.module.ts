@@ -7,6 +7,7 @@ import { AuditModule } from './modules/audit/audit.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { CommandsModule } from './modules/commands/commands.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { FinanceModule } from './modules/finance/finance.module';
 import { HealthModule } from './modules/health/health.module';
 import { PermissionsModule } from './modules/permissions/permissions.module';
 import { RolesModule } from './modules/roles/roles.module';
@@ -37,6 +38,9 @@ import { UsersModule } from './modules/users/users.module';
 
     // Agrega os indicadores dos modulos acima. Nao tem dados proprios.
     DashboardModule,
+
+    // Primeiro dominio de negocio.
+    FinanceModule,
 
     // Nucleo do motor de comandos. Independe de canal: os adaptadores
     // (Telegram, WhatsApp) entrarao como modulos proprios que o importam.

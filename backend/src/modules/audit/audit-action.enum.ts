@@ -12,10 +12,16 @@ export enum AuditAction {
   UserActivated = 'USER_ACTIVATED',
   UserDeactivated = 'USER_DEACTIVATED',
   UserRoleChanged = 'USER_ROLE_CHANGED',
+
+  // Financeiro. `usuarioId` e quem executou; o lancamento vai em `metadados.alvoId`.
+  FinanceEntryCreated = 'FINANCE_ENTRY_CREATED',
+  FinanceEntryUpdated = 'FINANCE_ENTRY_UPDATED',
+  FinanceEntryStatusChanged = 'FINANCE_ENTRY_STATUS_CHANGED',
 }
 
 /** Modulo do sistema onde a acao ocorreu. */
 export enum AuditModuleName {
   Auth = 'AUTH',
   Users = 'USERS',
+  Finance = 'FINANCE',
 }

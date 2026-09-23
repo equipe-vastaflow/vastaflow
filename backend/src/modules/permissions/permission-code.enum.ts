@@ -15,6 +15,11 @@ export enum PermissionCode {
   UsersStatus = 'users:status',
   UsersRole = 'users:role',
   AuditRead = 'audit:read',
+
+  FinanceRead = 'finance:read',
+  FinanceCreate = 'finance:create',
+  FinanceUpdate = 'finance:update',
+  FinanceStatus = 'finance:status',
 }
 
 export const PERMISSION_DESCRIPTIONS: Record<PermissionCode, string> = {
@@ -24,4 +29,8 @@ export const PERMISSION_DESCRIPTIONS: Record<PermissionCode, string> = {
   [PermissionCode.UsersStatus]: 'Ativar e desativar usuarios',
   [PermissionCode.UsersRole]: 'Alterar o perfil de usuarios',
   [PermissionCode.AuditRead]: 'Consultar o log de auditoria',
+  [PermissionCode.FinanceRead]: 'Consultar lancamentos financeiros',
+  [PermissionCode.FinanceCreate]: 'Criar lancamentos financeiros',
+  [PermissionCode.FinanceUpdate]: 'Editar lancamentos financeiros',
+  [PermissionCode.FinanceStatus]: 'Alterar o status de lancamentos financeiros',
 };

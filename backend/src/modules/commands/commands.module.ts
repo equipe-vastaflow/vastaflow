@@ -1,8 +1,10 @@
 import { Module, type OnModuleInit } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module';
+import { FinanceModule } from '../finance/finance.module';
 import { CommandCatalog } from './command-catalog';
 import { CommandRouter } from './command-router.service';
 import { CommandsController } from './commands.controller';
+import { FinanceCommandHandler } from './handlers/finance.command';
 import { HelpCommandHandler } from './handlers/help.command';
 import { StatusCommandHandler } from './handlers/status.command';
 import { NonProductionGuard } from './non-production.guard';
@@ -24,13 +26,14 @@ import { NonProductionGuard } from './non-production.guard';
  * higienizacao dos metadados continuam sendo as do modulo de auditoria.
  */
 @Module({
-  imports: [AuditModule],
+  imports: [AuditModule, FinanceModule],
   controllers: [CommandsController],
   providers: [
     CommandCatalog,
     CommandRouter,
     HelpCommandHandler,
     StatusCommandHandler,
+    FinanceCommandHandler,
     NonProductionGuard,
   ],
   exports: [CommandRouter],
@@ -40,6 +43,7 @@ export class CommandsModule implements OnModuleInit {
     private readonly catalog: CommandCatalog,
     private readonly help: HelpCommandHandler,
     private readonly status: StatusCommandHandler,
+    private readonly finance: FinanceCommandHandler,
   ) {}
 
   /**
@@ -48,6 +52,6 @@ export class CommandsModule implements OnModuleInit {
    * para se listar, e a injecao inversa criaria um ciclo. Ver `CommandCatalog`.
    */
   onModuleInit(): void {
-    this.catalog.register([this.help, this.status]);
+    this.catalog.register([this.help, this.status, this.finance]);
   }
 }

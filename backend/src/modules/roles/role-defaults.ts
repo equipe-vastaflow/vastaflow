@@ -28,6 +28,11 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<RoleName, PermissionCode[]> = {
     PermissionCode.UsersStatus,
     PermissionCode.UsersRole,
     PermissionCode.AuditRead,
+    // Financeiro: o GESTOR opera o dominio por completo.
+    PermissionCode.FinanceRead,
+    PermissionCode.FinanceCreate,
+    PermissionCode.FinanceUpdate,
+    PermissionCode.FinanceStatus,
   ],
   [RoleName.Operador]: [],
   [RoleName.Usuario]: [],

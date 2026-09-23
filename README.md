@@ -30,6 +30,7 @@ O desenvolvimento e **incremental**: a fundacao vem antes das automacoes.
 | Administracao de usuarios         | Funcionando (API + telas)               |
 | Dashboard administrativo          | Funcionando (usuarios e auditoria; sem dados de outros modulos) |
 | Tela de auditoria                 | Funcionando (listagem paginada; sem filtros)   |
+| Financeiro (backend)              | Fundacao: lancamentos internos + comando `/financeiro`. Sem tela |
 | Frontend: login, dashboard, usuarios | Funcionando (demais telas nao iniciadas) |
 | Integracoes externas              | Nao iniciado - apenas pastas reservadas |
 
@@ -329,6 +330,11 @@ Detalhes em [frontend/README.md](frontend/README.md).
 | `PATCH /users/:id/role` | `users:role`        | Altera o perfil (`{ "role": "OPERADOR" }`)                   |
 | `GET /audit-logs?page=&limit=` | permissao `audit:read` | Registros de auditoria, paginado (padrao 20, maximo 100), do mais recente ao mais antigo |
 | `GET /dashboard/summary` | autenticado        | Indicadores do dashboard. Cada secao vem conforme a permissao (ver abaixo) |
+| `GET /finance/entries?page=&limit=` | `finance:read` | Lancamentos financeiros, paginado (padrao 20, maximo 100), por data decrescente |
+| `GET /finance/entries/:id` | `finance:read`   | Consulta um lancamento                                        |
+| `POST /finance/entries` | `finance:create`   | Cria um lancamento (nasce `PENDENTE`; o autor e o usuario autenticado) |
+| `PATCH /finance/entries/:id` | `finance:update` | Edita os dados. Status e autor sao recusados (400)          |
+| `PATCH /finance/entries/:id/status` | `finance:status` | Altera o status respeitando as transicoes permitidas  |
 
 **Dashboard.** `GET /dashboard/summary` e somente leitura e **nao gera registro
 de auditoria**. Nao ha permissao propria de dashboard: qualquer usuario

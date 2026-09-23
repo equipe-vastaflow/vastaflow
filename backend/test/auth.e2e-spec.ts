@@ -508,6 +508,9 @@ describe('Auth, usuarios e RBAC (e2e)', () => {
           '/auth/register',
           '/commands/execute',
           '/dashboard/summary',
+          '/finance/entries',
+          '/finance/entries/{id}',
+          '/finance/entries/{id}/status',
           '/health',
           '/users',
           '/users/assignable-roles',
@@ -537,16 +540,22 @@ describe('Auth, usuarios e RBAC (e2e)', () => {
       expect(roles.map((role) => role.nome).sort()).toEqual(
         [RoleName.Admin, RoleName.Gestor, RoleName.Operador, RoleName.Usuario].sort(),
       );
-      const allUsersPermissions = [
+      // ADMIN e GESTOR recebem o mesmo conjunto pelo seeder; a diferenca entre
+      // eles esta na hierarquia (`user-access.policy.ts`), nao na lista.
+      const todasAsPermissoes = [
         'audit:read',
+        'finance:create',
+        'finance:read',
+        'finance:status',
+        'finance:update',
         'users:create',
         'users:read',
         'users:role',
         'users:status',
         'users:update',
       ];
-      expect(permissionsOf(RoleName.Admin)).toEqual(allUsersPermissions);
-      expect(permissionsOf(RoleName.Gestor)).toEqual(allUsersPermissions);
+      expect(permissionsOf(RoleName.Admin)).toEqual(todasAsPermissoes);
+      expect(permissionsOf(RoleName.Gestor)).toEqual(todasAsPermissoes);
       expect(permissionsOf(RoleName.Operador)).toEqual([]);
       expect(permissionsOf(RoleName.Usuario)).toEqual([]);
     });

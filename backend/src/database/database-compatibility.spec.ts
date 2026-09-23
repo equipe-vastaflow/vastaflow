@@ -31,22 +31,33 @@ async function buildDataSource(type: DatabaseType): Promise<DataSource> {
   return dataSource;
 }
 
-/** Executa `up`/`down` com um QueryRunner falso que apenas registra o SQL. */
-async function captureSql(type: DatabaseType, direction: 'up' | 'down'): Promise<string[]> {
-  const statements: string[] = [];
-  const queryRunner = {
-    query: (sql: string): Promise<void> => {
-      statements.push(sql);
-      return Promise.resolve();
-    },
-  } as unknown as QueryRunner;
-
+/** SQL de cada migration separadamente, na ordem de execucao da direcao pedida. */
+async function captureSqlPerMigration(
+  type: DatabaseType,
+  direction: 'up' | 'down',
+): Promise<string[][]> {
   const migrations = MIGRATIONS[type].map((Migration) => new Migration());
   const ordered = direction === 'up' ? migrations : [...migrations].reverse();
+
+  const porMigration: string[][] = [];
   for (const migration of ordered) {
+    const statements: string[] = [];
+    const queryRunner = {
+      query: (sql: string): Promise<void> => {
+        statements.push(sql);
+        return Promise.resolve();
+      },
+    } as unknown as QueryRunner;
+
     await migration[direction](queryRunner);
+    porMigration.push(statements);
   }
-  return statements;
+  return porMigration;
+}
+
+/** Executa `up`/`down` de todas as migrations com um QueryRunner falso que so registra o SQL. */
+async function captureSql(type: DatabaseType, direction: 'up' | 'down'): Promise<string[]> {
+  return (await captureSqlPerMigration(type, direction)).flat();
 }
 
 describe.each(Object.values(DatabaseType))('metadata das entities - %s', (type) => {
@@ -100,6 +111,59 @@ describe.each(Object.values(DatabaseType))('metadata das entities - %s', (type) 
     expect(typeof stored).toBe('string');
     expect(dataSource.driver.prepareHydratedValue(stored, metadados)).toEqual(value);
     expect(metadados.isNullable).toBe(true);
+  });
+
+  it('FinancialEntry.valor e DECIMAL(15,2) e sempre lido como number', async () => {
+    const dataSource = await buildDataSource(type);
+    const valor = dataSource.getMetadata('FinancialEntry').findColumnWithPropertyName('valor');
+    if (!valor) {
+      throw new Error('coluna FinancialEntry.valor nao encontrada');
+    }
+
+    expect(valor.precision).toBe(15);
+    expect(valor.scale).toBe(2);
+
+    // Dinheiro nunca em ponto flutuante no banco...
+    expect(['decimal', 'number']).toContain(dataSource.driver.normalizeType(valor));
+
+    // ...e o transformer cobre a divergencia entre drivers: o MySQL devolve
+    // string e os demais, number. O dominio precisa ver sempre number.
+    expect(dataSource.driver.prepareHydratedValue('1500.50', valor)).toBe(1500.5);
+    expect(dataSource.driver.prepareHydratedValue(1500.5, valor)).toBe(1500.5);
+    expect(typeof dataSource.driver.preparePersistentValue(1500.5, valor)).toBe('number');
+  });
+
+  it('FinancialEntry.data e uma data sem hora, lida como YYYY-MM-DD', async () => {
+    const dataSource = await buildDataSource(type);
+    const data = dataSource.getMetadata('FinancialEntry').findColumnWithPropertyName('data');
+    if (!data) {
+      throw new Error('coluna FinancialEntry.data nao encontrada');
+    }
+
+    expect(data.type).toBe('date');
+
+    // O dominio trafega a data como string `YYYY-MM-DD` de ponta a ponta (DTO,
+    // entity e resposta). Na LEITURA os tres drivers entregam essa string.
+    expect(dataSource.driver.prepareHydratedValue('2026-09-23', data)).toBe('2026-09-23');
+
+    // Na ESCRITA os caminhos diferem, e os dois estao corretos: MySQL e SQLite
+    // enviam a string; o Oracle monta a expressao `TO_DATE(...)`, que e como o
+    // TypeORM grava data naquele banco. O dominio nao percebe a diferenca.
+    const gravado = dataSource.driver.preparePersistentValue('2026-09-23', data) as unknown;
+    if (typeof gravado === 'function') {
+      expect(String((gravado as () => string)())).toContain('2026-09-23');
+    } else {
+      expect(gravado).toBe('2026-09-23');
+    }
+
+    // O MySQL devolve DATE como `Date` em 00:00 UTC. Sem `utc: true` na coluna,
+    // o TypeORM formataria no fuso LOCAL e o dia voltaria um em qualquer fuso
+    // negativo - gravar 2026-09-23 e ler 2026-09-22. Este teste falha se a
+    // opcao for removida, em qualquer fuso do servidor.
+    expect(data.utc).toBe(true);
+    expect(dataSource.driver.prepareHydratedValue(new Date('2026-09-23T00:00:00Z'), data)).toBe(
+      '2026-09-23',
+    );
   });
 });
 
@@ -173,11 +237,19 @@ describe('migrations', () => {
       expect(created.length).toBeGreaterThan(0);
       expect(notDropped).toEqual([]);
 
-      const lastConstraintDrop = Math.max(
-        down.lastIndexOf('DROP CONSTRAINT'),
-        down.lastIndexOf('DROP FOREIGN KEY'),
-      );
-      expect(lastConstraintDrop).toBeLessThan(down.indexOf('DROP TABLE'));
+      // A ordem "FKs antes das tabelas" vale DENTRO de cada migration: entre
+      // migrations diferentes os blocos se intercalam, e comparar o texto
+      // concatenado compararia objetos que nao tem relacao entre si.
+      for (const sql of await captureSqlPerMigration(type, 'down')) {
+        const bloco = sql.join('\n');
+        const ultimoDropDeConstraint = Math.max(
+          bloco.lastIndexOf('DROP CONSTRAINT'),
+          bloco.lastIndexOf('DROP FOREIGN KEY'),
+        );
+        if (ultimoDropDeConstraint >= 0) {
+          expect(ultimoDropDeConstraint).toBeLessThan(bloco.indexOf('DROP TABLE'));
+        }
+      }
     },
   );
 

@@ -1,6 +1,8 @@
 import type { MigrationInterface } from 'typeorm';
 import type { DatabaseType } from '../../config/env.validation';
+import { FinancialEntries1790136699120 as MysqlFinancialEntries } from './mysql/1790136699120-FinancialEntries';
 import { InitialSchema1790020288252 as MysqlInitialSchema } from './mysql/1790020288252-InitialSchema';
+import { FinancialEntries1790136699120 as OracleFinancialEntries } from './oracle/1790136699120-FinancialEntries';
 import { InitialSchema1790020288252 as OracleInitialSchema } from './oracle/1790020288252-InitialSchema';
 
 type MigrationClass = new () => MigrationInterface;
@@ -14,6 +16,6 @@ type MigrationClass = new () => MigrationInterface;
  * das pastas `mysql/` ou `oracle/` ficar de fora.
  */
 export const MIGRATIONS: Record<DatabaseType, MigrationClass[]> = {
-  mysql: [MysqlInitialSchema],
-  oracle: [OracleInitialSchema],
+  mysql: [MysqlInitialSchema, MysqlFinancialEntries],
+  oracle: [OracleInitialSchema, OracleFinancialEntries],
 };
