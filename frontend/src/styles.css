@@ -523,3 +523,62 @@ a.button {
 .actor-email {
   font-size: 0.85rem;
 }
+
+/* ---------------------------------------------------------------------------
+ * Financeiro
+ *
+ * Tipo e status aparecem sempre escritos por extenso; a cor abaixo apenas
+ * reforca o texto e nunca e a unica pista (ver EntryBadges.tsx).
+ * ------------------------------------------------------------------------- */
+
+.badge-receita {
+  color: var(--ok-text);
+  background: color-mix(in srgb, var(--ok) 16%, transparent);
+}
+
+.badge-despesa {
+  color: var(--danger-text);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+
+.badge-pendente {
+  color: var(--muted);
+  background: color-mix(in srgb, var(--muted) 16%, transparent);
+}
+
+.badge-pago {
+  color: var(--ok-text);
+  background: color-mix(in srgb, var(--ok) 16%, transparent);
+}
+
+.badge-cancelado {
+  color: var(--danger-text);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+
+/* Valor monetario: alinhado a direita para os numeros baterem coluna a coluna. */
+.amount {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.amount-receita {
+  color: var(--ok-text);
+  font-weight: 600;
+}
+
+.amount-despesa {
+  color: var(--danger-text);
+  font-weight: 600;
+}
+
+/* A descricao pode ser longa: e a unica coluna da tabela que quebra linha. */
+.cell-wrap {
+  max-width: 22rem;
+  white-space: normal;
+}
+
+/* Erro de validacao ligado a um campo do formulario. */
+.field-error {
+  color: var(--danger-text);
+}

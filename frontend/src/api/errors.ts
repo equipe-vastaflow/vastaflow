@@ -6,7 +6,7 @@ import { ApiError, NetworkError } from './client';
  */
 export function describeApiError(
   error: unknown,
-  messages: { conflict?: string; badRequest?: string } = {},
+  messages: { conflict?: string; badRequest?: string; notFound?: string } = {},
 ): string {
   if (error instanceof NetworkError) {
     return 'Não foi possível conectar ao servidor. Verifique sua conexão e tente novamente.';
@@ -19,7 +19,7 @@ export function describeApiError(
       case 403:
         return 'Você não tem permissão para esta ação.';
       case 404:
-        return 'Usuário não encontrado.';
+        return messages.notFound ?? 'Usuário não encontrado.';
       case 409:
         return messages.conflict ?? error.message;
     }

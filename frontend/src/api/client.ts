@@ -98,6 +98,68 @@ export interface AuditLogPage {
   limit: number;
 }
 
+/**
+ * Natureza do lancamento. O `valor` e sempre positivo: e o `tipo` que diz se o
+ * dinheiro entra ou sai.
+ */
+export type FinancialEntryType = 'RECEITA' | 'DESPESA';
+
+/**
+ * Situacao do lancamento. Todo lancamento nasce `PENDENTE`; `CANCELADO` e
+ * terminal. As transicoes permitidas ficam em `pages/finance/entry-capabilities.ts`.
+ */
+export type FinancialEntryStatus = 'PENDENTE' | 'PAGO' | 'CANCELADO';
+
+export interface FinancialEntry {
+  id: string;
+  tipo: FinancialEntryType;
+  descricao: string;
+  /**
+   * Sempre positivo. O backend normaliza a coluna DECIMAL para `number` antes
+   * de responder (ver `money.transformer.ts`), entao aqui nunca chega string.
+   * O frontend apenas formata - nao faz conta com este valor.
+   */
+  valor: number;
+  /** Dia do evento financeiro, `YYYY-MM-DD`, sem hora e sem fuso. */
+  data: string;
+  categoria: string;
+  status: FinancialEntryStatus;
+  observacao: string | null;
+  /** Id de quem criou o lancamento. */
+  criadoPorId: string;
+  /**
+   * Autor ja identificado pelo backend, em uma unica consulta em lote. Nulo
+   * quando o usuario nao existe mais - `criadoPorId` continua preenchido.
+   */
+  criadoPor: { id: string; nome: string; email: string } | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FinancialEntryPage {
+  items: FinancialEntry[];
+  /** Total de lancamentos, em todas as paginas. Vem do backend. */
+  total: number;
+  page: number;
+  limit: number;
+}
+
+/**
+ * `status` e `criadoPorId` NAO entram: o lancamento nasce PENDENTE e o autor e
+ * o usuario autenticado. O backend recusa os dois com 400.
+ */
+export interface CreateFinancialEntryInput {
+  tipo: FinancialEntryType;
+  descricao: string;
+  valor: number;
+  data: string;
+  categoria: string;
+  observacao?: string;
+}
+
+/** Edicao parcial. O status muda pela rota propria, nunca por aqui. */
+export type UpdateFinancialEntryInput = Partial<CreateFinancialEntryInput>;
+
 /** Erro devolvido pela API (status HTTP diferente de 2xx). */
 export class ApiError extends Error {
   constructor(
@@ -159,6 +221,7 @@ async function readErrorMessage(response: Response): Promise<string> {
 }
 
 const userPath = (id: string): string => `/users/${encodeURIComponent(id)}`;
+const entryPath = (id: string): string => `/finance/entries/${encodeURIComponent(id)}`;
 
 export const api = {
   login: (email: string, senha: string): Promise<LoginResponse> =>
@@ -203,5 +266,28 @@ export const api = {
 
     setRole: (token: string, id: string, role: RoleName): Promise<User> =>
       request(`${userPath(id)}/role`, { method: 'PATCH', body: { role }, token }),
+  },
+
+  finance: {
+    list: (token: string, page: number, limit: number): Promise<FinancialEntryPage> =>
+      request(
+        `/finance/entries?${new URLSearchParams({ page: String(page), limit: String(limit) }).toString()}`,
+        { token },
+      ),
+
+    get: (token: string, id: string): Promise<FinancialEntry> => request(entryPath(id), { token }),
+
+    create: (token: string, input: CreateFinancialEntryInput): Promise<FinancialEntry> =>
+      request('/finance/entries', { method: 'POST', body: input, token }),
+
+    update: (
+      token: string,
+      id: string,
+      input: UpdateFinancialEntryInput,
+    ): Promise<FinancialEntry> => request(entryPath(id), { method: 'PATCH', body: input, token }),
+
+    /** Transicoes validas: PENDENTE -> PAGO | CANCELADO e PAGO -> CANCELADO. */
+    setStatus: (token: string, id: string, status: FinancialEntryStatus): Promise<FinancialEntry> =>
+      request(`${entryPath(id)}/status`, { method: 'PATCH', body: { status }, token }),
   },
 };

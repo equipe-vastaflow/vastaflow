@@ -4,6 +4,12 @@ interface ConfirmDialogProps {
   title: string;
   children: ReactNode;
   confirmLabel: string;
+  /**
+   * Texto do botao que fecha sem agir. O padrao serve para quase tudo; trocar
+   * por "Voltar" evita a ambiguidade quando a propria acao se chama cancelar
+   * (ex.: "Cancelar lancamento?").
+   */
+  cancelLabel?: string;
   /** Destaca a acao como destrutiva (ex.: desativar). */
   danger?: boolean;
   busy?: boolean;
@@ -21,6 +27,7 @@ export function ConfirmDialog({
   title,
   children,
   confirmLabel,
+  cancelLabel = 'Cancelar',
   danger = false,
   busy = false,
   confirmDisabled = false,
@@ -56,7 +63,7 @@ export function ConfirmDialog({
             onClick={onCancel}
             disabled={busy}
           >
-            Cancelar
+            {cancelLabel}
           </button>
           <button
             type="button"

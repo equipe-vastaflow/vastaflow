@@ -5,6 +5,9 @@ import { ProtectedRoute } from './auth/ProtectedRoute';
 import { RequirePermission } from './auth/RequirePermission';
 import { AuditLogsPage } from './pages/audit/AuditLogsPage';
 import { DashboardPage } from './pages/dashboard/DashboardPage';
+import { FinanceEntryDetailPage } from './pages/finance/FinanceEntryDetailPage';
+import { FinanceEntryFormPage } from './pages/finance/FinanceEntryFormPage';
+import { FinancePage } from './pages/finance/FinancePage';
 import { LoginPage } from './pages/LoginPage';
 import { UserDetailPage } from './pages/users/UserDetailPage';
 import { UserFormPage } from './pages/users/UserFormPage';
@@ -29,6 +32,19 @@ export function App(): ReactNode {
         </Route>
         <Route element={<RequirePermission permission={Permission.UsersUpdate} />}>
           <Route path="/users/:id/editar" element={<UserFormPage key="editar" />} />
+        </Route>
+
+        {/* Financeiro. Cada rota exige a permissao correspondente, e o backend
+            a checa de novo em cada requisicao. */}
+        <Route element={<RequirePermission permission={Permission.FinanceRead} />}>
+          <Route path="/finance" element={<FinancePage />} />
+          <Route path="/finance/:id" element={<FinanceEntryDetailPage />} />
+        </Route>
+        <Route element={<RequirePermission permission={Permission.FinanceCreate} />}>
+          <Route path="/finance/novo" element={<FinanceEntryFormPage key="novo" />} />
+        </Route>
+        <Route element={<RequirePermission permission={Permission.FinanceUpdate} />}>
+          <Route path="/finance/:id/editar" element={<FinanceEntryFormPage key="editar" />} />
         </Route>
 
         {/* Auditoria. O backend exige `audit:read` de novo em cada requisicao. */}

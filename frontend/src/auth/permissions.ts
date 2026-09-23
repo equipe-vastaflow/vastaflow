@@ -8,6 +8,10 @@ export const Permission = {
   UsersStatus: 'users:status',
   UsersRole: 'users:role',
   AuditRead: 'audit:read',
+  FinanceRead: 'finance:read',
+  FinanceCreate: 'finance:create',
+  FinanceUpdate: 'finance:update',
+  FinanceStatus: 'finance:status',
 } as const;
 
 export type PermissionCode = (typeof Permission)[keyof typeof Permission];
