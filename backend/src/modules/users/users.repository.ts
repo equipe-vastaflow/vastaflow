@@ -111,6 +111,34 @@ export class UsersRepository {
   }
 
   /**
+   * Altera SOMENTE a coluna `nome`, direto no banco.
+   *
+   * Existe para o `PATCH /profile`, e nao usa `save(entity)` de proposito. O
+   * `save` compara a entidade em memoria com a linha atual e inclui no UPDATE
+   * TODA coluna que diferir - entao uma entidade carregada antes de uma
+   * alteracao administrativa concorrente reescreveria `ativo`, `role_id`,
+   * `senha_hash` e `email` com os valores antigos. Aqui o UPDATE cita apenas
+   * `nome` e `updated_at`: nenhuma coluna administrativa entra no comando, e
+   * uma alteracao concorrente sobrevive.
+   *
+   * `updated_at` vai explicito porque um UPDATE por query builder nao dispara
+   * o `@UpdateDateColumn`, e o `ON UPDATE CURRENT_TIMESTAMP` existe no MySQL
+   * mas nao no Oracle - mesmo cuidado de `NotificationsRepository`.
+   *
+   * @returns quantas linhas foram alcancadas: zero quando o usuario nao existe mais.
+   */
+  async updateName(id: string, nome: string, quando: Date): Promise<number> {
+    const result = await this.repository
+      .createQueryBuilder()
+      .update(User)
+      .set({ nome, updatedAt: quando })
+      .where('id = :id', { id })
+      .execute();
+
+    return result.affected ?? 0;
+  }
+
+  /**
    * Executa uma alteracao de status ou de perfil sob lock, para que a regra do
    * "ultimo ADMIN ativo" valha tambem sob concorrencia.
    *

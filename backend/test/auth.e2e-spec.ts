@@ -517,6 +517,7 @@ describe('Auth, usuarios e RBAC (e2e)', () => {
           '/notifications/unread-count',
           '/notifications/{id}',
           '/notifications/{id}/read',
+          '/profile',
           '/settings',
           '/settings/{key}',
           '/users',

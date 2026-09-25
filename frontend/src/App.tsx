@@ -10,6 +10,7 @@ import { FinanceEntryDetailPage } from './pages/finance/FinanceEntryDetailPage';
 import { FinanceEntryFormPage } from './pages/finance/FinanceEntryFormPage';
 import { FinancePage } from './pages/finance/FinancePage';
 import { LoginPage } from './pages/LoginPage';
+import { ProfilePage } from './pages/profile/ProfilePage';
 import { NotificationsPage } from './pages/notifications/NotificationsPage';
 import { SettingsPage } from './pages/settings/SettingsPage';
 import { UserDetailPage } from './pages/users/UserDetailPage';
@@ -31,6 +32,10 @@ export function App(): ReactNode {
         {/* Notificacoes do proprio usuario: sem permissao granular, como
             `/auth/me`. O backend so devolve as de quem esta autenticado. */}
         <Route path="/notifications" element={<NotificationsPage />} />
+
+        {/* Dados pessoais do proprio usuario. Sem permissao granular pelo
+            mesmo motivo: a identidade do JWT ja limita o alcance. */}
+        <Route path="/profile" element={<ProfilePage />} />
 
         {/* Administracao de usuarios. A permissao e checada de novo pelo backend. */}
         <Route element={<RequirePermission permission={Permission.UsersRead} />}>

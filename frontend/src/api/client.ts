@@ -189,6 +189,33 @@ export interface SystemSetting {
   updatedAt: string;
 }
 
+/**
+ * Perfil do proprio usuario.
+ *
+ * Contrato separado de `User` (`/auth/me`): ali o que importa e o material de
+ * autorizacao, inclusive `permissions`; aqui sao os dados pessoais. `role` e
+ * `ativo` vem apenas para LEITURA - a tela os mostra e nao oferece edicao.
+ */
+export interface Profile {
+  id: string;
+  nome: string;
+  email: string;
+  role: RoleName;
+  ativo: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Edicao do proprio perfil. Hoje so o nome.
+ *
+ * `id`, `email`, `role`, `ativo`, permissoes e senha NAO entram: o backend
+ * recusa cada um deles com 400, por estarem fora do DTO.
+ */
+export interface UpdateProfileInput {
+  nome?: string;
+}
+
 /** Natureza da notificacao. O texto da tela sempre diz qual e - a cor nao e a unica pista. */
 export type NotificationType = 'INFO' | 'SUCCESS' | 'WARNING' | 'ERROR';
 
@@ -337,6 +364,13 @@ export const api = {
 
     setRole: (token: string, id: string, role: RoleName): Promise<User> =>
       request(`${userPath(id)}/role`, { method: 'PATCH', body: { role }, token }),
+  },
+
+  profile: {
+    get: (token: string): Promise<Profile> => request('/profile', { token }),
+
+    update: (token: string, input: UpdateProfileInput): Promise<Profile> =>
+      request('/profile', { method: 'PATCH', body: input, token }),
   },
 
   notifications: {

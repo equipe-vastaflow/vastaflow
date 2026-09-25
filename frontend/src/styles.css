@@ -583,6 +583,39 @@ a.button {
 }
 
 /* ---------------------------------------------------------------------------
+ * Perfil do proprio usuario
+ *
+ * Dados administrativos (e-mail, perfil, situacao) aparecem como leitura, em
+ * lista de definicao - sem campo de formulario, porque nao sao editaveis aqui.
+ * ------------------------------------------------------------------------- */
+
+.profile-readonly {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0.9rem 0 0;
+  border-top: 1px solid var(--border);
+}
+
+.profile-readonly div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.profile-readonly dt {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.profile-readonly dd {
+  margin: 0;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+/* ---------------------------------------------------------------------------
  * Notificacoes
  *
  * O tipo e o estado (lida/nao lida) aparecem SEMPRE escritos; cor e borda so

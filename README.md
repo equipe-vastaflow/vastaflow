@@ -33,6 +33,7 @@ O desenvolvimento e **incremental**: a fundacao vem antes das automacoes.
 | Financeiro (backend)              | Fundacao: lancamentos internos + comando `/financeiro`. Sem tela |
 | Configuracoes do sistema          | Funcionando (API + tela, so ADMIN). Nao guarda segredo; ainda nao lida por outros modulos |
 | Notificacoes internas             | Funcionando (API + tela). Somente internas: sem e-mail, push ou mensageria |
+| Perfil do proprio usuario         | Funcionando (API + tela). So o nome e editavel; sem troca de senha ou e-mail |
 | Frontend: login, dashboard, usuarios, auditoria, financeiro, configuracoes | Funcionando |
 | Integracoes externas              | Nao iniciado - apenas pastas reservadas |
 
@@ -345,6 +346,8 @@ Detalhes em [frontend/README.md](frontend/README.md).
 | `GET /notifications/:id` | autenticado         | Uma notificacao do proprio usuario (404 se for de outra pessoa) |
 | `PATCH /notifications/:id/read` | autenticado  | Marca uma como lida. Idempotente; corpo com qualquer campo e recusado (400) |
 | `PATCH /notifications/read-all` | autenticado  | Marca todas as nao lidas como lidas. Idempotente |
+| `GET /profile`         | autenticado          | Dados pessoais de quem esta autenticado (sem permissao granular) |
+| `PATCH /profile`       | autenticado          | Altera os proprios dados. Hoje so `nome`; qualquer outro campo e recusado (400) |
 
 **Dashboard.** `GET /dashboard/summary` e somente leitura e **nao gera registro
 de auditoria**. Nao ha permissao propria de dashboard: qualquer usuario
@@ -431,6 +434,21 @@ aquele id existe.
 
 Marcar como lida **nao** entra na trilha de auditoria; a decisao e a razao estao
 em [docs/arquitetura.md](docs/arquitetura.md#notificacoes-internas).
+
+**Perfil proprio.** `/profile` trabalha sempre com o usuario do JWT - nao ha
+parametro de usuario na rota, na query nem no corpo, entao nao existe caminho
+para o perfil de outra pessoa. Nenhuma permissao granular foi criada: ver e
+editar os proprios dados nao e privilegio administrativo.
+
+Hoje o unico campo editavel e `nome`. `email`, `role`, `ativo`, `id`, senha e
+permissoes sao somente leitura e, por estarem fora do DTO, resultam em **400**
+se enviados - recusados pelo contrato, nunca ignorados. A gravacao e um
+`UPDATE` que cita apenas `nome` e `updated_at`, entao uma alteracao
+administrativa concorrente (desativacao, troca de perfil) nunca e revertida
+pelo perfil. Troca de senha e de
+e-mail continuam fora do escopo. A alteracao reusa a acao de auditoria
+`USER_UPDATED`, gravando apenas os NOMES dos campos alterados. Detalhes em
+[docs/arquitetura.md](docs/arquitetura.md#perfil-do-proprio-usuario).
 
 Respostas: `400` dados invalidos · `401` credenciais/token invalidos ·
 `403` usuario inativo (no login), sem permissao ou alvo fora do seu alcance ·

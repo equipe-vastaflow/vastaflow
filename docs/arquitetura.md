@@ -543,6 +543,97 @@ lida; **nao ha polling nem atualizacao automatica**. Falha ao le-lo deixa o
 contador em zero sem derrubar a navegacao. Tipo e estado (lida/nao lida)
 aparecem sempre escritos - a cor nunca e a unica pista.
 
+## Perfil do proprio usuario
+
+Os dados pessoais de quem esta autenticado, em `/profile`. Nao ha tabela nova:
+o perfil E o registro em `users`.
+
+| Rota             | Acesso      | O que faz |
+| ---------------- | ----------- | --------- |
+| `GET /profile`   | autenticado | Devolve o perfil de quem esta autenticado |
+| `PATCH /profile` | autenticado | Altera os dados pessoais - hoje, so o nome |
+
+**Sem permissao granular.** Nenhuma `profile:read` ou `profile:update` foi
+criada: ver e editar os PROPRIOS dados nao e privilegio administrativo, e o
+recorte "so o proprio" ja e absoluto. Mesmo criterio de `/auth/me`,
+`/dashboard/summary` e `/notifications`.
+
+**A identidade vem do JWT.** Nao existe parametro de usuario em lugar nenhum
+deste caminho - nem na rota, nem na query, nem no corpo. O alvo e sempre o
+`@CurrentUser()`, o mesmo mecanismo de `/auth/me`. Nao ha, portanto, "perfil de
+outra pessoa" a que chegar: nao e uma checagem que pode falhar, e a ausencia de
+um caminho.
+
+| Campo | No perfil |
+| ----- | --------- |
+| `nome` | **editavel** |
+| `email` | somente leitura - trocar exige um fluxo de confirmacao que nao existe |
+| `role` | somente leitura - `PATCH /users/:id/role`, com regra de hierarquia |
+| `ativo` | somente leitura - `PATCH /users/:id/status` |
+| `id`, `createdAt`, `updatedAt` | somente leitura - ninguem os altera |
+| senha | fora do escopo desta etapa: nao ha fluxo de troca |
+| permissoes | nao aparecem: vem do perfil, e `/auth/me` ja as entrega |
+
+O `UpdateProfileDto` tem UM campo e **nao herda** de `UpdateUserDto` (o
+administrativo, que aceita `email`): herdar e remover campo depois e o tipo de
+heranca que deixa um campo entrar de volta em silencio quando o DTO de origem
+cresce. Como o `ValidationPipe` global roda com `forbidNonWhitelisted`, enviar
+`role`, `ativo`, `id`, `userId`, `usuarioId`, `senha`, `email` ou `permissions`
+resulta em **400** - RECUSADO pelo contrato, nunca ignorado em silencio.
+
+**Gravacao direcionada, nao `save(entity)`.** O `PATCH` emite
+`UPDATE users SET nome = ?, updated_at = ? WHERE id = ?` e nada mais. A
+diferenca e de seguranca: o `save` de uma entity carregada compara-a com a
+linha atual e reescreve TODA coluna que diferir, entao uma desativacao, um
+rebaixamento de perfil ou uma troca de e-mail feitos entre a leitura e a
+gravacao voltariam atras - o usuario se reativaria, ou recuperaria um perfil
+recem-revogado. Com o UPDATE direcionado, `ativo`, `role_id`, `senha_hash` e
+`email` nao aparecem no comando e uma alteracao administrativa concorrente
+sobrevive. Ha testes de integracao que aplicam a alteracao administrativa
+exatamente no instante da gravacao e conferem o resultado direto no banco.
+
+O `PATCH` tambem nao faz leitura propria: o `JwtAuthGuard` ja releu o usuario
+do banco nesta requisicao, e a existencia da conta e conferida pelo numero de
+linhas que o UPDATE alcanca (zero -> 404).
+
+> O mesmo padrao load-mutate-save continua em `UserManagementService.update`
+> (`PATCH /users/:id`), que nao foi alterado nesta etapa. Ali o caminho exige
+> `users:update` e a regra de hierarquia, mas a janela de reversao existe e
+> merece tratamento proprio.
+
+**Nao reusa `UserManagementService.update`**, por duas razoes concretas: aquele
+metodo aplica a regra de hierarquia (`canManageUser`), que recusa alguem com o
+MESMO perfil - ou seja, recusaria todo mundo editando a si mesmo -, e aceita
+`email`. O `ProfileService` vive no `UsersModule` porque grava na tabela
+`users`, e o projeto mantem as escritas dessa tabela dentro desse modulo (foi
+por isso que o `UserDirectoryModule` nasceu como fronteira somente leitura).
+
+**Contrato proprio, separado de `/auth/me`.** Em `/auth/me` o que importa e o
+material de autorizacao, inclusive a lista de permissoes; em `/profile`, os
+dados pessoais. `/auth/me` nao foi alterado.
+
+**Auditoria.** A alteracao reusa `USER_UPDATED` no modulo `USERS` - nenhuma
+acao nova foi criada, porque a existente ja significa exatamente "os dados de
+um usuario mudaram". O que distingue a edicao do proprio perfil de uma edicao
+administrativa e `usuarioId === metadados.alvoId`.
+
+Os metadados guardam so os NOMES dos campos alterados (`{ alvoId, campos:
+['nome'] }`), nunca os valores - mesmo criterio de `FINANCE_ENTRY_UPDATED`. A
+descricao e `Perfil proprio atualizado`, **sem o e-mail**: quem executou ja esta
+em `usuarioId`, e a tela de auditoria resolve o nome a partir dele. Isso difere
+das descricoes dos demais modulos, que trazem o e-mail do ator; a diferenca e
+deliberada, para nao duplicar dado pessoal na trilha.
+
+`GET /profile` nao audita. Alteracao sem efeito (corpo vazio, ou o mesmo nome)
+responde 200 sem gravar e sem auditar. A auditoria e **best-effort**: falhar ao
+grava-la nao desfaz a alteracao.
+
+**Frontend.** `/profile` e "Meu perfil" no menu, para todo usuario autenticado.
+O formulario tem um unico campo - o nome; e-mail, perfil, situacao e data de
+cadastro aparecem em bloco de leitura, sem campo de edicao. Depois de salvar, a
+sessao e relida (`refreshUser`) para o nome acompanhar no resto da aplicacao,
+sem recarregar a pagina.
+
 ## Tratamento de erros
 
 Toda falha sai no formato de `ErrorResponseDto`:

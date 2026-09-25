@@ -54,6 +54,9 @@ export function AppShell({ children, wide = false }: { children: ReactNode; wide
                 Configurações
               </NavLink>
             )}
+            <NavLink to="/profile" className="nav-link">
+              Meu perfil
+            </NavLink>
           </nav>
         </div>
         <button type="button" className="button button-secondary" onClick={() => void handleLogout()}>
