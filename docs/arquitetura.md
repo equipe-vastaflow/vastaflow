@@ -99,6 +99,7 @@ AuditLog   (usuario_id sem FK, de proposito: a trilha sobrevive ao usuario)
 | `role_permissions` | `role_id`, `permission_id`                                                       |
 | `audit_logs`       | `id`, `usuario_id` (nulo se nao identificado), `acao`, `modulo`, `descricao`, `ip`, `metadados` (JSON, nulo), `created_at` |
 | `financial_entries` | `id`, `tipo`, `descricao`, `valor` DECIMAL(15,2), `data` DATE, `categoria`, `status`, `observacao` (nulo), `criado_por_id` (sem FK), `created_at`, `updated_at` |
+| `system_settings`  | `id`, `chave` (unica), `valor` (texto), `descricao`, `tipo`, `atualizado_por_id` (nulo, sem FK), `created_at`, `updated_at` |
 
 `metadados` guarda detalhes adicionais da operacao como JSON (`text` no MySQL,
 `CLOB` no Oracle). Antes de gravar, o `AuditService` remove valores de chaves
@@ -111,7 +112,8 @@ Acoes de auditoria implementadas: `REGISTER`, `LOGIN`, `LOGIN_FAILED`, `LOGOUT`
 (modulo `AUTH`); `USER_CREATED`, `USER_UPDATED`, `USER_ACTIVATED`,
 `USER_DEACTIVATED`, `USER_ROLE_CHANGED` (modulo `USERS`); e
 `FINANCE_ENTRY_CREATED`, `FINANCE_ENTRY_UPDATED`,
-`FINANCE_ENTRY_STATUS_CHANGED` (modulo `FINANCE`). Previstas
+`FINANCE_ENTRY_STATUS_CHANGED` (modulo `FINANCE`); e `SYSTEM_SETTING_UPDATED`
+(modulo `SETTINGS`). Previstas
 para os proximos modulos: `DELETE`, `EXECUTE`, `INTEGRATION_REQUEST`,
 `INTEGRATION_RESPONSE`, `ERROR`.
 
@@ -139,7 +141,7 @@ exige estar autenticado.
 | Perfil     | Permissoes iniciais                          |
 | ---------- | -------------------------------------------- |
 | `ADMIN`    | todas (e ignora a checagem)                   |
-| `GESTOR`   | `users:*`, `audit:read` e `finance:read/create/update/status` |
+| `GESTOR`   | `users:*`, `audit:read` e `finance:read/create/update/status` - **sem** `settings:*` |
 | `OPERADOR` | nenhuma ainda (definidas junto com os modulos) |
 | `USUARIO`  | nenhuma (acesso basico: `/auth/me`, logout)   |
 
@@ -386,6 +388,82 @@ so consulta, como `/ajuda` e `/status`. A trilha registra o que muda.
 
 Nao existe `/receitas`, `/despesas`, `/pagar`, `/saldo` nem relatorio: este
 comando e apenas o ponto de entrada do dominio.
+
+## Configuracoes do sistema
+
+Parametros internos administrados pela propria aplicacao, em `system_settings`.
+E a base persistente que as integracoes futuras vao consultar - nesta etapa
+apenas o nucleo administrativo existe.
+
+**Nao guarda segredo.** Senha, token, API key, credencial de terceiro e
+certificado NAO entram nesta tabela: nao ha coluna `secret`, nao ha cifragem e
+quem tem `settings:read` le todos os valores em claro. Credenciais continuam
+vindo de variavel de ambiente. O teste `setting-catalog.spec.ts` falha se
+alguma chave com cara de credencial entrar no catalogo.
+
+**Catalogo em codigo.** As chaves nascem em `setting-catalog.ts` e o `SeedService`
+cria no banco as que faltarem, a cada boot, sem sobrescrever valor ja
+administrado. Por isso nao existe `POST /settings` nem `DELETE /settings`:
+acrescentar configuracao e mudar o catalogo, nao chamar a API.
+
+| Permissao          | Rotas                                     |
+| ------------------ | ----------------------------------------- |
+| `settings:read`    | `GET /settings`, `GET /settings/:key`     |
+| `settings:update`  | `PATCH /settings/:key`                    |
+
+As duas sao **exclusivas do ADMIN** nesta etapa - `GESTOR` nao as recebe, mesmo
+tendo outras permissoes administrativas. O ADMIN as obtem pelo mecanismo que ja
+existia (`DEFAULT_ROLE_PERMISSIONS[ADMIN] = Object.values(PermissionCode)`, alem
+de o `PermissionsGuard` liberar ADMIN incondicionalmente); nenhuma regra nova de
+ADMIN foi criada.
+
+**Tipagem.** O `valor` e sempre TEXTO no banco - o mesmo DDL nos dois bancos,
+sem JSON nativo (que exigiria Oracle 21c+) - e a coluna `tipo` diz como
+interpreta-lo:
+
+| `tipo`    | Aceita no `PATCH`     | Devolve no `GET`  |
+| --------- | --------------------- | ----------------- |
+| `STRING`  | texto nao vazio       | `string`          |
+| `NUMBER`  | numero finito na faixa | `number`          |
+| `BOOLEAN` | `true` ou `false`     | `boolean`         |
+
+Nao ha coercao: `"false"` numa chave BOOLEAN e recusado com 400, em vez de virar
+`true` por uma conversao ingenua; `"20"` numa chave NUMBER tambem. Como o corpo
+chega em JSON, o tipo ja vem do payload e pode ser exigido. A conversao fica em
+`setting-value.ts`, funcao pura, e a leitura de uma linha corrompida por fora
+(SQL manual) falha alto em vez de devolver valor adivinhado.
+
+**Somente o valor muda.** `chave`, `tipo` e `descricao` vem do catalogo e o
+responsavel vem do JWT. O DTO do `PATCH` so tem `valor`, e o `ValidationPipe`
+global roda com `forbidNonWhitelisted` - enviar qualquer outro campo resulta em
+400.
+
+**Leitura pelos demais modulos.** `SystemSettingsService` (`get`, `getString`,
+`getNumber`, `getBoolean`) e o unico caminho: ninguem le a tabela direto nem
+repete a conversao. Pedir `getNumber` de uma chave STRING falha alto - e erro de
+programacao, nao entrada do usuario.
+
+**Sem cache, por decisao.** Cada leitura vai ao banco. A tabela tem poucas
+linhas, nenhum modulo a consulta em caminho quente ainda, e um cache em memoria
+traria um contrato de invalidacao sem beneficio atual - com mais de uma
+instancia, cada uma teria a sua copia e um `PATCH` so atualizaria a que o
+atendeu. Enquanto for consulta direta, `GET` e `PATCH` nunca divergem. Quando a
+leitura for frequente o bastante, o cache entra em `SystemSettingsService` - e
+so ali -, invalidado pelo `SettingsService.update`.
+
+**Auditoria.** Toda alteracao efetiva grava `SYSTEM_SETTING_UPDATED` no modulo
+`SETTINGS`, com a chave na descricao e em `metadados` - **nunca** o valor
+anterior nem o novo. Hoje nenhuma configuracao guarda segredo, e a regra vale de
+antemao para que nunca passe a guardar por descuido. Consulta nao audita, valor
+recusado nao audita, e reenviar o mesmo valor responde 200 sem gravar nem
+auditar (mesmo criterio do financeiro e de usuarios). A auditoria e
+**best-effort**: falhar ao grava-la nao desfaz a alteracao.
+
+**Estado desta etapa.** As chaves do catalogo sao armazenadas e administraveis,
+mas **ainda nao sao lidas por nenhum modulo** - as listagens continuam com o seu
+proprio `DEFAULT_PAGE_SIZE` e o nome do sistema continua fixo no frontend. Ligar
+uma configuracao ao comportamento de um modulo muda o comportamento desse modulo
+e e uma decisao a parte, feita junto com ele.
 
 ## Tratamento de erros
 

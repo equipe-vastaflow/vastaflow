@@ -31,7 +31,8 @@ O desenvolvimento e **incremental**: a fundacao vem antes das automacoes.
 | Dashboard administrativo          | Funcionando (usuarios e auditoria; sem dados de outros modulos) |
 | Tela de auditoria                 | Funcionando (listagem paginada; sem filtros)   |
 | Financeiro (backend)              | Fundacao: lancamentos internos + comando `/financeiro`. Sem tela |
-| Frontend: login, dashboard, usuarios | Funcionando (demais telas nao iniciadas) |
+| Configuracoes do sistema          | Funcionando (API + tela, so ADMIN). Nao guarda segredo; ainda nao lida por outros modulos |
+| Frontend: login, dashboard, usuarios, auditoria, financeiro, configuracoes | Funcionando |
 | Integracoes externas              | Nao iniciado - apenas pastas reservadas |
 
 > Nenhuma integracao possui endpoint, token ou payload definido. Nada foi
@@ -335,6 +336,9 @@ Detalhes em [frontend/README.md](frontend/README.md).
 | `POST /finance/entries` | `finance:create`   | Cria um lancamento (nasce `PENDENTE`; o autor e o usuario autenticado) |
 | `PATCH /finance/entries/:id` | `finance:update` | Edita os dados. Status e autor sao recusados (400)          |
 | `PATCH /finance/entries/:id/status` | `finance:status` | Altera o status respeitando as transicoes permitidas  |
+| `GET /settings`        | `settings:read`      | Configuracoes do sistema, lista completa ordenada pela chave (sem paginacao) |
+| `GET /settings/:key`   | `settings:read`      | Consulta uma configuracao pela chave                          |
+| `PATCH /settings/:key` | `settings:update`    | Altera SOMENTE o valor. Chave, tipo, descricao e responsavel sao recusados (400) |
 
 **Dashboard.** `GET /dashboard/summary` e somente leitura e **nao gera registro
 de auditoria**. Nao ha permissao propria de dashboard: qualquer usuario
@@ -365,6 +369,31 @@ contar, e os nomes dos responsaveis pelos eventos saem numa unica consulta.
 
 Financeiro, automacoes e integracoes entrarao como novas secoes opcionais quando
 esses modulos existirem - nenhum dado foi inventado para ocupar espaco.
+
+**Configuracoes.** `settings:read` e `settings:update` sao exclusivas do ADMIN
+nesta etapa - o `GESTOR` nao as recebe. A tabela `system_settings` **nao guarda
+segredo**: senha, token, API key e credencial continuam vindo de variavel de
+ambiente, e as chaves nascem de um catalogo em codigo (por isso nao ha `POST`
+nem `DELETE`). O valor e devolvido ja tipado conforme `tipo`, e enviado no mesmo
+tipo - `"false"` numa chave `BOOLEAN` e recusado com 400, nao convertido.
+
+```json
+{
+  "chave": "PAGINATION_DEFAULT_LIMIT",
+  "valor": 20,
+  "descricao": "Quantidade padrao de itens por pagina nas listagens",
+  "tipo": "NUMBER",
+  "atualizadoPorId": null,
+  "atualizadoPor": null,
+  "createdAt": "2026-09-24T10:00:00.000Z",
+  "updatedAt": "2026-09-24T10:00:00.000Z"
+}
+```
+
+Alterar: `PATCH /settings/PAGINATION_DEFAULT_LIMIT` com `{ "valor": 25 }`. Cada
+alteracao efetiva gera `SYSTEM_SETTING_UPDATED` (modulo `SETTINGS`) com a chave,
+**nunca** o valor. Detalhes em
+[docs/arquitetura.md](docs/arquitetura.md#configuracoes-do-sistema).
 
 Respostas: `400` dados invalidos · `401` credenciais/token invalidos ·
 `403` usuario inativo (no login), sem permissao ou alvo fora do seu alcance ·

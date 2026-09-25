@@ -160,6 +160,35 @@ export interface CreateFinancialEntryInput {
 /** Edicao parcial. O status muda pela rota propria, nunca por aqui. */
 export type UpdateFinancialEntryInput = Partial<CreateFinancialEntryInput>;
 
+/** Tipo declarado de uma configuracao do sistema. */
+export type SystemSettingType = 'STRING' | 'NUMBER' | 'BOOLEAN';
+
+/** Valor de uma configuracao, ja tipado pelo backend conforme o `tipo`. */
+export type SettingValue = string | number | boolean;
+
+/**
+ * Configuracao interna do sistema.
+ *
+ * NAO guarda segredo: nao ha token, senha nem credencial nesta tabela, e por
+ * isso nao ha campo mascarado na tela. Chave, tipo e descricao vem de um
+ * catalogo no backend e nao sao editaveis - so o `valor` muda.
+ */
+export interface SystemSetting {
+  chave: string;
+  valor: SettingValue;
+  descricao: string;
+  tipo: SystemSettingType;
+  /** Id de quem alterou por ultimo. Nulo enquanto o valor for o padrao inicial. */
+  atualizadoPorId: string | null;
+  /**
+   * Responsavel ja identificado pelo backend, em uma unica consulta em lote.
+   * Nulo quando ninguem alterou ainda ou quando o usuario nao existe mais.
+   */
+  atualizadoPor: { id: string; nome: string; email: string } | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 /** Erro devolvido pela API (status HTTP diferente de 2xx). */
 export class ApiError extends Error {
   constructor(
@@ -222,6 +251,7 @@ async function readErrorMessage(response: Response): Promise<string> {
 
 const userPath = (id: string): string => `/users/${encodeURIComponent(id)}`;
 const entryPath = (id: string): string => `/finance/entries/${encodeURIComponent(id)}`;
+const settingPath = (chave: string): string => `/settings/${encodeURIComponent(chave)}`;
 
 export const api = {
   login: (email: string, senha: string): Promise<LoginResponse> =>
@@ -266,6 +296,21 @@ export const api = {
 
     setRole: (token: string, id: string, role: RoleName): Promise<User> =>
       request(`${userPath(id)}/role`, { method: 'PATCH', body: { role }, token }),
+  },
+
+  settings: {
+    /** Sem paginacao: o catalogo e um conjunto fechado, definido no backend. */
+    list: (token: string): Promise<SystemSetting[]> => request('/settings', { token }),
+
+    get: (token: string, chave: string): Promise<SystemSetting> =>
+      request(settingPath(chave), { token }),
+
+    /**
+     * Altera SOMENTE o valor. O tipo precisa corresponder ao `tipo` da
+     * configuracao - o backend recusa `"true"` numa chave BOOLEAN, por exemplo.
+     */
+    update: (token: string, chave: string, valor: SettingValue): Promise<SystemSetting> =>
+      request(settingPath(chave), { method: 'PATCH', body: { valor }, token }),
   },
 
   finance: {

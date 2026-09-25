@@ -17,6 +17,9 @@ export enum AuditAction {
   FinanceEntryCreated = 'FINANCE_ENTRY_CREATED',
   FinanceEntryUpdated = 'FINANCE_ENTRY_UPDATED',
   FinanceEntryStatusChanged = 'FINANCE_ENTRY_STATUS_CHANGED',
+
+  /** Configuracoes do sistema. A chave alterada vai em `metadados.chave`; o valor nunca entra. */
+  SystemSettingUpdated = 'SYSTEM_SETTING_UPDATED',
 }
 
 /** Modulo do sistema onde a acao ocorreu. */
@@ -24,4 +27,5 @@ export enum AuditModuleName {
   Auth = 'AUTH',
   Users = 'USERS',
   Finance = 'FINANCE',
+  Settings = 'SETTINGS',
 }

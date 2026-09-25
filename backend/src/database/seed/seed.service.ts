@@ -10,6 +10,9 @@ import { PermissionsService } from '../../modules/permissions/permissions.servic
 import { DEFAULT_ROLE_PERMISSIONS, ROLE_DESCRIPTIONS } from '../../modules/roles/role-defaults';
 import { RoleName } from '../../modules/roles/role-name.enum';
 import { RolesService } from '../../modules/roles/roles.service';
+import { SETTING_CATALOG } from '../../modules/settings/setting-catalog';
+import { serializeSettingValue } from '../../modules/settings/setting-value';
+import { SettingsRepository } from '../../modules/settings/settings.repository';
 import { isPasswordValid, PASSWORD_POLICY_MESSAGE } from '../../modules/users/password.policy';
 import { UsersService } from '../../modules/users/users.service';
 
@@ -18,7 +21,8 @@ import { UsersService } from '../../modules/users/users.service';
  *
  * 1. Permissoes do catalogo (`PermissionCode`);
  * 2. Perfis (`RoleName`) com as permissoes padrao;
- * 3. Administrador inicial, se `SEED_ADMIN_EMAIL`/`SEED_ADMIN_PASSWORD` estiverem definidos.
+ * 3. Configuracoes do catalogo (`SETTING_CATALOG`), com o valor padrao;
+ * 4. Administrador inicial, se `SEED_ADMIN_EMAIL`/`SEED_ADMIN_PASSWORD` estiverem definidos.
  */
 @Injectable()
 export class SeedService implements OnApplicationBootstrap {
@@ -28,11 +32,13 @@ export class SeedService implements OnApplicationBootstrap {
     private readonly permissionsService: PermissionsService,
     private readonly rolesService: RolesService,
     private readonly usersService: UsersService,
+    private readonly settingsRepository: SettingsRepository,
     private readonly config: ConfigService<EnvironmentVariables, true>,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
     await this.seedAccessControl();
+    await this.seedSettings();
     await this.seedAdmin();
   }
 
@@ -87,6 +93,29 @@ export class SeedService implements OnApplicationBootstrap {
 
       const newlyCreated = defaults.filter((code) => permissions.created.has(code));
       await this.rolesService.addPermissions(existing, resolve(newlyCreated, permissions.byCode));
+    }
+  }
+
+  /**
+   * Cria as chaves do catalogo que ainda nao existem, com o valor padrao.
+   *
+   * NUNCA sobrescreve o valor de uma chave existente: o que o administrador
+   * alterou pela tela permanece em todos os boots seguintes. Chave removida do
+   * catalogo tambem nao e apagada - remover configuracao e mudanca de dados e
+   * pede uma migration propria, nao um efeito colateral do boot.
+   */
+  private async seedSettings(): Promise<void> {
+    for (const definicao of SETTING_CATALOG) {
+      if (await this.settingsRepository.findByKey(definicao.chave)) {
+        continue;
+      }
+      await this.settingsRepository.create({
+        chave: definicao.chave,
+        valor: serializeSettingValue(definicao.padrao),
+        descricao: definicao.descricao,
+        tipo: definicao.tipo,
+      });
+      this.logger.log(`Configuracao criada: ${definicao.chave}`);
     }
   }
 

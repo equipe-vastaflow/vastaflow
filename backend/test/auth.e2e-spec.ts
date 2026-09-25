@@ -512,6 +512,8 @@ describe('Auth, usuarios e RBAC (e2e)', () => {
           '/finance/entries/{id}',
           '/finance/entries/{id}/status',
           '/health',
+          '/settings',
+          '/settings/{key}',
           '/users',
           '/users/assignable-roles',
           '/users/{id}',
@@ -540,9 +542,10 @@ describe('Auth, usuarios e RBAC (e2e)', () => {
       expect(roles.map((role) => role.nome).sort()).toEqual(
         [RoleName.Admin, RoleName.Gestor, RoleName.Operador, RoleName.Usuario].sort(),
       );
-      // ADMIN e GESTOR recebem o mesmo conjunto pelo seeder; a diferenca entre
-      // eles esta na hierarquia (`user-access.policy.ts`), nao na lista.
-      const todasAsPermissoes = [
+      // GESTOR administra usuarios, auditoria e financeiro; as configuracoes do
+      // sistema sao exclusivas do ADMIN nesta etapa. Fora isso, a diferenca
+      // entre os dois esta na hierarquia (`user-access.policy.ts`).
+      const doGestor = [
         'audit:read',
         'finance:create',
         'finance:read',
@@ -554,8 +557,12 @@ describe('Auth, usuarios e RBAC (e2e)', () => {
         'users:status',
         'users:update',
       ];
-      expect(permissionsOf(RoleName.Admin)).toEqual(todasAsPermissoes);
-      expect(permissionsOf(RoleName.Gestor)).toEqual(todasAsPermissoes);
+      expect(permissionsOf(RoleName.Admin)).toEqual(
+        [...doGestor, 'settings:read', 'settings:update'].sort(),
+      );
+      expect(permissionsOf(RoleName.Gestor)).toEqual(doGestor);
+      expect(permissionsOf(RoleName.Gestor)).not.toContain('settings:read');
+      expect(permissionsOf(RoleName.Gestor)).not.toContain('settings:update');
       expect(permissionsOf(RoleName.Operador)).toEqual([]);
       expect(permissionsOf(RoleName.Usuario)).toEqual([]);
     });

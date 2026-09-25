@@ -37,6 +37,11 @@ export function AppShell({ children, wide = false }: { children: ReactNode; wide
                 Auditoria
               </NavLink>
             )}
+            {hasPermission(user, Permission.SettingsRead) && (
+              <NavLink to="/settings" className="nav-link">
+                Configurações
+              </NavLink>
+            )}
           </nav>
         </div>
         <button type="button" className="button button-secondary" onClick={() => void handleLogout()}>

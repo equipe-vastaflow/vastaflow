@@ -578,6 +578,30 @@ a.button {
   white-space: normal;
 }
 
+/* ---------------------------------------------------------------------------
+ * Configuracoes do sistema
+ *
+ * Edicao acontece na propria linha da tabela: o campo muda conforme o tipo da
+ * configuracao (texto, numero ou caixa de marcacao).
+ * ------------------------------------------------------------------------- */
+
+.setting-form {
+  align-items: center;
+}
+
+.setting-form input[type='text'],
+.setting-form input[type='number'] {
+  min-width: 12rem;
+  padding: 0.3rem 0.5rem;
+}
+
+/* Caixa de marcacao com o rotulo Sim/Nao ao lado. */
+.field-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
 /* Erro de validacao ligado a um campo do formulario. */
 .field-error {
   color: var(--danger-text);

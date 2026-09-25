@@ -9,6 +9,7 @@ import { FinanceEntryDetailPage } from './pages/finance/FinanceEntryDetailPage';
 import { FinanceEntryFormPage } from './pages/finance/FinanceEntryFormPage';
 import { FinancePage } from './pages/finance/FinancePage';
 import { LoginPage } from './pages/LoginPage';
+import { SettingsPage } from './pages/settings/SettingsPage';
 import { UserDetailPage } from './pages/users/UserDetailPage';
 import { UserFormPage } from './pages/users/UserFormPage';
 import { UsersPage } from './pages/users/UsersPage';
@@ -45,6 +46,11 @@ export function App(): ReactNode {
         </Route>
         <Route element={<RequirePermission permission={Permission.FinanceUpdate} />}>
           <Route path="/finance/:id/editar" element={<FinanceEntryFormPage key="editar" />} />
+        </Route>
+
+        {/* Configuracoes do sistema. Hoje so o ADMIN tem `settings:read`. */}
+        <Route element={<RequirePermission permission={Permission.SettingsRead} />}>
+          <Route path="/settings" element={<SettingsPage />} />
         </Route>
 
         {/* Auditoria. O backend exige `audit:read` de novo em cada requisicao. */}

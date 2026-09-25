@@ -20,6 +20,9 @@ export enum PermissionCode {
   FinanceCreate = 'finance:create',
   FinanceUpdate = 'finance:update',
   FinanceStatus = 'finance:status',
+
+  SettingsRead = 'settings:read',
+  SettingsUpdate = 'settings:update',
 }
 
 export const PERMISSION_DESCRIPTIONS: Record<PermissionCode, string> = {
@@ -33,4 +36,6 @@ export const PERMISSION_DESCRIPTIONS: Record<PermissionCode, string> = {
   [PermissionCode.FinanceCreate]: 'Criar lancamentos financeiros',
   [PermissionCode.FinanceUpdate]: 'Editar lancamentos financeiros',
   [PermissionCode.FinanceStatus]: 'Alterar o status de lancamentos financeiros',
+  [PermissionCode.SettingsRead]: 'Consultar as configuracoes do sistema',
+  [PermissionCode.SettingsUpdate]: 'Alterar o valor das configuracoes do sistema',
 };

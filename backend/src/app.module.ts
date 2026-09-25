@@ -11,6 +11,7 @@ import { FinanceModule } from './modules/finance/finance.module';
 import { HealthModule } from './modules/health/health.module';
 import { PermissionsModule } from './modules/permissions/permissions.module';
 import { RolesModule } from './modules/roles/roles.module';
+import { SettingsModule } from './modules/settings/settings.module';
 import { UsersModule } from './modules/users/users.module';
 
 @Module({
@@ -38,6 +39,9 @@ import { UsersModule } from './modules/users/users.module';
 
     // Agrega os indicadores dos modulos acima. Nao tem dados proprios.
     DashboardModule,
+
+    // Configuracoes internas, administradas por ADMIN. Nao guardam segredo.
+    SettingsModule,
 
     // Primeiro dominio de negocio.
     FinanceModule,
