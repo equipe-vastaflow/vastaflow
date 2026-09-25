@@ -101,6 +101,8 @@ function renderAt(path: string): void {
 function session(me: User, extra: Record<string, Handler> = {}): Record<string, Handler> {
   return {
     'GET /auth/me': { status: 200, body: me },
+    // O contador do menu consulta isto em toda pagina autenticada.
+    'GET /notifications/unread-count': { status: 200, body: { count: 0 } },
     'GET /dashboard/summary': { status: 200, body: {} },
     ...extra,
   };

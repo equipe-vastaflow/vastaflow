@@ -2,10 +2,12 @@ import type { ReactNode } from 'react';
 import { NavLink, useNavigate } from 'react-router';
 import { useAuth } from '../auth/AuthContext';
 import { hasPermission, Permission } from '../auth/permissions';
+import { useNotifications } from '../notifications/NotificationsContext';
 
 /** Barra superior e navegacao das paginas autenticadas. */
 export function AppShell({ children, wide = false }: { children: ReactNode; wide?: boolean }): ReactNode {
   const { user, logout } = useAuth();
+  const { unreadCount } = useNotifications();
   const navigate = useNavigate();
 
   async function handleLogout(): Promise<void> {
@@ -21,6 +23,16 @@ export function AppShell({ children, wide = false }: { children: ReactNode; wide
           <nav className="nav" aria-label="Navegação principal">
             <NavLink to="/dashboard" className="nav-link">
               Início
+            </NavLink>
+            <NavLink to="/notifications" className="nav-link">
+              Notificações
+              {/* O selo so aparece quando ha algo por ler, e o texto do
+                  aria-label diz o numero - a cor nao e a unica pista. */}
+              {unreadCount > 0 && (
+                <span className="nav-badge" aria-label={`${unreadCount} não lidas`}>
+                  {unreadCount}
+                </span>
+              )}
             </NavLink>
             {hasPermission(user, Permission.UsersRead) && (
               <NavLink to="/users" className="nav-link">

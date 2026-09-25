@@ -32,6 +32,7 @@ O desenvolvimento e **incremental**: a fundacao vem antes das automacoes.
 | Tela de auditoria                 | Funcionando (listagem paginada; sem filtros)   |
 | Financeiro (backend)              | Fundacao: lancamentos internos + comando `/financeiro`. Sem tela |
 | Configuracoes do sistema          | Funcionando (API + tela, so ADMIN). Nao guarda segredo; ainda nao lida por outros modulos |
+| Notificacoes internas             | Funcionando (API + tela). Somente internas: sem e-mail, push ou mensageria |
 | Frontend: login, dashboard, usuarios, auditoria, financeiro, configuracoes | Funcionando |
 | Integracoes externas              | Nao iniciado - apenas pastas reservadas |
 
@@ -339,6 +340,11 @@ Detalhes em [frontend/README.md](frontend/README.md).
 | `GET /settings`        | `settings:read`      | Configuracoes do sistema, lista completa ordenada pela chave (sem paginacao) |
 | `GET /settings/:key`   | `settings:read`      | Consulta uma configuracao pela chave                          |
 | `PATCH /settings/:key` | `settings:update`    | Altera SOMENTE o valor. Chave, tipo, descricao e responsavel sao recusados (400) |
+| `GET /notifications?page=&limit=` | autenticado | Notificacoes do proprio usuario, paginado. Nao lidas primeiro, depois as mais recentes |
+| `GET /notifications/unread-count` | autenticado | Quantas o usuario tem por ler |
+| `GET /notifications/:id` | autenticado         | Uma notificacao do proprio usuario (404 se for de outra pessoa) |
+| `PATCH /notifications/:id/read` | autenticado  | Marca uma como lida. Idempotente; corpo com qualquer campo e recusado (400) |
+| `PATCH /notifications/read-all` | autenticado  | Marca todas as nao lidas como lidas. Idempotente |
 
 **Dashboard.** `GET /dashboard/summary` e somente leitura e **nao gera registro
 de auditoria**. Nao ha permissao propria de dashboard: qualquer usuario
@@ -394,6 +400,37 @@ Alterar: `PATCH /settings/PAGINATION_DEFAULT_LIMIT` com `{ "valor": 25 }`. Cada
 alteracao efetiva gera `SYSTEM_SETTING_UPDATED` (modulo `SETTINGS`) com a chave,
 **nunca** o valor. Detalhes em
 [docs/arquitetura.md](docs/arquitetura.md#configuracoes-do-sistema).
+
+**Notificacoes.** Avisos INTERNOS, por usuario: nao ha e-mail, push, WhatsApp,
+Telegram, WebSocket nem SSE. Nenhuma permissao granular nova - ver as proprias
+notificacoes nao e privilegio administrativo, e o destinatario vem sempre do
+JWT. Nao existe `POST` nem `DELETE`: quem cria e outro modulo do sistema, pelo
+`NotificationsService.createForUser`, que nenhum modulo chama ainda. Consultar
+notificacao de outra pessoa responde 404, nunca 403 - um 403 confirmaria que
+aquele id existe.
+
+```json
+{
+  "items": [
+    {
+      "id": "...",
+      "titulo": "Lancamento aprovado",
+      "mensagem": "O lancamento de manutencao foi marcado como pago.",
+      "tipo": "SUCCESS",
+      "lida": false,
+      "createdAt": "2026-09-24T12:30:00.000Z",
+      "updatedAt": "2026-09-24T12:30:00.000Z"
+    }
+  ],
+  "total": 42,
+  "page": 1,
+  "limit": 20,
+  "totalPages": 3
+}
+```
+
+Marcar como lida **nao** entra na trilha de auditoria; a decisao e a razao estao
+em [docs/arquitetura.md](docs/arquitetura.md#notificacoes-internas).
 
 Respostas: `400` dados invalidos · `401` credenciais/token invalidos ·
 `403` usuario inativo (no login), sem permissao ou alvo fora do seu alcance ·

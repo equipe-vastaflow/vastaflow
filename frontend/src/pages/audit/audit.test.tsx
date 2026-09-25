@@ -83,6 +83,8 @@ function renderAt(path: string, me: User, extra: Record<string, Handler> = {}): 
   );
   const fetchMock = mockApi({
     'GET /auth/me': { status: 200, body: me },
+    // O contador do menu consulta isto em toda pagina autenticada.
+    'GET /notifications/unread-count': { status: 200, body: { count: 0 } },
     'GET /dashboard/summary': { status: 200, body: { auditoria: { total: 2, recentes: [] } } },
     'GET /audit-logs': { status: 200, body: pagina([EVENTO, SEM_RESPONSAVEL]) },
     ...extra,

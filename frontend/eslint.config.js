@@ -33,7 +33,10 @@ export default tseslint.config(
       // Custo aceito: editar AuthContext.tsx recarrega a pagina em vez de
       // aplicar o hot reload. Qualquer outra exportacao nao-componente em
       // arquivo de componente continua sendo erro.
-      'react-refresh/only-export-components': ['error', { allowExportNames: ['useAuth'] }],
+      'react-refresh/only-export-components': [
+        'error',
+        { allowExportNames: ['useAuth', 'useNotifications'] },
+      ],
     },
   },
   {

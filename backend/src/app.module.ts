@@ -9,6 +9,7 @@ import { CommandsModule } from './modules/commands/commands.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { FinanceModule } from './modules/finance/finance.module';
 import { HealthModule } from './modules/health/health.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 import { PermissionsModule } from './modules/permissions/permissions.module';
 import { RolesModule } from './modules/roles/roles.module';
 import { SettingsModule } from './modules/settings/settings.module';
@@ -42,6 +43,10 @@ import { UsersModule } from './modules/users/users.module';
 
     // Configuracoes internas, administradas por ADMIN. Nao guardam segredo.
     SettingsModule,
+
+    // Avisos internos por usuario. Sem integracao externa: nada de e-mail,
+    // push ou mensageria - os modulos de negocio chamam o service direto.
+    NotificationsModule,
 
     // Primeiro dominio de negocio.
     FinanceModule,

@@ -189,6 +189,46 @@ export interface SystemSetting {
   updatedAt: string;
 }
 
+/** Natureza da notificacao. O texto da tela sempre diz qual e - a cor nao e a unica pista. */
+export type NotificationType = 'INFO' | 'SUCCESS' | 'WARNING' | 'ERROR';
+
+/**
+ * Aviso interno destinado ao usuario autenticado.
+ *
+ * Nao ha `usuarioId`: toda notificacao que a API devolve pertence, por
+ * construcao, a quem pediu. O destinatario nunca trafega do cliente para o
+ * servidor - ele vem do JWT.
+ */
+export interface AppNotification {
+  id: string;
+  titulo: string;
+  mensagem: string;
+  tipo: NotificationType;
+  lida: boolean;
+  createdAt: string;
+  /** Quando foi marcada como lida, se ja foi. */
+  updatedAt: string;
+}
+
+export interface NotificationPage {
+  items: AppNotification[];
+  /** Total de notificacoes do usuario, em todas as paginas. Vem do backend. */
+  total: number;
+  page: number;
+  limit: number;
+  /** Quantas paginas existem com este `limit`. Calculado pelo backend. */
+  totalPages: number;
+}
+
+export interface UnreadCount {
+  count: number;
+}
+
+/** Quantas notificacoes passaram de nao lida para lida. */
+export interface ReadAllResult {
+  atualizadas: number;
+}
+
 /** Erro devolvido pela API (status HTTP diferente de 2xx). */
 export class ApiError extends Error {
   constructor(
@@ -252,6 +292,7 @@ async function readErrorMessage(response: Response): Promise<string> {
 const userPath = (id: string): string => `/users/${encodeURIComponent(id)}`;
 const entryPath = (id: string): string => `/finance/entries/${encodeURIComponent(id)}`;
 const settingPath = (chave: string): string => `/settings/${encodeURIComponent(chave)}`;
+const notificationPath = (id: string): string => `/notifications/${encodeURIComponent(id)}`;
 
 export const api = {
   login: (email: string, senha: string): Promise<LoginResponse> =>
@@ -296,6 +337,26 @@ export const api = {
 
     setRole: (token: string, id: string, role: RoleName): Promise<User> =>
       request(`${userPath(id)}/role`, { method: 'PATCH', body: { role }, token }),
+  },
+
+  notifications: {
+    list: (token: string, page: number, limit: number): Promise<NotificationPage> =>
+      request(
+        `/notifications?${new URLSearchParams({ page: String(page), limit: String(limit) }).toString()}`,
+        { token },
+      ),
+
+    /** Uma consulta COUNT no backend. Alimenta o contador do menu. */
+    unreadCount: (token: string): Promise<UnreadCount> =>
+      request('/notifications/unread-count', { token }),
+
+    /** Idempotente: marcar de novo continua respondendo 200. */
+    markAsRead: (token: string, id: string): Promise<AppNotification> =>
+      request(`${notificationPath(id)}/read`, { method: 'PATCH', token }),
+
+    /** Idempotente: sem nenhuma por ler, devolve `atualizadas: 0`. */
+    markAllAsRead: (token: string): Promise<ReadAllResult> =>
+      request('/notifications/read-all', { method: 'PATCH', token }),
   },
 
   settings: {

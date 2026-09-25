@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { Navigate, Route, Routes } from 'react-router';
 import { Permission } from './auth/permissions';
 import { ProtectedRoute } from './auth/ProtectedRoute';
+import { NotificationsProvider } from './notifications/NotificationsContext';
 import { RequirePermission } from './auth/RequirePermission';
 import { AuditLogsPage } from './pages/audit/AuditLogsPage';
 import { DashboardPage } from './pages/dashboard/DashboardPage';
@@ -9,6 +10,7 @@ import { FinanceEntryDetailPage } from './pages/finance/FinanceEntryDetailPage';
 import { FinanceEntryFormPage } from './pages/finance/FinanceEntryFormPage';
 import { FinancePage } from './pages/finance/FinancePage';
 import { LoginPage } from './pages/LoginPage';
+import { NotificationsPage } from './pages/notifications/NotificationsPage';
 import { SettingsPage } from './pages/settings/SettingsPage';
 import { UserDetailPage } from './pages/users/UserDetailPage';
 import { UserFormPage } from './pages/users/UserFormPage';
@@ -17,11 +19,18 @@ import { UsersPage } from './pages/users/UsersPage';
 /** Rotas da aplicacao. O roteador (`BrowserRouter`) fica em `main.tsx` para permitir testes com `MemoryRouter`. */
 export function App(): ReactNode {
   return (
-    <Routes>
+    // O contador de nao lidas e compartilhado pelo menu e pela tela de
+    // notificacoes: uma consulta so, num lugar so.
+    <NotificationsProvider>
+      <Routes>
       <Route path="/login" element={<LoginPage />} />
 
       <Route element={<ProtectedRoute />}>
         <Route path="/dashboard" element={<DashboardPage />} />
+
+        {/* Notificacoes do proprio usuario: sem permissao granular, como
+            `/auth/me`. O backend so devolve as de quem esta autenticado. */}
+        <Route path="/notifications" element={<NotificationsPage />} />
 
         {/* Administracao de usuarios. A permissao e checada de novo pelo backend. */}
         <Route element={<RequirePermission permission={Permission.UsersRead} />}>
@@ -60,7 +69,8 @@ export function App(): ReactNode {
       </Route>
 
       {/* Qualquer outro endereco cai no dashboard, que por sua vez exige login. */}
-      <Route path="*" element={<Navigate to="/dashboard" replace />} />
-    </Routes>
+        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      </Routes>
+    </NotificationsProvider>
   );
 }

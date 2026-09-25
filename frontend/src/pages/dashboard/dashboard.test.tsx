@@ -76,6 +76,8 @@ function renderDashboard(me: User, extra: Record<string, Handler> = {}): ReturnT
   );
   const fetchMock = mockApi({
     'GET /auth/me': { status: 200, body: me },
+    // O contador do menu consulta isto em toda pagina autenticada.
+    'GET /notifications/unread-count': { status: 200, body: { count: 0 } },
     'GET /dashboard/summary': { status: 200, body: SUMMARY },
     ...extra,
   });
@@ -127,14 +129,19 @@ describe('Dashboard', () => {
     const fetchMock = renderDashboard(GESTOR);
 
     await heading('Dashboard');
+    const chamadas = (): [string, RequestInit][] => fetchMock.mock.calls as [string, RequestInit][];
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(chamadas().filter(([url]) => url.includes('/dashboard/summary'))).toHaveLength(1);
     });
-    const chamadas = fetchMock.mock.calls as [string, RequestInit][];
-    const resumo = chamadas.find(([url]) => url.includes('/dashboard/summary'));
+    const resumo = chamadas().find(([url]) => url.includes('/dashboard/summary'));
 
     expect(resumo?.[1].headers).toMatchObject({ Authorization: 'Bearer jwt-guardado' });
     expect(resumo?.[1].method ?? 'GET').toBe('GET');
+    // O ponto do teste: a sessao guardada e confirmada UMA vez e nenhuma
+    // autenticacao nova e criada. As demais chamadas da pagina (o contador de
+    // notificacoes, por exemplo) nao interferem nisso.
+    expect(chamadas().filter(([url]) => url.includes('/auth/me'))).toHaveLength(1);
+    expect(chamadas().filter(([url]) => url.includes('/auth/login'))).toHaveLength(0);
   });
 
   describe('cards de usuarios', () => {

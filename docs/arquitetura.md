@@ -100,6 +100,7 @@ AuditLog   (usuario_id sem FK, de proposito: a trilha sobrevive ao usuario)
 | `audit_logs`       | `id`, `usuario_id` (nulo se nao identificado), `acao`, `modulo`, `descricao`, `ip`, `metadados` (JSON, nulo), `created_at` |
 | `financial_entries` | `id`, `tipo`, `descricao`, `valor` DECIMAL(15,2), `data` DATE, `categoria`, `status`, `observacao` (nulo), `criado_por_id` (sem FK), `created_at`, `updated_at` |
 | `system_settings`  | `id`, `chave` (unica), `valor` (texto), `descricao`, `tipo`, `atualizado_por_id` (nulo, sem FK), `created_at`, `updated_at` |
+| `notifications`    | `id`, `usuario_id` (destinatario, sem FK), `titulo`, `mensagem`, `tipo`, `lida`, `created_at`, `updated_at` |
 
 `metadados` guarda detalhes adicionais da operacao como JSON (`text` no MySQL,
 `CLOB` no Oracle). Antes de gravar, o `AuditService` remove valores de chaves
@@ -464,6 +465,83 @@ mas **ainda nao sao lidas por nenhum modulo** - as listagens continuam com o seu
 proprio `DEFAULT_PAGE_SIZE` e o nome do sistema continua fixo no frontend. Ligar
 uma configuracao ao comportamento de um modulo muda o comportamento desse modulo
 e e uma decisao a parte, feita junto com ele.
+
+## Notificacoes internas
+
+Avisos destinados a UM usuario, lidos por ele na tela `/notifications`.
+
+**Internas de verdade.** Nao ha e-mail, push, WhatsApp, Telegram, WebSocket nem
+SSE nesta etapa - a notificacao nasce dentro do sistema e e lida dentro do
+sistema. Nenhuma integracao externa foi criada, e nenhum disparador de negocio
+foi inventado para ocupar espaco.
+
+| Rota                              | Acesso      | O que faz |
+| --------------------------------- | ----------- | --------- |
+| `GET /notifications`              | autenticado | Pagina das notificacoes do proprio usuario |
+| `GET /notifications/unread-count` | autenticado | `COUNT` das nao lidas do proprio usuario |
+| `GET /notifications/:id`          | autenticado | Uma notificacao do proprio usuario |
+| `PATCH /notifications/:id/read`   | autenticado | Marca uma como lida (idempotente) |
+| `PATCH /notifications/read-all`   | autenticado | Marca todas as nao lidas como lidas (idempotente) |
+
+**Sem permissao granular nova.** Ver as proprias notificacoes nao e privilegio
+administrativo: o recorte por dono ja limita o que cada um alcanca, como em
+`GET /auth/me` e `GET /dashboard/summary`. Nenhuma permissao foi acrescentada ao
+catalogo.
+
+**Isolamento por usuario.** O destinatario vem SEMPRE do JWT (`@CurrentUser()`).
+Nao existe `usuarioId` em corpo, query ou rota - os dois `PATCH` declaram corpo
+vazio (`EmptyBodyDto`) justamente para que o `ValidationPipe` global recuse com
+400 qualquer campo enviado, inclusive uma tentativa de informar o destinatario.
+No repositorio, TODA consulta leva o `usuarioId` junto: nao ha metodo que leia
+ou altere notificacao sem dizer de quem ela e.
+
+Consultar notificacao alheia responde **404**, e nao 403: um 403 confirmaria que
+aquele id existe. De fora, id inexistente e id de outra pessoa sao
+indistinguiveis - inclusive no corpo do erro.
+
+**Criacao.** Nao ha `POST` nem `DELETE`. Quem cria e outro modulo do sistema,
+pelo `NotificationsService.createForUser({ usuarioId, titulo, mensagem, tipo })`.
+Como essa chamada NAO passa pelo `ValidationPipe`, o conteudo e validado e
+normalizado por `notification.policy.ts` (funcao pura, como
+`entry-status.policy.ts` e `setting-value.ts`). Nenhum modulo a chama ainda.
+
+**Ordenacao e paginacao.** `lida ASC, created_at DESC, id DESC`: nao lidas
+primeiro, depois da mais recente para a mais antiga, com o id desempatando
+(varias notificacoes podem cair no mesmo instante). Como `false` grava 0 e
+`true` grava 1 nos tres drivers, "nao lidas primeiro" vale em qualquer banco. A
+paginacao e a mesma de `/users`, `/audit-logs` e `/finance/entries` - com um
+campo a mais, `totalPages`, calculado no backend.
+
+**Desempenho.** Uma consulta por pagina (`findAndCount` traz linhas e total
+juntos) e uma por contador (`COUNT`). `ix_notif_dest` (`usuario_id`, `lida`,
+`created_at`) serve as duas: a listagem usa o indice inteiro e o contador usa o
+prefixo. Marcar todas como lidas e UM `UPDATE`, nao uma gravacao por linha.
+
+**Auditoria: este modulo NAO grava na trilha, de proposito.**
+
+- consultas nunca sao auditadas neste projeto - mesmo criterio que tirou o
+  `FINANCE_QUERIED` do financeiro;
+- marcar como lida e estado de leitura do proprio dono, sem efeito sobre dado de
+  negocio, dinheiro, acesso ou configuracao. Auditar isso geraria um evento por
+  usuario e por notificacao, justamente o ruido que dificultaria achar o que
+  importa na trilha;
+- a criacao tambem nao e auditada aqui: quem cria uma notificacao e um modulo de
+  negocio, que ja registra o SEU evento (o pagamento, a mudanca de perfil). Um
+  segundo registro descreveria o aviso, nao o fato.
+
+Nenhuma acao de auditoria nova foi criada. Se a politica da empresa exigir
+rastrear a leitura, o ponto de mudanca e `markAsRead`/`markAllAsRead`, com o
+`AuditService` que ja existe - sem mecanismo paralelo. Ha teste e2e travando a
+decisao atual: se alguem acrescentar auditoria aqui, ele falha e a mudanca vira
+deliberada.
+
+**Frontend.** `/notifications` (apenas autenticacao) e um contador no menu,
+alimentado por `GET /notifications/unread-count` atraves do
+`NotificationsContext` - uma consulta so, compartilhada pelo menu e pela tela.
+O contador e relido quando a sessao muda e depois de cada acao de marcar como
+lida; **nao ha polling nem atualizacao automatica**. Falha ao le-lo deixa o
+contador em zero sem derrubar a navegacao. Tipo e estado (lida/nao lida)
+aparecem sempre escritos - a cor nunca e a unica pista.
 
 ## Tratamento de erros
 

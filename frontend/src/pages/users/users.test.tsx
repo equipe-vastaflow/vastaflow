@@ -74,6 +74,8 @@ function renderAt(path: string): void {
 function session(me: User, extra: Record<string, Handler> = {}): Record<string, Handler> {
   return {
     'GET /auth/me': { status: 200, body: me },
+    // O contador do menu consulta isto em toda pagina autenticada.
+    'GET /notifications/unread-count': { status: 200, body: { count: 0 } },
     // O dashboard e a pagina inicial destes testes; os indicadores em si tem
     // cobertura propria em pages/dashboard/dashboard.test.tsx.
     'GET /dashboard/summary': { status: 200, body: {} },
