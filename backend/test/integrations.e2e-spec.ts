@@ -36,8 +36,11 @@ describe('Integracoes (e2e)', () => {
     await app.close();
   });
 
-  it('a aplicacao sobe sem nenhuma integracao registrada - nem falsa', () => {
-    expect(registry.all()).toEqual([]);
+  it('a aplicacao sobe so com as integracoes reais - nenhuma falsa', () => {
+    // O Telegram e a unica integracao real ate aqui (`TelegramModule`).
+    expect(registry.all()).toEqual([
+      { id: 'telegram', name: 'Telegram', category: IntegrationCategory.Messaging },
+    ]);
   });
 
   it('o boot nao faz chamada externa', () => {
@@ -75,9 +78,7 @@ describe('Integracoes (e2e)', () => {
 
     registry.register(exemplo);
 
-    expect(registry.all()).toEqual([
-      { id: 'exemplo-e2e', name: 'Exemplo', category: IntegrationCategory.Other },
-    ]);
+    expect(registry.all().map(({ id }) => id)).toEqual(['exemplo-e2e', 'telegram']);
     await expect(registry.healthCheck('exemplo-e2e')).resolves.toMatchObject({
       status: IntegrationStatus.Ready,
       // O `detail` do provider ('respondendo') nao sai: a mensagem e do registro.

@@ -10,6 +10,7 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { FinanceModule } from './modules/finance/finance.module';
 import { HealthModule } from './modules/health/health.module';
 import { IntegrationsModule } from './modules/integrations/integrations.module';
+import { TelegramModule } from './modules/integrations/telegram/telegram.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { PermissionsModule } from './modules/permissions/permissions.module';
 import { RolesModule } from './modules/roles/roles.module';
@@ -59,6 +60,10 @@ import { UsersModule } from './modules/users/users.module';
     // Foundation das integracoes externas: contrato, estados e registro.
     // Nenhuma integracao real, nenhuma rota e nenhuma chamada externa.
     IntegrationsModule,
+
+    // Canal Telegram: adapter do Command Engine. Sem rota HTTP; o recebimento
+    // por polling e opt-in (TELEGRAM_POLLING_ENABLED) e exige o token.
+    TelegramModule,
   ],
 })
 export class AppModule {}

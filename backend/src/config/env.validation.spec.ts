@@ -136,4 +136,35 @@ describe('validateEnv', () => {
       expect(env.SEED_ADMIN_EMAIL).toBe('admin@example.com');
     });
   });
+
+  describe('telegram', () => {
+    it('opcional: sem as variaveis, token ausente e polling desligado', () => {
+      const env = validateEnv(baseEnv);
+
+      expect(env.TELEGRAM_BOT_TOKEN).toBeUndefined();
+      expect(env.TELEGRAM_POLLING_ENABLED).toBe(false);
+    });
+
+    it('token em branco conta como ausente', () => {
+      expect(
+        validateEnv({ ...baseEnv, TELEGRAM_BOT_TOKEN: '   ' }).TELEGRAM_BOT_TOKEN,
+      ).toBeUndefined();
+    });
+
+    it('o polling so liga com true explicito', () => {
+      expect(
+        validateEnv({ ...baseEnv, TELEGRAM_POLLING_ENABLED: 'true' }).TELEGRAM_POLLING_ENABLED,
+      ).toBe(true);
+      expect(
+        validateEnv({ ...baseEnv, TELEGRAM_POLLING_ENABLED: 'false' }).TELEGRAM_POLLING_ENABLED,
+      ).toBe(false);
+      expect(
+        validateEnv({ ...baseEnv, TELEGRAM_POLLING_ENABLED: '' }).TELEGRAM_POLLING_ENABLED,
+      ).toBe(false);
+    });
+
+    it('polling ligado sem token nao impede a aplicacao de subir', () => {
+      expect(() => validateEnv({ ...baseEnv, TELEGRAM_POLLING_ENABLED: 'true' })).not.toThrow();
+    });
+  });
 });

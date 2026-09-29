@@ -26,3 +26,8 @@ process.env.SEED_ADMIN_EMAIL = 'admin@vasta.test';
 process.env.SEED_ADMIN_PASSWORD = 'AdminSenha1';
 process.env.SEED_ADMIN_NAME = 'Admin de Teste';
 process.env.FRONTEND_ORIGIN = '';
+
+// Telegram SEMPRE desligado nos testes, mesmo que o `.env` do desenvolvedor
+// tenha um token e o polling ligado: os e2e nunca falam com o Telegram real.
+process.env.TELEGRAM_BOT_TOKEN = '';
+process.env.TELEGRAM_POLLING_ENABLED = 'false';

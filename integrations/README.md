@@ -1,10 +1,11 @@
 # Integracoes externas
 
-> **Estado: nenhuma integracao foi implementada.**
+> **Estado: somente o Telegram foi implementado** - no backend, em
+> `backend/src/modules/integrations/telegram/` (ver secao abaixo).
 >
-> Esta pasta reserva a estrutura prevista no briefing. Nao ha, e nao deve haver
-> ate segunda ordem: endpoint, URL de API, token, credencial, payload ou metodo
-> HTTP de qualquer provedor.
+> Esta pasta reserva a estrutura prevista no briefing. Para os demais provedores
+> nao ha, e nao deve haver ate segunda ordem: endpoint, URL de API, token,
+> credencial, payload ou metodo HTTP.
 
 ## Por que as pastas estao vazias
 
@@ -21,7 +22,7 @@ precisar ser jogado fora. Cada integracao so sera escrita quando tivermos:
 | Pasta       | Provedor         | Pendencia                                        |
 | ----------- | ---------------- | ------------------------------------------------ |
 | `whatsapp/` | a definir        | Provedor nao escolhido (API oficial? terceiro?)   |
-| `telegram/` | Telegram Bot API | Definir bot, token e modelo (webhook ou polling)  |
+| `telegram/` | Telegram Bot API | Feito (polling) no backend; falta vincular usuario |
 | `plantae/`  | Plantae          | Sem documentacao de API e sem acesso              |
 | `nfse/`     | a definir        | Municipio e provedor nao definidos                |
 | `email/`    | SMTP             | Servidor, porta e politica de autenticacao        |

@@ -13,6 +13,8 @@ import type { PermissionCode } from '../permissions/permission-code.enum';
 export enum CommandChannel {
   /** Endpoint interno de teste (`POST /commands/execute`). */
   Test = 'test',
+  /** Adaptador do Telegram (`modules/integrations/telegram`). */
+  Telegram = 'telegram',
 }
 
 /**

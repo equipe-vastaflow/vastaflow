@@ -42,9 +42,9 @@ API REST -----------+                                              Repository
 Nenhuma regra de negocio pode ser duplicada por canal. Um adapter so faz
 traducao de formato.
 
-> Nenhum adapter foi implementado. Endpoints, autenticacao e payloads de
-> WhatsApp, Telegram, Plantae e NFS-e serao definidos apenas quando houver
-> documentacao e acesso oficiais.
+> O adapter do **Telegram** existe (ver "Canal Telegram" abaixo). WhatsApp,
+> Plantae e NFS-e continuam sem implementacao: endpoints, autenticacao e
+> payloads so serao definidos quando houver documentacao e acesso oficiais.
 
 ## Estrutura do backend
 
@@ -79,7 +79,9 @@ backend/src/
 │   ├── audit/                 [x] entity AuditLog, AuditService, GET /audit-logs (paginado)
 │   │                              usa UserDirectoryModule para nomear o responsavel
 │   ├── dashboard/             [x] GET /dashboard/summary - agrega os modulos acima
-│   └── integrations/          [x] foundation: contrato, estados e registro - sem provider real
+│   └── integrations/          [x] foundation: contrato, estados e registro
+│       ├── channels/          [x] mensagem e identidade externa, neutras de fornecedor
+│       └── telegram/          [x] canal Telegram (long polling) -> Command Engine
 ```
 
 ## Modelo de dados
@@ -644,9 +646,10 @@ sem recarregar a pagina.
 ## Integracoes externas: foundation
 
 `backend/src/modules/integrations/` define COMO uma integracao externa entra no
-sistema. Nenhuma integracao real existe: nao ha provider de Telegram, WhatsApp,
-Plantae, NFS-e nem e-mail, nenhum SDK instalado e nenhuma chamada externa. Sem
-entity, tabela, migration, rota HTTP ou permissao nova.
+sistema. A foundation em si nao faz chamada externa e nao instala SDK; a unica
+integracao real construida sobre ela e o Telegram (secao "Canal Telegram").
+WhatsApp, Plantae, NFS-e e e-mail nao tem provider. Sem entity, tabela,
+migration, rota HTTP ou permissao nova.
 
 Decisao da Etapa 5 (em aberto em `integrations/README.md`): o codigo das
 integracoes vive em `backend/src/modules/integrations/` como modulo Nest, e nao
@@ -693,6 +696,81 @@ Nenhum modulo de negocio depende da foundation ainda.
 **Fora do `/health` por enquanto.** Expor o estado das integracoes no endpoint
 publico sera decidido quando o primeiro provider real existir; o ponto de
 extensao (`HEALTH_INDICATORS`) ja esta la.
+
+## Canal Telegram
+
+Primeira integracao externa real: `backend/src/modules/integrations/telegram/`.
+O Telegram e so um canal - o Command Engine recebe o `CommandContext` de sempre
+e nao sabe de onde a mensagem veio (o canal e o rotulo `CommandChannel.Telegram`,
+o unico acrescimo ao motor).
+
+```
+getUpdates -> TelegramAdapter -> IncomingMessage (neutra)
+           -> ChannelIdentityResolver -> usuario interno | null
+           -> CommandContext -> CommandRouter -> CommandResult
+           -> texto -> sendMessage
+```
+
+| Peca | Papel |
+| ---- | ----- |
+| `TelegramApiClient` | Unico ponto de rede. `getMe`, `getUpdates`, `sendMessage` da Bot API oficial, `fetch` nativo, timeout explicito, erros em categorias fixas |
+| `toIncomingMessage` | Reduz o update a `IncomingMessage` (canal, conversa, remetente, texto, data). So texto, so remetente humano, so conversa 1:1 (regra abaixo) |
+| `ChannelIdentityResolver` | Identidade externa -> usuario interno. Nesta etapa: `UnlinkedIdentityResolver` (todos nao vinculados) |
+| `TelegramAdapter` | Monta o `CommandContext`, chama o `CommandRouter`, responde com o `reply` do motor |
+| `TelegramPollingService` | Long polling opt-in, um por processo, backoff 1s-60s, shutdown limpo |
+| `TelegramProvider` | `IntegrationProvider` da foundation: `NOT_CONFIGURED`/`READY` sem rede; health via `getMe` |
+
+**Identidade externa, sem vinculo automatico.** O id do remetente no Telegram
+e uma identidade EXTERNA e nunca vira usuario interno por convencao. Ainda nao
+existe mecanismo de vinculacao, entao o resolvedor devolve `null` para todos e
+o adapter responde apenas que a conta nao esta vinculada - **nenhum comando e
+executado pelo Telegram nesta etapa**, nenhum perfil e presumido e o RBAC nunca
+e avaliado para quem o sistema nao conhece. O resolvedor recebe so
+`{ channel, externalId }`: texto e payload nao escolhem o usuario. Quando a
+vinculacao existir, basta registrar outro resolvedor no token
+`CHANNEL_IDENTITY_RESOLVER`; adapter, polling e motor nao mudam.
+
+**Regra arquitetural temporaria: so conversa 1:1.** O mapper aceita apenas chat
+privado cujo id e o do proprio remetente; grupo, supergrupo e canal ficam fora
+do fluxo, sem resposta. Isto NAO e uma decisao de produto - essa decisao ainda
+nao foi tomada. E uma limitacao tecnica do modelo atual:
+
+1. o RBAC do Command Engine autoriza quem pede (`context.user`), mas num grupo a
+   resposta chega a todos os membros, inclusive a quem nao tem a permissao
+   exigida - nao existe autorizacao da audiencia;
+2. o `CommandContext` tem um so `conversationId` (destino) e um so `user`, o que
+   so e coerente quando os dois sao a mesma pessoa;
+3. em grupo o Telegram costuma enviar `/ajuda@NomeDoBot`, que o parser atual
+   classifica como malformado;
+4. sem vinculo, o bot responderia "nao vinculado" a cada mensagem do grupo.
+
+Suportar grupos exige decidir antes: quem pode usar o bot num grupo, se a
+resposta vai ao grupo ou ao privado de quem pediu, e como tratar
+`/comando@bot`. Ate la, a regra fica.
+
+**Recebimento por long polling, sem webhook.** Webhook exigiria URL publica,
+certificado e uma rota aberta na aplicacao. O polling roda em qualquer maquina
+e nao abre rota nenhuma. E opt-in: so inicia com `TELEGRAM_POLLING_ENABLED=true`
+e `TELEGRAM_BOT_TOKEN` preenchido - o Telegram recusa dois `getUpdates`
+simultaneos, entao so UM ambiente por bot deve liga-lo. O boot nunca depende do
+Telegram. O `offset` avanca antes de processar cada update (um update que quebre
+nao volta sem fim); updates processados e ainda nao confirmados podem ser
+reentregues depois de um reinicio.
+
+**Configuracao.** `TELEGRAM_BOT_TOKEN` (opcional; sem ele a integracao fica
+`NOT_CONFIGURED`) e `TELEGRAM_POLLING_ENABLED` (padrao `false`), validados em
+`env.validation.ts`. Os e2e forcam os dois vazios/falsos em `setup-env.ts`.
+
+**Token.** A URL da Bot API carrega o token (`/bot<token>/metodo`), entao a URL
+e tratada como segredo: o cliente descarta o erro original do `fetch` (nem como
+`cause`), nao repassa o `description` do Telegram e nao registra log. Os logs do
+canal levam so desfecho e categoria de falha - nunca token, URL, texto da
+mensagem, id do remetente ou a resposta.
+
+**Resposta.** O texto e o `reply` do proprio motor para todo desfecho (sucesso,
+desconhecido, sem permissao, nao-comando, falha do handler); o adapter so aplica
+o limite de 4096 caracteres e envia sem `parse_mode`. Sem auditoria por mensagem
+e sem comando novo.
 
 ## Tratamento de erros
 

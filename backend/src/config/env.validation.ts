@@ -198,6 +198,30 @@ export class EnvironmentVariables {
   @IsString()
   @MaxLength(120)
   SEED_ADMIN_NAME: string = 'Administrador';
+
+  // ---------------------------------------------------------------------
+  // Integracao: Telegram
+  // ---------------------------------------------------------------------
+
+  /**
+   * Token do bot, emitido pelo @BotFather. Opcional: sem ele a integracao fica
+   * `NOT_CONFIGURED` e a aplicacao sobe normalmente. E SEGREDO - nunca vai para
+   * log, resposta, relatorio de status nem mensagem de erro.
+   */
+  @Transform(optionalString)
+  @IsOptional()
+  @IsString()
+  TELEGRAM_BOT_TOKEN?: string;
+
+  /**
+   * Liga o recebimento de mensagens por long polling (`getUpdates`). Opt-in:
+   * o token sozinho NAO liga o polling, para que um ambiente com o token (dev,
+   * homologacao) nao dispute as mensagens do bot com outro - o Telegram recusa
+   * dois `getUpdates` simultaneos para o mesmo bot.
+   */
+  @Transform(({ value }: TransformInput): boolean => value === 'true' || value === true)
+  @IsBoolean({ message: "TELEGRAM_POLLING_ENABLED deve ser 'true' ou 'false'" })
+  TELEGRAM_POLLING_ENABLED: boolean = false;
 }
 
 function isBlank(value: unknown): boolean {
