@@ -9,6 +9,7 @@ import { CommandsModule } from './modules/commands/commands.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { FinanceModule } from './modules/finance/finance.module';
 import { HealthModule } from './modules/health/health.module';
+import { IntegrationsModule } from './modules/integrations/integrations.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { PermissionsModule } from './modules/permissions/permissions.module';
 import { RolesModule } from './modules/roles/roles.module';
@@ -55,8 +56,9 @@ import { UsersModule } from './modules/users/users.module';
     // (Telegram, WhatsApp) entrarao como modulos proprios que o importam.
     CommandsModule,
 
-    // Modulos das proximas etapas:
-    //   Etapa 5 - IntegrationsModule (apenas contratos)
+    // Foundation das integracoes externas: contrato, estados e registro.
+    // Nenhuma integracao real, nenhuma rota e nenhuma chamada externa.
+    IntegrationsModule,
   ],
 })
 export class AppModule {}

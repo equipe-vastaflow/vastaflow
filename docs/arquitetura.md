@@ -78,8 +78,8 @@ backend/src/
 │   ├── finance/               [x] lancamentos financeiros - primeiro dominio de negocio
 │   ├── audit/                 [x] entity AuditLog, AuditService, GET /audit-logs (paginado)
 │   │                              usa UserDirectoryModule para nomear o responsavel
-│   └── dashboard/             [x] GET /dashboard/summary - agrega os modulos acima
-└── integrations/              [ ] Etapa 5 - apenas contratos
+│   ├── dashboard/             [x] GET /dashboard/summary - agrega os modulos acima
+│   └── integrations/          [x] foundation: contrato, estados e registro - sem provider real
 ```
 
 ## Modelo de dados
@@ -640,6 +640,59 @@ O formulario tem um unico campo - o nome; e-mail, perfil, situacao e data de
 cadastro aparecem em bloco de leitura, sem campo de edicao. Depois de salvar, a
 sessao e relida (`refreshUser`) para o nome acompanhar no resto da aplicacao,
 sem recarregar a pagina.
+
+## Integracoes externas: foundation
+
+`backend/src/modules/integrations/` define COMO uma integracao externa entra no
+sistema. Nenhuma integracao real existe: nao ha provider de Telegram, WhatsApp,
+Plantae, NFS-e nem e-mail, nenhum SDK instalado e nenhuma chamada externa. Sem
+entity, tabela, migration, rota HTTP ou permissao nova.
+
+Decisao da Etapa 5 (em aberto em `integrations/README.md`): o codigo das
+integracoes vive em `backend/src/modules/integrations/` como modulo Nest, e nao
+num npm workspace separado.
+
+```
+modulo de negocio  ->  interface de capacidade (ex.: "enviar mensagem")
+                              |
+                   IntegrationProvider (adapter)  ->  servico externo
+                              |
+                   IntegrationRegistry (identidade, estado, health)
+```
+
+- **Contrato** (`IntegrationProvider`): `metadata` (id, nome, categoria),
+  `getStatus()` e `healthCheck()`. Pequeno de proposito: o que cada integracao
+  FAZ fica numa interface propria dela, definida quando ela existir. Nao ha
+  campo de credencial no contrato.
+- **Estados** (`IntegrationStatus`): `DISABLED`, `NOT_CONFIGURED`, `READY`,
+  `ERROR`. Decididos localmente, sem rede.
+- **Health check**: reutiliza `HealthIndicatorResult` (`ok`/`degraded`/`down`)
+  do `HealthModule` - nenhum vocabulario paralelo. So roda com a integracao em
+  `READY`; nos demais estados o registro nem chama o provider.
+- **Registro** (`IntegrationRegistry`): mesmo arranjo do `CommandCatalog`.
+  Identificador unico (duplicidade derruba o boot), `find`, `all` ordenado por
+  id, `status` e `healthCheck`. Registrar e listar nao executam nada do provider.
+  Falha de um provider vira `ERROR`/`down` sem afetar os demais.
+- **Configuracao**: `hasConfigValues(config, chaves)` diz se as chaves tem valor,
+  lendo pelo `ConfigService`, e devolve so um booleano. Nenhuma variavel de
+  integracao foi criada; o `.env.example` continua so reservando os prefixos.
+- **Sem segredo na saida**: tudo o que o registro devolve e uma copia com campos
+  escolhidos (id, nome, categoria, estado, `status`/`detail` do health). O
+  `detail` do provider e descartado: o registro expoe uma mensagem fixa por
+  estado (`disponivel`, `disponivel com restricoes`, `indisponivel`, ou
+  `verificacao falhou` quando o health check lanca excecao). O log de
+  falha registra so o NOME do erro - a mensagem de um cliente HTTP pode trazer a
+  URL, e a URL pode trazer o token.
+
+**Regra de dependencia.** O `IntegrationsModule` nao importa nenhum modulo, e um
+teste de arquitetura falha se algum arquivo dele importar algo fora do Nest e do
+tipo de health. Uma integracao futura e um modulo proprio que importa este e
+registra o seu provider no `onModuleInit`; o registro nunca conhece o provider.
+Nenhum modulo de negocio depende da foundation ainda.
+
+**Fora do `/health` por enquanto.** Expor o estado das integracoes no endpoint
+publico sera decidido quando o primeiro provider real existir; o ponto de
+extensao (`HEALTH_INDICATORS`) ja esta la.
 
 ## Tratamento de erros
 

@@ -25,7 +25,7 @@ precisar ser jogado fora. Cada integracao so sera escrita quando tivermos:
 | `plantae/`  | Plantae          | Sem documentacao de API e sem acesso              |
 | `nfse/`     | a definir        | Municipio e provedor nao definidos                |
 | `email/`    | SMTP             | Servidor, porta e politica de autenticacao        |
-| `index/`    | -                | Registro central das integracoes disponiveis      |
+| `index/`    | -                | Feito: `IntegrationRegistry` no backend           |
 
 ## Regra de isolamento
 
@@ -36,14 +36,13 @@ provedor de WhatsApp, por exemplo, nao pode exigir mudanca em nenhum service.
 Os canais conversacionais (WhatsApp, Telegram) compartilham o mesmo caminho
 interno; ver [docs/arquitetura.md](../docs/arquitetura.md).
 
-## Decisao em aberto
+## Decisao da Etapa 5: onde fica o codigo
 
-Como esta pasta se conecta ao backend ainda **nao foi decidido**. Duas opcoes:
+O codigo das integracoes vive em **`backend/src/modules/integrations/`**, como
+modulo Nest (DI, testes e build do proprio backend), e nao num npm workspace.
+Ali ja esta a foundation: contrato `IntegrationProvider`, estados e
+`IntegrationRegistry` - ver [docs/arquitetura.md](../docs/arquitetura.md).
 
-1. **npm workspace** - `integrations/` vira um pacote consumido pelo backend.
-   Mais isolamento, mais configuracao.
-2. **Mover para `backend/src/integrations/`** - mais simples, porem foge da
-   estrutura pedida no briefing.
-
-A escolha sera feita na Etapa 5, quando a primeira integracao for de fato
-implementada. Ate la, nao duplicar a estrutura nos dois lugares.
+As pastas desta raiz ficam como registro das pendencias de cada provedor (tabela
+acima). Nenhum codigo de integracao deve ser criado aqui: cada provider real
+entrara como modulo proprio dentro do backend.
