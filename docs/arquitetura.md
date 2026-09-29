@@ -100,7 +100,7 @@ AuditLog   (usuario_id sem FK, de proposito: a trilha sobrevive ao usuario)
 | `audit_logs`       | `id`, `usuario_id` (nulo se nao identificado), `acao`, `modulo`, `descricao`, `ip`, `metadados` (JSON, nulo), `created_at` |
 | `financial_entries` | `id`, `tipo`, `descricao`, `valor` DECIMAL(15,2), `data` DATE, `categoria`, `status`, `observacao` (nulo), `criado_por_id` (sem FK), `created_at`, `updated_at` |
 | `system_settings`  | `id`, `chave` (unica), `valor` (texto), `descricao`, `tipo`, `atualizado_por_id` (nulo, sem FK), `created_at`, `updated_at` |
-| `notifications`    | `id`, `usuario_id` (destinatario, sem FK), `titulo`, `mensagem`, `tipo`, `lida`, `created_at`, `updated_at` |
+| `notifications`    | `id`, `usuario_id` (destinatario, sem FK), `titulo`, `mensagem`, `tipo`, `lida`, `created_at`, `updated_at`, `read_at` (nulo enquanto nao lida) |
 
 `metadados` guarda detalhes adicionais da operacao como JSON (`text` no MySQL,
 `CLOB` no Oracle). Antes de gravar, o `AuditService` remove valores de chaves
@@ -498,6 +498,13 @@ ou altere notificacao sem dizer de quem ela e.
 Consultar notificacao alheia responde **404**, e nao 403: um 403 confirmaria que
 aquele id existe. De fora, id inexistente e id de outra pessoa sao
 indistinguiveis - inclusive no corpo do erro.
+
+**Marcar como lida e um UPDATE direcionado**, sem find -> mutate -> save:
+`SET lida = 1, read_at = ?, updated_at = ? WHERE id = ? AND usuario_id = ? AND
+lida = 0`, seguido de uma releitura filtrada pelo dono. O `lida = 0` torna a
+operacao idempotente de verdade: `read_at` guarda o horario da PRIMEIRA leitura,
+e requisicoes simultaneas nao se sobrescrevem. `read-all` segue a mesma regra.
+A resposta traz `readAt`; `updatedAt` continua na resposta por compatibilidade.
 
 **Criacao.** Nao ha `POST` nem `DELETE`. Quem cria e outro modulo do sistema,
 pelo `NotificationsService.createForUser({ usuarioId, titulo, mensagem, tipo })`.

@@ -73,19 +73,20 @@ export class NotificationsService {
   /**
    * Marca uma notificacao do usuario como lida.
    *
-   * Idempotente: se ja estava lida, responde o estado atual sem gravar de novo
-   * - mesmo criterio de repetir o status atual no financeiro.
+   * UPDATE direcionado primeiro, releitura depois - sem find -> mutate -> save.
+   * O `UPDATE` so alcanca a linha se ela for do usuario E ainda estiver por
+   * ler; a releitura, tambem filtrada pelo dono, devolve o estado real.
+   *
+   * Idempotente: ja lida, o `UPDATE` nao alcanca nada e a resposta traz o
+   * `readAt` da primeira leitura, intacto - mesmo sob requisicoes simultaneas.
+   * Id inexistente e id de outra pessoa tambem nao alcancam nada, e a releitura
+   * responde 404 nos dois casos, indistinguiveis.
    *
    * @throws NotFoundException id inexistente OU de outro usuario.
    */
   async markAsRead(usuarioId: string, id: string): Promise<Notification> {
-    const notification = await this.get(usuarioId, id);
-    if (notification.lida) {
-      return notification;
-    }
-
-    notification.lida = true;
-    return this.repository.save(notification);
+    await this.repository.markAsReadForUser(id, usuarioId, new Date());
+    return this.get(usuarioId, id);
   }
 
   /**
@@ -132,6 +133,6 @@ export class NotificationsService {
       throw new BadRequestException(`Notificacao invalida: ${validado.erro}`);
     }
 
-    return this.repository.create({ ...validado.value, lida: false });
+    return this.repository.create({ ...validado.value, lida: false, readAt: null });
   }
 }

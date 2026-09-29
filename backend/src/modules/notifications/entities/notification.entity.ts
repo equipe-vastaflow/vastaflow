@@ -71,4 +71,16 @@ export class Notification {
 
   @UpdateDateColumn({ name: 'updated_at' })
   updatedAt: Date;
+
+  /**
+   * Quando a notificacao foi marcada como lida. `null` enquanto `lida` e falso.
+   *
+   * Gravado uma unica vez, pelo UPDATE direcionado de `NotificationsRepository`
+   * (`WHERE lida = 0`): marcar de novo nao alcanca a linha e nao muda o horario.
+   *
+   * `type: Date` com precisao 6: o mesmo tipo que o driver escolhe para
+   * `created_at` - `datetime(6)` no MySQL, `timestamp(6)` no Oracle.
+   */
+  @Column({ name: 'read_at', type: Date, precision: 6, nullable: true })
+  readAt: Date | null;
 }

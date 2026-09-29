@@ -28,8 +28,20 @@ export class NotificationResponseDto {
   @ApiProperty({ format: 'date-time' })
   createdAt: Date;
 
-  @ApiProperty({ format: 'date-time', description: 'Quando foi marcada como lida, se ja foi' })
+  /**
+   * Mantido por compatibilidade: o frontend o lia como momento da leitura antes
+   * de `readAt` existir. Para saber quando foi lida, use `readAt`.
+   */
+  @ApiProperty({ format: 'date-time', description: 'Ultima alteracao do registro' })
   updatedAt: Date;
+
+  @ApiProperty({
+    format: 'date-time',
+    nullable: true,
+    type: String,
+    description: 'Quando foi marcada como lida pela primeira vez; null enquanto nao lida',
+  })
+  readAt: Date | null;
 }
 
 export function toNotificationResponse(notification: Notification): NotificationResponseDto {
@@ -41,5 +53,6 @@ export function toNotificationResponse(notification: Notification): Notification
     lida: notification.lida,
     createdAt: notification.createdAt,
     updatedAt: notification.updatedAt,
+    readAt: notification.readAt,
   };
 }

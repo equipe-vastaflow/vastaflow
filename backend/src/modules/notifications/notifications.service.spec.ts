@@ -18,6 +18,7 @@ function notification(overrides: Partial<Notification> = {}): Notification {
     lida: false,
     createdAt: new Date('2026-09-24T10:00:00.000Z'),
     updatedAt: new Date('2026-09-24T10:00:00.000Z'),
+    readAt: null,
     ...overrides,
   };
 }
@@ -37,7 +38,7 @@ describe('NotificationsService', () => {
       | 'findPageForUser'
       | 'countUnreadForUser'
       | 'create'
-      | 'save'
+      | 'markAsReadForUser'
       | 'markAllAsReadForUser'
     >
   >;
@@ -49,7 +50,7 @@ describe('NotificationsService', () => {
       findPageForUser: jest.fn().mockResolvedValue([[notification()], 1]),
       countUnreadForUser: jest.fn().mockResolvedValue(0),
       create: jest.fn().mockImplementation((data: object) => Promise.resolve(notification(data))),
-      save: jest.fn().mockImplementation((n: Notification) => Promise.resolve(n)),
+      markAsReadForUser: jest.fn().mockResolvedValue(1),
       markAllAsReadForUser: jest.fn().mockResolvedValue(undefined),
     };
     service = new NotificationsService(repository as unknown as NotificationsRepository);
@@ -139,46 +140,61 @@ describe('NotificationsService', () => {
     });
   });
 
+  /**
+   * UPDATE direcionado + releitura. O `WHERE` do repositorio (dono e
+   * `lida = 0`) e testado contra o banco no e2e; aqui, o que o servico pede.
+   */
   describe('markAsRead', () => {
-    it('nao lida passa a lida', async () => {
+    const LIDA_EM = new Date('2026-09-25T08:00:00.000Z');
+
+    it('grava por UPDATE direcionado, com o dono e o horario', async () => {
+      await service.markAsRead(DONO, 'notif-1');
+
+      expect(repository.markAsReadForUser).toHaveBeenCalledTimes(1);
+      expect(repository.markAsReadForUser).toHaveBeenCalledWith('notif-1', DONO, expect.any(Date));
+    });
+
+    it('devolve o estado relido do banco, com readAt preenchido', async () => {
+      repository.findByIdForUser.mockResolvedValue(notification({ lida: true, readAt: LIDA_EM }));
+
       const lida = await service.markAsRead(DONO, 'notif-1');
 
       expect(lida.lida).toBe(true);
-      expect(repository.save).toHaveBeenCalledTimes(1);
+      expect(lida.readAt).toBe(LIDA_EM);
+      // A releitura acontece DEPOIS do UPDATE, e tambem filtrada pelo dono.
+      expect(repository.findByIdForUser).toHaveBeenCalledWith('notif-1', DONO);
+      expect(repository.markAsReadForUser.mock.invocationCallOrder[0]).toBeLessThan(
+        repository.findByIdForUser.mock.invocationCallOrder[0],
+      );
     });
 
-    it('ja lida continua lida, sem gravar de novo', async () => {
-      repository.findByIdForUser.mockResolvedValue(notification({ lida: true }));
+    it('ja lida: o UPDATE nao alcanca nada e o readAt original volta intacto', async () => {
+      repository.markAsReadForUser.mockResolvedValue(0);
+      repository.findByIdForUser.mockResolvedValue(notification({ lida: true, readAt: LIDA_EM }));
 
       const resultado = await service.markAsRead(DONO, 'notif-1');
 
       expect(resultado.lida).toBe(true);
-      expect(repository.save).not.toHaveBeenCalled();
+      expect(resultado.readAt).toBe(LIDA_EM);
     });
 
-    it('repetir a operacao e seguro', async () => {
-      const alvo = notification();
-      repository.findByIdForUser.mockResolvedValue(alvo);
-
-      await service.markAsRead(DONO, 'notif-1');
-      await service.markAsRead(DONO, 'notif-1');
-
-      expect(alvo.lida).toBe(true);
-      // A segunda chamada ja encontra `lida` e nao grava.
-      expect(repository.save).toHaveBeenCalledTimes(1);
-    });
-
-    it('notificacao de outro usuario nao pode ser alterada', async () => {
+    it('notificacao de outro usuario: 404, e o UPDATE levou o dono verdadeiro', async () => {
+      repository.markAsReadForUser.mockResolvedValue(0);
       repository.findByIdForUser.mockResolvedValue(null);
 
       await expect(service.markAsRead(OUTRO, 'notif-1')).rejects.toBeInstanceOf(NotFoundException);
-      expect(repository.save).not.toHaveBeenCalled();
+      expect(repository.markAsReadForUser).toHaveBeenCalledWith('notif-1', OUTRO, expect.any(Date));
     });
 
-    it('a busca leva o usuario junto: nunca ha leitura sem dono', async () => {
-      await service.markAsRead(DONO, 'notif-1');
+    it('id inexistente: 404', async () => {
+      repository.markAsReadForUser.mockResolvedValue(0);
+      repository.findByIdForUser.mockResolvedValue(null);
 
-      expect(repository.findByIdForUser).toHaveBeenCalledWith('notif-1', DONO);
+      await expect(service.markAsRead(DONO, 'sumida')).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('nao persiste a entidade inteira: o repositorio nem expoe mais save', () => {
+      expect(Object.getOwnPropertyNames(NotificationsRepository.prototype)).not.toContain('save');
     });
   });
 
@@ -218,7 +234,7 @@ describe('NotificationsService', () => {
       await service.markAllAsRead(DONO);
 
       expect(repository.markAllAsReadForUser).toHaveBeenCalledTimes(1);
-      expect(repository.save).not.toHaveBeenCalled();
+      expect(repository.markAsReadForUser).not.toHaveBeenCalled();
     });
   });
 
@@ -232,6 +248,7 @@ describe('NotificationsService', () => {
         mensagem: 'Mensagem',
         tipo: NotificationType.Info,
         lida: false,
+        readAt: null,
       });
     });
 

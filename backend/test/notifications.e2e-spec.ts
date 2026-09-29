@@ -244,7 +244,7 @@ describe('Notificacoes (e2e)', () => {
         .expect(200);
 
       expect(Object.keys(response.body as object).sort()).toEqual(
-        ['createdAt', 'id', 'lida', 'mensagem', 'tipo', 'titulo', 'updatedAt'].sort(),
+        ['createdAt', 'id', 'lida', 'mensagem', 'readAt', 'tipo', 'titulo', 'updatedAt'].sort(),
       );
     });
   });
@@ -465,6 +465,139 @@ describe('Notificacoes (e2e)', () => {
         .expect(400);
 
       expect(await contar(ana)).toBe(1);
+    });
+  });
+
+  /**
+   * `read_at` e o UPDATE direcionado de "marcar como lida".
+   *
+   * Estes testes conferem a LINHA NO BANCO, e nao so a resposta HTTP: a
+   * propriedade em jogo e o que ficou persistido.
+   */
+  describe('readAt e gravacao direcionada', () => {
+    interface LinhaCrua {
+      usuario_id: string;
+      titulo: string;
+      mensagem: string;
+      tipo: string;
+      lida: boolean;
+      created_at: string;
+      read_at: string | null;
+    }
+
+    /** A linha como esta no banco, sem passar pela API. */
+    async function linha(id: string): Promise<LinhaCrua> {
+      const [row] = await dataSource.query<(Omit<LinhaCrua, 'lida'> & { lida: number })[]>(
+        'SELECT usuario_id, titulo, mensagem, tipo, lida, created_at, read_at FROM notifications WHERE id = ?',
+        [id],
+      );
+      return { ...row, lida: Boolean(row.lida) };
+    }
+
+    /** Horario de leitura fixo e antigo, para provar que nada o sobrescreve. */
+    const LIDA_ANTES = '2026-01-02 03:04:05.678';
+
+    it('nasce com lida = false e readAt nulo, no banco e na resposta', async () => {
+      const id = await notificar(ana);
+
+      expect(await linha(id)).toMatchObject({ lida: false, read_at: null });
+      expect((await listar(ana)).items[0]).toMatchObject({ id, lida: false, readAt: null });
+    });
+
+    it('marcar como lida preenche readAt, no banco e na resposta', async () => {
+      const id = await notificar(ana);
+      const antes = Date.now();
+
+      const resposta = await marcarLida(ana, id, 200);
+
+      expect(resposta.lida).toBe(true);
+      expect(resposta.readAt).not.toBeNull();
+      expect(new Date(resposta.readAt as unknown as string).getTime()).toBeGreaterThanOrEqual(
+        antes - 1000,
+      );
+      const depois = await linha(id);
+      expect(depois.lida).toBe(true);
+      expect(depois.read_at).not.toBeNull();
+    });
+
+    it('marcar de novo nao altera o readAt da primeira leitura', async () => {
+      const id = await notificar(ana);
+      await marcarLida(ana, id, 200);
+      await dataSource.query('UPDATE notifications SET read_at = ? WHERE id = ?', [LIDA_ANTES, id]);
+
+      const segunda = await marcarLida(ana, id, 200);
+
+      expect((await linha(id)).read_at).toBe(LIDA_ANTES);
+      expect(new Date(segunda.readAt as unknown as string).getTime()).toBe(
+        new Date(`${LIDA_ANTES.replace(' ', 'T')}Z`).getTime(),
+      );
+    });
+
+    it('so lida, read_at e updated_at mudam: o resto da linha fica intacto', async () => {
+      const id = await notificar(ana, { titulo: 'Intacta', tipo: NotificationType.Warning });
+      const antes = await linha(id);
+
+      await marcarLida(ana, id, 200);
+
+      const { lida, read_at: readAt, ...resto } = await linha(id);
+      const { lida: _l, read_at: _r, ...restoAntes } = antes;
+      expect(resto).toEqual(restoAntes);
+      expect(lida).toBe(true);
+      expect(readAt).not.toBeNull();
+    });
+
+    it('requisicoes simultaneas: todas 200, uma unica leitura gravada', async () => {
+      const id = await notificar(ana);
+
+      const respostas = await Promise.all(
+        Array.from({ length: 5 }, () =>
+          request(server())
+            .patch(`/notifications/${id}/read`)
+            .set('Authorization', bearer(ana.token)),
+        ),
+      );
+
+      expect(respostas.map((r) => r.status)).toEqual([200, 200, 200, 200, 200]);
+      const horarios = new Set(
+        respostas.map((r) => (r.body as NotificationResponseDto).readAt as unknown as string),
+      );
+      // Todas devolvem o MESMO horario: nenhuma sobrescreveu a primeira.
+      expect(horarios.size).toBe(1);
+      expect(await linha(id)).toMatchObject({ lida: true });
+      expect(await contar(ana)).toBe(0);
+    });
+
+    it('outro usuario tentando marcar: a linha da dona continua sem readAt', async () => {
+      const id = await notificar(ana);
+
+      await marcarLida(bruno, id, 404);
+
+      expect(await linha(id)).toMatchObject({ lida: false, read_at: null, usuario_id: ana.id });
+    });
+
+    it('read-all preenche readAt das nao lidas e preserva o das ja lidas', async () => {
+      const jaLida = await notificar(ana);
+      const nova = await notificar(ana);
+      await marcarLida(ana, jaLida, 200);
+      await dataSource.query('UPDATE notifications SET read_at = ? WHERE id = ?', [
+        LIDA_ANTES,
+        jaLida,
+      ]);
+
+      expect(await marcarTodas(ana)).toEqual({ atualizadas: 1 });
+
+      expect((await linha(jaLida)).read_at).toBe(LIDA_ANTES);
+      expect(await linha(nova)).toMatchObject({ lida: true });
+      expect((await linha(nova)).read_at).not.toBeNull();
+    });
+
+    it('read-all nao preenche readAt de notificacao de outro usuario', async () => {
+      await notificar(ana);
+      const doBruno = await notificar(bruno);
+
+      await marcarTodas(ana);
+
+      expect(await linha(doBruno)).toMatchObject({ lida: false, read_at: null });
     });
   });
 

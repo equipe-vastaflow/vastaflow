@@ -5,7 +5,7 @@ import { Notification } from './entities/notification.entity';
 
 export type NewNotification = Pick<
   Notification,
-  'usuarioId' | 'titulo' | 'mensagem' | 'tipo' | 'lida'
+  'usuarioId' | 'titulo' | 'mensagem' | 'tipo' | 'lida' | 'readAt'
 >;
 
 /**
@@ -70,8 +70,34 @@ export class NotificationsRepository {
     return this.repository.save(this.repository.create(data));
   }
 
-  save(notification: Notification): Promise<Notification> {
-    return this.repository.save(notification);
+  /**
+   * Marca UMA notificacao do usuario como lida, num unico `UPDATE` direcionado.
+   *
+   * Substitui o antigo find -> mutate -> `save`. O `WHERE` faz o trabalho todo:
+   *
+   * - `usuario_id`: notificacao de outra pessoa nunca e alcancada;
+   * - `lida = 0`: uma notificacao ja lida nao e regravada, entao `read_at`
+   *   guarda o horario da PRIMEIRA leitura. Duas requisicoes simultaneas nao
+   *   se sobrescrevem: a segunda encontra `lida = 1` e nao alcanca a linha.
+   *
+   * Cita apenas `lida`, `read_at` e `updated_at`. `updated_at` vai explicito
+   * pelo mesmo motivo de `markAllAsReadForUser`.
+   *
+   * @returns quantas linhas mudaram: zero quando a notificacao ja estava lida,
+   *   nao existe ou e de outro usuario. Quem chama distingue os casos pela
+   *   releitura, nao por aqui.
+   */
+  async markAsReadForUser(id: string, usuarioId: string, quando: Date): Promise<number> {
+    const result = await this.repository
+      .createQueryBuilder()
+      .update(Notification)
+      .set({ lida: () => '1', readAt: quando, updatedAt: quando })
+      .where('id = :id', { id })
+      .andWhere('usuario_id = :usuarioId', { usuarioId })
+      .andWhere('lida = 0')
+      .execute();
+
+    return result.affected ?? 0;
   }
 
   /**
@@ -79,13 +105,15 @@ export class NotificationsRepository {
    *
    * `lida` recebe o literal `1` e `updated_at` recebe a data explicitamente: um
    * `UPDATE` por query builder nao dispara o `@UpdateDateColumn`, e o
-   * `ON UPDATE CURRENT_TIMESTAMP` existe no MySQL mas nao no Oracle.
+   * `ON UPDATE CURRENT_TIMESTAMP` existe no MySQL mas nao no Oracle. `read_at`
+   * so e preenchido nas que ainda estavam por ler (`lida = 0`): as ja lidas
+   * mantem o horario da primeira leitura.
    */
   async markAllAsReadForUser(usuarioId: string, quando: Date): Promise<void> {
     await this.repository
       .createQueryBuilder()
       .update(Notification)
-      .set({ lida: () => '1', updatedAt: quando })
+      .set({ lida: () => '1', readAt: quando, updatedAt: quando })
       .where('usuario_id = :usuarioId', { usuarioId })
       .andWhere('lida = 0')
       .execute();
