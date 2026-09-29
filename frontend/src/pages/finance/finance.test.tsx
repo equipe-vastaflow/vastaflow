@@ -4,6 +4,7 @@ import { MemoryRouter } from 'react-router';
 import { App } from '../../App';
 import type { FinancialEntry, FinancialEntryPage, RoleName, User } from '../../api/client';
 import { AuthProvider } from '../../auth/AuthContext';
+import { formatCurrency, formatEntryDate, parseAmount } from './finance-format';
 
 type Reply = { status: number; body?: unknown };
 type Handler = Reply | ((init: RequestInit | undefined) => Reply | Promise<Reply>);
@@ -777,5 +778,124 @@ describe('detalhes', () => {
     expect(await screen.findByRole('heading', { name: 'Pedido antigo' })).toBeInTheDocument();
     expect(screen.getByText('Cancelado')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Editar' })).not.toBeInTheDocument();
+  });
+});
+
+describe('sessao e chamadas a API', () => {
+  it('sessao recusada (401) durante a consulta leva ao login', async () => {
+    mockApi(
+      session(GESTOR, {
+        'GET /finance/entries': { status: 401, body: { message: 'Token de acesso invalido ou expirado' } },
+        'POST /auth/logout': { status: 401 },
+      }),
+    );
+
+    renderAt('/finance');
+
+    expect(await screen.findByRole('button', { name: 'Entrar' })).toBeInTheDocument();
+  });
+
+  it('sessao recusada (401) ao mudar o status leva ao login', async () => {
+    mockApi(
+      session(GESTOR, {
+        'GET /finance/entries': { status: 200, body: page([makeEntry()]) },
+        'PATCH /finance/entries/entry-1/status': {
+          status: 401,
+          body: { message: 'Token de acesso invalido ou expirado' },
+        },
+        'POST /auth/logout': { status: 401 },
+      }),
+    );
+    const user = userEvent.setup();
+
+    renderAt('/finance');
+    await user.click(within(await rowOf('Compra de insumos')).getByRole('button', { name: 'Marcar como pago' }));
+    await user.click(screen.getByRole('button', { name: 'Confirmar pagamento' }));
+
+    expect(await screen.findByRole('button', { name: 'Entrar' })).toBeInTheDocument();
+  });
+
+  it('403 ao mudar o status vira mensagem de permissao', async () => {
+    mockApi(
+      session(GESTOR, {
+        'GET /finance/entries': { status: 200, body: page([makeEntry()]) },
+        'PATCH /finance/entries/entry-1/status': { status: 403, body: { message: 'Forbidden resource' } },
+      }),
+    );
+    const user = userEvent.setup();
+
+    renderAt('/finance');
+    await user.click(within(await rowOf('Compra de insumos')).getByRole('button', { name: 'Marcar como pago' }));
+    await user.click(screen.getByRole('button', { name: 'Confirmar pagamento' }));
+
+    const alerta = await screen.findByRole('alert');
+    expect(alerta).toHaveTextContent('Você não tem permissão para esta ação.');
+    expect(alerta).not.toHaveTextContent('Forbidden');
+  });
+
+  it('a listagem faz uma unica consulta, sem GET por lancamento (sem N+1)', async () => {
+    const fetchMock = mockApi(
+      session(GESTOR, {
+        'GET /finance/entries': { status: 200, body: page([makeEntry(), RECEITA, PAGO, CANCELADO]) },
+      }),
+    );
+
+    renderAt('/finance');
+    await rowOf('Pedido antigo');
+
+    expect(callsTo(fetchMock, 'GET /finance/entries')).toBe(1);
+    const individuais = fetchMock.mock.calls.filter(([url]) =>
+      new URL(url as string).pathname.startsWith('/finance/entries/'),
+    );
+    expect(individuais).toHaveLength(0);
+    // O autor vem na propria resposta: nenhuma busca de usuario por linha.
+    expect(fetchMock.mock.calls.some(([url]) => new URL(url as string).pathname.startsWith('/users'))).toBe(
+      false,
+    );
+  });
+
+  it('com a API vazia, nenhum dado financeiro aparece', async () => {
+    mockApi(session(GESTOR, { 'GET /finance/entries': { status: 200, body: page([]) } }));
+
+    renderAt('/finance');
+
+    expect(await screen.findByText('Nenhum lançamento registrado ainda.')).toBeInTheDocument();
+    // Nem valor, nem saldo, nem total inventados; nem badges de tipo/status.
+    expect(screen.queryByText(/R\$/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/saldo|total/i)).not.toBeInTheDocument();
+    for (const rotulo of ['Receita', 'Despesa', 'Pendente', 'Pago', 'Cancelado']) {
+      expect(screen.queryByText(rotulo)).not.toBeInTheDocument();
+    }
+    expect(screen.queryByRole('navigation', { name: /pagina/i })).not.toBeInTheDocument();
+  });
+});
+
+describe('formatacao', () => {
+  /** O Intl separa `R$` do numero com espaco nao separavel. */
+  const normalizado = (texto: string): string => texto.replace(/\s/g, ' ');
+
+  it('formata o valor como moeda brasileira', () => {
+    expect(normalizado(formatCurrency(1250.5))).toBe('R$ 1.250,50');
+    expect(normalizado(formatCurrency(0.01))).toBe('R$ 0,01');
+    expect(normalizado(formatCurrency(9999999999999.99))).toBe('R$ 9.999.999.999.999,99');
+  });
+
+  it('formata a data civil sem passar por fuso', () => {
+    expect(formatEntryDate('2026-09-29')).toBe('29/09/2026');
+    expect(formatEntryDate('2026-01-01')).toBe('01/01/2026');
+    // Formato inesperado aparece como veio, sem inventar uma data.
+    expect(formatEntryDate('29/09/2026')).toBe('29/09/2026');
+  });
+
+  it('aceita valor positivo com ate duas casas, com virgula ou ponto', () => {
+    expect(parseAmount('1250,50')).toBe(1250.5);
+    expect(parseAmount('1250.5')).toBe(1250.5);
+    expect(parseAmount(' 10 ')).toBe(10);
+  });
+
+  it('recusa valor invalido, zero, negativo ou com mais de duas casas', () => {
+    for (const invalido of ['', 'abc', '0', '0,00', '-5', '1,234', '1.000,00', '12345678901234']) {
+      expect(parseAmount(invalido)).toBeNull();
+    }
   });
 });
