@@ -1,14 +1,17 @@
 import type { Server } from 'node:http';
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
+import { DataSource } from 'typeorm';
 import type { ErrorResponseDto } from '../src/common/dto/error-response.dto';
 import type { AuditLogPageResponseDto } from '../src/modules/audit/dto/audit-log-page-response.dto';
 import type { AuditLogResponseDto } from '../src/modules/audit/dto/audit-log-response.dto';
 import { AuditRepository } from '../src/modules/audit/audit.repository';
 import type { AuthResponseDto } from '../src/modules/auth/dto/auth-response.dto';
+import { Role } from '../src/modules/roles/entities/role.entity';
 import { RoleName } from '../src/modules/roles/role-name.enum';
 import type { UserPageResponseDto } from '../src/modules/users/dto/user-page-response.dto';
 import type { UserResponseDto } from '../src/modules/users/dto/user-response.dto';
+import { UsersRepository } from '../src/modules/users/users.repository';
 import { UsersService } from '../src/modules/users/users.service';
 import { createTestApp } from './support/test-app';
 
@@ -554,6 +557,297 @@ describe('Administracao de usuarios (e2e)', () => {
       await isolatedPatch(`/users/${second.id}/status`, { ativo: false }).expect(200);
       // Voltou a ser o unico ADMIN ativo.
       await isolatedPatch(`/users/${adminId}/status`, { ativo: false }).expect(409);
+    });
+  });
+
+  /**
+   * C1/C2: a edicao geral (`PATCH /users/:id`) grava por UPDATE DIRECIONADO.
+   *
+   * Todos os testes daqui conferem a LINHA NO BANCO, nao a resposta HTTP: a
+   * propriedade em jogo e o que ficou persistido. Com o antigo `save(entity)`,
+   * uma entidade lida antes de uma alteracao administrativa concorrente
+   * reescrevia `ativo`, `role_id` e `senha_hash` com os valores antigos.
+   *
+   * O instante da alteracao concorrente e simulado: ela e aplicada no banco no
+   * momento exato em que a gravacao do PATCH vai acontecer - o instante que o
+   * `save` nao sobrevivia.
+   */
+  describe('PATCH /users/:id: gravacao direcionada', () => {
+    let dataSource: DataSource;
+    let usersRepository: UsersRepository;
+
+    beforeAll(() => {
+      dataSource = app.get(DataSource, { strict: false });
+      usersRepository = app.get(UsersRepository, { strict: false });
+    });
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    interface LinhaCrua {
+      nome: string;
+      email: string;
+      senha_hash: string;
+      ativo: boolean;
+      role_id: string;
+    }
+
+    /** A linha do usuario como esta no banco, sem passar pela API. */
+    async function linha(id: string): Promise<LinhaCrua> {
+      const [row] = await dataSource.query<
+        { nome: string; email: string; senha_hash: string; ativo: number; role_id: string }[]
+      >('SELECT nome, email, senha_hash, ativo, role_id FROM users WHERE id = ?', [id]);
+      return { ...row, ativo: Boolean(row.ativo) };
+    }
+
+    async function roleIdDe(nome: RoleName): Promise<string> {
+      const role = await dataSource.getRepository(Role).findOneByOrFail({ nome });
+      return role.id;
+    }
+
+    /** Cria um alvo que o GESTOR pode gerenciar. */
+    async function alvo(): Promise<Session> {
+      return sessionFor(RoleName.Usuario);
+    }
+
+    /**
+     * Aplica a alteracao administrativa EXATAMENTE entre a leitura do alvo e a
+     * gravacao do PATCH, e devolve o que o admin gravou.
+     */
+    function adminAlteraDuranteAGravacao(id: string, sql: string, params: unknown[]): void {
+      const real = usersRepository.updateFields.bind(usersRepository);
+      jest
+        .spyOn(usersRepository, 'updateFields')
+        .mockImplementation(async (alvoId, campos, quando) => {
+          await dataSource.query(sql, [...params, id]);
+          return real(alvoId, campos, quando);
+        });
+    }
+
+    describe('alteracao simples', () => {
+      it('altera so o nome, sem tocar em e-mail, status, perfil nem hash', async () => {
+        const target = await alvo();
+        const antes = await linha(target.id);
+
+        await patch(admin, `/users/${target.id}`, { nome: 'Nome Novo' }).expect(200);
+
+        expect(await linha(target.id)).toEqual({ ...antes, nome: 'Nome Novo' });
+      });
+
+      it('altera so o e-mail, sem tocar em nome, status, perfil nem hash', async () => {
+        const target = await alvo();
+        const antes = await linha(target.id);
+        const novo = uniqueEmail('trocado');
+
+        await patch(admin, `/users/${target.id}`, { email: novo }).expect(200);
+
+        expect(await linha(target.id)).toEqual({ ...antes, email: novo });
+      });
+
+      it('altera nome e e-mail juntos, e nada mais', async () => {
+        const target = await alvo();
+        const antes = await linha(target.id);
+        const novo = uniqueEmail('ambos');
+
+        await patch(admin, `/users/${target.id}`, { nome: 'Os Dois', email: novo }).expect(200);
+
+        expect(await linha(target.id)).toEqual({ ...antes, nome: 'Os Dois', email: novo });
+      });
+
+      it('e-mail duplicado continua 409 e nao altera nada', async () => {
+        const target = await alvo();
+        const antes = await linha(target.id);
+
+        await patch(admin, `/users/${target.id}`, { email: gestor.email }).expect(409);
+
+        expect(await linha(target.id)).toEqual(antes);
+      });
+    });
+
+    describe('concorrencia com operacoes administrativas', () => {
+      it('A) nao reativa uma conta que o ADMIN acabou de desativar', async () => {
+        const target = await alvo();
+        adminAlteraDuranteAGravacao(target.id, 'UPDATE users SET ativo = 0 WHERE id = ?', []);
+
+        await patch(admin, `/users/${target.id}`, { nome: 'Insistindo' }).expect(200);
+
+        const depois = await linha(target.id);
+        expect(depois.nome).toBe('Insistindo');
+        expect(depois.ativo).toBe(false);
+      });
+
+      it('B) nao restaura o perfil que o ADMIN acabou de trocar', async () => {
+        const target = await alvo();
+        const operadorRole = await roleIdDe(RoleName.Operador);
+        adminAlteraDuranteAGravacao(target.id, 'UPDATE users SET role_id = ? WHERE id = ?', [
+          operadorRole,
+        ]);
+
+        await patch(admin, `/users/${target.id}`, { nome: 'Insistindo' }).expect(200);
+
+        const depois = await linha(target.id);
+        expect(depois.nome).toBe('Insistindo');
+        expect(depois.role_id).toBe(operadorRole);
+      });
+
+      it('C) alterar o e-mail nao reescreve status nem perfil', async () => {
+        const target = await alvo();
+        const operadorRole = await roleIdDe(RoleName.Operador);
+        adminAlteraDuranteAGravacao(
+          target.id,
+          'UPDATE users SET ativo = 0, role_id = ? WHERE id = ?',
+          [operadorRole],
+        );
+        const novo = uniqueEmail('concorrente');
+
+        await patch(admin, `/users/${target.id}`, { email: novo }).expect(200);
+
+        const depois = await linha(target.id);
+        expect(depois.email).toBe(novo);
+        expect(depois.ativo).toBe(false);
+        expect(depois.role_id).toBe(operadorRole);
+      });
+
+      it('D) alterar nome/e-mail nao reescreve senha_hash', async () => {
+        const target = await alvo();
+        adminAlteraDuranteAGravacao(
+          target.id,
+          "UPDATE users SET senha_hash = '$2b$04$hashTrocadoPorFora' WHERE id = ?",
+          [],
+        );
+
+        await patch(admin, `/users/${target.id}`, {
+          nome: 'Nome',
+          email: uniqueEmail('senha'),
+        }).expect(200);
+
+        expect((await linha(target.id)).senha_hash).toBe('$2b$04$hashTrocadoPorFora');
+      });
+    });
+
+    /**
+     * I1: como cada operacao cita apenas as colunas que declarou, uma alteracao
+     * de nome nao reescreve o e-mail e vice-versa. Nao ha mecanismo de conflito
+     * novo: duas alteracoes do MESMO campo continuam em last-write-wins, que e
+     * o que o banco produz.
+     */
+    describe('duas edicoes gerais simultaneas', () => {
+      it('A) nome e e-mail ao mesmo tempo: as duas alteracoes sobrevivem', async () => {
+        const target = await alvo();
+        const novo = uniqueEmail('cruzado');
+        adminAlteraDuranteAGravacao(target.id, 'UPDATE users SET email = ? WHERE id = ?', [novo]);
+
+        await patch(admin, `/users/${target.id}`, { nome: 'So O Nome' }).expect(200);
+
+        const depois = await linha(target.id);
+        expect(depois.nome).toBe('So O Nome');
+        expect(depois.email).toBe(novo);
+      });
+
+      it('B) duas alteracoes de nome: vence a ultima gravacao', async () => {
+        const target = await alvo();
+        adminAlteraDuranteAGravacao(target.id, 'UPDATE users SET nome = ? WHERE id = ?', [
+          'Gravado Primeiro',
+        ]);
+
+        await patch(admin, `/users/${target.id}`, { nome: 'Gravado Depois' }).expect(200);
+
+        expect((await linha(target.id)).nome).toBe('Gravado Depois');
+      });
+
+      it('C) duas alteracoes de e-mail: vence a ultima gravacao', async () => {
+        const target = await alvo();
+        const primeiro = uniqueEmail('primeiro');
+        const depoisEmail = uniqueEmail('depois');
+        adminAlteraDuranteAGravacao(target.id, 'UPDATE users SET email = ? WHERE id = ?', [
+          primeiro,
+        ]);
+
+        await patch(admin, `/users/${target.id}`, { email: depoisEmail }).expect(200);
+
+        expect((await linha(target.id)).email).toBe(depoisEmail);
+      });
+    });
+
+    describe('auditoria', () => {
+      /** Os campos auditados sao exatamente os que o UPDATE citou. */
+      async function camposAuditados(id: string): Promise<string[]> {
+        const eventos = await auditFor(id, 'USER_UPDATED');
+        expect(eventos).toHaveLength(1);
+        const { alteracoes } = eventos[0].metadados as {
+          alteracoes: Record<string, unknown>;
+        };
+        return Object.keys(alteracoes).sort();
+      }
+
+      it('alterar so o nome audita so o nome', async () => {
+        const target = await alvo();
+
+        await patch(admin, `/users/${target.id}`, { nome: 'Auditado' }).expect(200);
+
+        expect(await camposAuditados(target.id)).toEqual(['nome']);
+      });
+
+      it('alterar so o e-mail audita so o e-mail', async () => {
+        const target = await alvo();
+
+        await patch(admin, `/users/${target.id}`, { email: uniqueEmail('audit') }).expect(200);
+
+        expect(await camposAuditados(target.id)).toEqual(['email']);
+      });
+
+      it('alterar os dois audita os dois', async () => {
+        const target = await alvo();
+
+        await patch(admin, `/users/${target.id}`, {
+          nome: 'Auditado',
+          email: uniqueEmail('audit'),
+        }).expect(200);
+
+        expect(await camposAuditados(target.id)).toEqual(['email', 'nome']);
+      });
+
+      it('a trilha nao menciona ativo, role nem senha', async () => {
+        const target = await alvo();
+
+        await patch(admin, `/users/${target.id}`, {
+          nome: 'Sem Vazamento',
+          email: uniqueEmail('vaz'),
+        }).expect(200);
+
+        const [evento] = await auditFor(target.id, 'USER_UPDATED');
+        const registro = JSON.stringify(evento.metadados);
+        for (const proibido of ['ativo', 'role', 'senha']) {
+          expect(registro).not.toContain(proibido);
+        }
+      });
+
+      it('operacao sem efeito: nenhuma auditoria e nenhuma alteracao', async () => {
+        const target = await alvo();
+        const antes = await linha(target.id);
+
+        await patch(admin, `/users/${target.id}`, {
+          nome: antes.nome,
+          email: antes.email,
+        }).expect(200);
+
+        expect(await linha(target.id)).toEqual(antes);
+        expect(await auditFor(target.id, 'USER_UPDATED')).toHaveLength(0);
+      });
+
+      it('operacao recusada: nenhuma auditoria e nenhuma alteracao', async () => {
+        const target = await sessionFor(RoleName.Gestor);
+        const antes = await linha(target.id);
+
+        // GESTOR nao gerencia outro GESTOR.
+        await patch(gestor, `/users/${target.id}`, { nome: 'Nao Deveria' }).expect(403);
+        // Campo fora do DTO.
+        await patch(admin, `/users/${target.id}`, { ativo: false }).expect(400);
+
+        expect(await linha(target.id)).toEqual(antes);
+        expect(await auditFor(target.id, 'USER_UPDATED')).toHaveLength(0);
+      });
     });
   });
 });

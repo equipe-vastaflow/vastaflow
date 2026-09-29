@@ -20,6 +20,14 @@ export interface NewUser {
   role: Role;
 }
 
+/**
+ * Campos cadastrais que a edicao administrativa (`PATCH /users/:id`) alcanca.
+ *
+ * O tipo e a primeira barreira - so estes dois campos existem nele; a segunda
+ * e a lista branca dentro de `updateFields`, que vale mesmo contra um cast.
+ */
+export type EditableUserFields = Partial<Pick<User, 'nome' | 'email'>>;
+
 const WITH_ROLE = { role: { permissions: true } } as const;
 
 /** Drivers em que `SELECT ... FOR UPDATE` existe. O SQLite dos testes ja serializa as escritas. */
@@ -105,9 +113,49 @@ export class UsersRepository {
     });
   }
 
-  /** @throws DuplicateEmailError quando o e-mail novo pertence a outro usuario. */
-  async update(user: User): Promise<User> {
-    return saveTranslatingDuplicates(this.repository, user);
+  /**
+   * Altera SOMENTE os campos cadastrais informados (`nome` e/ou `email`).
+   *
+   * Substitui o antigo `update(user)`, que fazia `save(entity)`. A troca e de
+   * seguranca, nao de estilo: o `save` compara a entidade carregada com a linha
+   * atual e inclui no UPDATE TODA coluna que diferir, entao uma entidade lida
+   * antes de uma alteracao administrativa concorrente reescrevia `ativo`,
+   * `role_id` e `senha_hash` com os valores antigos - reativando uma conta
+   * recem-desativada ou devolvendo um perfil recem-revogado.
+   *
+   * Aqui as colunas sao citadas UMA A UMA, a partir de um objeto montado dentro
+   * deste metodo: nenhuma chave extra que chegue em `changes` (nem por um cast)
+   * alcanca o comando. `ativo`, `role_id`, `senha_hash`, `id` e `created_at`
+   * nao tem como entrar.
+   *
+   * `updated_at` vai explicito porque um UPDATE por query builder nao dispara o
+   * `@UpdateDateColumn`, e o `ON UPDATE CURRENT_TIMESTAMP` existe no MySQL mas
+   * nao no Oracle - mesmo cuidado de `updateName` e do modulo de notificacoes.
+   *
+   * @returns quantas linhas foram alcancadas: zero quando o usuario nao existe mais.
+   * @throws DuplicateEmailError quando o e-mail novo pertence a outro usuario.
+   */
+  async updateFields(id: string, changes: EditableUserFields, quando: Date): Promise<number> {
+    try {
+      const result = await this.repository
+        .createQueryBuilder()
+        .update(User)
+        .set({
+          // Lista branca explicita: so estas duas colunas, e so quando vieram.
+          ...(changes.nome === undefined ? {} : { nome: changes.nome }),
+          ...(changes.email === undefined ? {} : { email: changes.email }),
+          updatedAt: quando,
+        })
+        .where('id = :id', { id })
+        .execute();
+
+      return result.affected ?? 0;
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        throw new DuplicateEmailError();
+      }
+      throw error;
+    }
   }
 
   /**

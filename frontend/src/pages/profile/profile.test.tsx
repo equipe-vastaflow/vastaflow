@@ -128,9 +128,21 @@ describe('Tela de perfil', () => {
 
     it('nao envia nenhum identificador de usuario ao carregar', async () => {
       const fetchMock = renderAt('/profile', COMUM);
-      await heading('Meu perfil');
+      const urlsDeProfile = (): string[] =>
+        chamadas(fetchMock)
+          .map(([url]) => url)
+          .filter((url) => url.includes('/profile'));
 
-      const [url] = chamadas(fetchMock).find(([u]) => u.includes('/profile')) ?? [''];
+      // Espera pela REQUISICAO, e nao pelo cabecalho: o `<h1>` entra no DOM no
+      // commit em que a pagina monta, e o `useEffect` que dispara o GET roda
+      // depois dele. Esperando pelo heading, a busca abaixo podia correr antes
+      // de a chamada existir - e o teste falhava com "Invalid URL" em vez de
+      // uma asserção clara.
+      await waitFor(() => {
+        expect(urlsDeProfile()).toHaveLength(1);
+      });
+
+      const [url] = urlsDeProfile();
       expect(new URL(url).pathname).toBe('/profile');
       expect(new URL(url).search).toBe('');
     });

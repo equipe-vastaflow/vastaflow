@@ -69,7 +69,7 @@ describe('UserManagementService', () => {
   let repository: jest.Mocked<
     Pick<
       UsersRepository,
-      'findById' | 'findByEmail' | 'findPage' | 'update' | 'runLockedAdminChange'
+      'findById' | 'findByEmail' | 'findPage' | 'updateFields' | 'runLockedAdminChange'
     >
   >;
   let usersService: jest.Mocked<Pick<UsersService, 'create'>>;
@@ -88,7 +88,12 @@ describe('UserManagementService', () => {
       findById: jest.fn().mockResolvedValue(null),
       findByEmail: jest.fn().mockResolvedValue(null),
       findPage: jest.fn().mockResolvedValue([[], 0]),
-      update: jest.fn((user: User) => Promise.resolve(user)),
+      // NAO e mais um identity mock de `save(entity)`: o fluxo administrativo
+      // grava por UPDATE direcionado, e o mock reflete essa assinatura - id,
+      // campos citados e data. Assim os testes podem afirmar QUAIS colunas a
+      // operacao pediu para alterar, que era exatamente o que o mock antigo
+      // escondia.
+      updateFields: jest.fn().mockResolvedValue(1),
       runLockedAdminChange: jest.fn(
         (_id: string, work: (change: LockedAdminChange) => Promise<unknown>) =>
           work({ ...locked, save }),
@@ -206,7 +211,7 @@ describe('UserManagementService', () => {
 
       await service.update(gestor, 'alvo', { nome: target.nome, email: target.email }, IP);
 
-      expect(repository.update).not.toHaveBeenCalled();
+      expect(repository.updateFields).not.toHaveBeenCalled();
       expect(auditService.record).not.toHaveBeenCalled();
     });
 
@@ -217,12 +222,12 @@ describe('UserManagementService', () => {
       await expect(
         service.update(gestor, 'alvo', { email: 'outro@vasta.test' }, IP),
       ).rejects.toBeInstanceOf(ConflictException);
-      expect(repository.update).not.toHaveBeenCalled();
+      expect(repository.updateFields).not.toHaveBeenCalled();
     });
 
     it('violacao de unicidade no banco (corrida) vira 409', async () => {
       repository.findById.mockResolvedValue(makeUser('alvo', RoleName.Usuario));
-      repository.update.mockRejectedValue(new DuplicateEmailError());
+      repository.updateFields.mockRejectedValue(new DuplicateEmailError());
 
       await expect(
         service.update(gestor, 'alvo', { email: 'livre@vasta.test' }, IP),
@@ -243,6 +248,137 @@ describe('UserManagementService', () => {
 
       await expect(service.update(gestor, gestor.id, { nome: 'Eu' }, IP)).resolves.toMatchObject({
         nome: 'Eu',
+      });
+    });
+
+    /**
+     * O nucleo da correcao de C1: a edicao administrativa grava por UPDATE
+     * DIRECIONADO, citando so as colunas que ela declara alterar. Com o antigo
+     * `save(entity)`, uma entidade lida antes de uma alteracao administrativa
+     * concorrente reescrevia `ativo`, `role_id` e `senha_hash` com os valores
+     * antigos. Aqui os testes afirmam QUAIS colunas a operacao pede.
+     */
+    describe('gravacao direcionada', () => {
+      it('alterar so o nome cita so o nome', async () => {
+        repository.findById.mockResolvedValue(makeUser('alvo', RoleName.Usuario));
+
+        await service.update(gestor, 'alvo', { nome: 'Novo Nome' }, IP);
+
+        expect(repository.updateFields).toHaveBeenCalledWith(
+          'alvo',
+          { nome: 'Novo Nome' },
+          expect.any(Date),
+        );
+      });
+
+      it('alterar so o e-mail cita so o e-mail, normalizado', async () => {
+        repository.findById.mockResolvedValue(makeUser('alvo', RoleName.Usuario));
+
+        await service.update(gestor, 'alvo', { email: '  NOVO@Vasta.TEST ' }, IP);
+
+        expect(repository.updateFields).toHaveBeenCalledWith(
+          'alvo',
+          { email: 'novo@vasta.test' },
+          expect.any(Date),
+        );
+      });
+
+      it('alterar os dois cita os dois', async () => {
+        repository.findById.mockResolvedValue(makeUser('alvo', RoleName.Usuario));
+
+        await service.update(gestor, 'alvo', { nome: 'N', email: 'e@vasta.test' }, IP);
+
+        expect(repository.updateFields).toHaveBeenCalledWith(
+          'alvo',
+          { nome: 'N', email: 'e@vasta.test' },
+          expect.any(Date),
+        );
+      });
+
+      /**
+       * A prova de que colunas administrativas nao entram: o objeto passado ao
+       * repositorio tem APENAS as chaves da operacao. Se alguem voltar a
+       * persistir a entidade inteira, este teste falha.
+       */
+      it('nunca cita ativo, role, senhaHash, id nem createdAt', async () => {
+        repository.findById.mockResolvedValue(makeUser('alvo', RoleName.Usuario));
+
+        await service.update(gestor, 'alvo', { nome: 'N', email: 'e@vasta.test' }, IP);
+
+        const [, campos] = repository.updateFields.mock.calls[0];
+        expect(Object.keys(campos).sort()).toEqual(['email', 'nome']);
+        for (const proibido of ['ativo', 'role', 'roleId', 'senhaHash', 'id', 'createdAt']) {
+          expect(campos).not.toHaveProperty(proibido);
+        }
+      });
+
+      it('o id gravado e o do alvo da rota, nunca o do ator', async () => {
+        repository.findById.mockResolvedValue(makeUser('alvo', RoleName.Usuario));
+
+        await service.update(gestor, 'alvo', { nome: 'N' }, IP);
+
+        const [id] = repository.updateFields.mock.calls[0];
+        expect(id).toBe('alvo');
+        expect(id).not.toBe(gestor.id);
+      });
+
+      it('nao usa save da entidade inteira: o repositorio nem expoe mais isso', () => {
+        expect((repository as unknown as Record<string, unknown>).update).toBeUndefined();
+      });
+
+      it('conta apagada entre a leitura e a gravacao: 404 e sem auditoria', async () => {
+        repository.findById.mockResolvedValue(makeUser('alvo', RoleName.Usuario));
+        repository.updateFields.mockResolvedValue(0);
+
+        await expect(service.update(gestor, 'alvo', { nome: 'N' }, IP)).rejects.toBeInstanceOf(
+          NotFoundException,
+        );
+        expect(auditService.record).not.toHaveBeenCalled();
+      });
+
+      it('a data gravada e a devolvida na resposta', async () => {
+        repository.findById.mockResolvedValue(makeUser('alvo', RoleName.Usuario));
+
+        const saved = await service.update(gestor, 'alvo', { nome: 'N' }, IP);
+
+        const [, , quando] = repository.updateFields.mock.calls[0];
+        expect(saved.updatedAt).toBe(quando);
+      });
+    });
+
+    /**
+     * C2: os campos auditados sao exatamente os que o UPDATE citou, porque
+     * `alteracoes` e a fonte dos dois.
+     */
+    describe('auditoria corresponde ao que foi gravado', () => {
+      it.each([
+        ['so nome', { nome: 'Novo Nome' }, ['nome']],
+        ['so email', { email: 'novo@vasta.test' }, ['email']],
+        ['nome e email', { nome: 'N', email: 'novo@vasta.test' }, ['email', 'nome']],
+      ])('%s: a trilha lista os mesmos campos do UPDATE', async (_nome, dto, esperados) => {
+        repository.findById.mockResolvedValue(makeUser('alvo', RoleName.Usuario));
+
+        await service.update(gestor, 'alvo', dto, IP);
+
+        const [, campos] = repository.updateFields.mock.calls[0];
+        const [[evento]] = auditService.record.mock.calls;
+        const auditados = Object.keys(
+          (evento.metadados as { alteracoes: Record<string, unknown> }).alteracoes,
+        );
+        expect(auditados.sort()).toEqual(esperados);
+        expect(auditados.sort()).toEqual(Object.keys(campos).sort());
+      });
+
+      it('a trilha nunca menciona ativo, role nem senha', async () => {
+        repository.findById.mockResolvedValue(makeUser('alvo', RoleName.Usuario));
+
+        await service.update(gestor, 'alvo', { nome: 'N', email: 'e@vasta.test' }, IP);
+
+        const [[evento]] = auditService.record.mock.calls;
+        const registro = JSON.stringify(evento.metadados);
+        for (const proibido of ['ativo', 'role', 'senha']) {
+          expect(registro).not.toContain(proibido);
+        }
       });
     });
 

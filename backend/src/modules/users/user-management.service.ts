@@ -139,23 +139,46 @@ export class UserManagementService {
       return target;
     }
 
-    target.nome = alteracoes.nome?.para ?? target.nome;
-    target.email = alteracoes.email?.para ?? target.email;
-    let saved: User;
+    // Gravacao DIRECIONADA: somente as colunas que esta operacao declara
+    // alterar. Nao ha `save(entity)` aqui - uma entidade lida antes de uma
+    // alteracao administrativa concorrente nao tem como reescrever `ativo`,
+    // `role_id` ou `senha_hash`.
+    const quando = new Date();
+    let alcancadas: number;
     try {
-      saved = await this.usersRepository.update(target);
+      alcancadas = await this.usersRepository.updateFields(
+        target.id,
+        {
+          ...(alteracoes.nome === undefined ? {} : { nome: alteracoes.nome.para }),
+          ...(alteracoes.email === undefined ? {} : { email: alteracoes.email.para }),
+        },
+        quando,
+      );
     } catch (error) {
       if (error instanceof DuplicateEmailError) {
         throw new ConflictException('E-mail ja cadastrado');
       }
       throw error;
     }
+    if (alcancadas === 0) {
+      // Conta apagada entre a leitura e a gravacao. O `save` antigo a
+      // reinseriria; o UPDATE direcionado simplesmente nao alcanca nada.
+      throw new NotFoundException('Usuario nao encontrado');
+    }
 
-    await this.record(actor, ip, AuditAction.UserUpdated, `Usuario ${saved.email} alterado`, {
-      alvoId: saved.id,
+    // As demais colunas nao foram tocadas, entao o resto de `target` continua
+    // valendo para a resposta.
+    target.nome = alteracoes.nome?.para ?? target.nome;
+    target.email = alteracoes.email?.para ?? target.email;
+    target.updatedAt = quando;
+
+    // Os campos auditados sao exatamente os que o UPDATE citou: `alteracoes` e
+    // a mesma fonte dos dois.
+    await this.record(actor, ip, AuditAction.UserUpdated, `Usuario ${target.email} alterado`, {
+      alvoId: target.id,
       alteracoes,
     });
-    return saved;
+    return target;
   }
 
   /**
