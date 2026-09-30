@@ -1,4 +1,3 @@
-import { Injectable } from '@nestjs/common';
 import type { AuthenticatedUser } from '../../auth/auth.types';
 import type { ExternalIdentity } from './incoming-message';
 
@@ -22,21 +21,3 @@ export interface ChannelIdentityResolver {
 
 /** Token de injecao do resolvedor usado pelos adaptadores de canal. */
 export const CHANNEL_IDENTITY_RESOLVER = Symbol('CHANNEL_IDENTITY_RESOLVER');
-
-/**
- * Resolvedor desta etapa: NENHUMA identidade externa esta vinculada.
- *
- * Nao existe ainda mecanismo de vinculacao (tabela, fluxo de confirmacao), e
- * associar `telegramUserId` a um usuario interno por convencao seria inventar
- * uma relacao - e um caminho de impersonacao. Enquanto a vinculacao nao for
- * definida, todo remetente e tratado como nao vinculado.
- *
- * Quando ela existir, basta registrar outro resolvedor no token
- * `CHANNEL_IDENTITY_RESOLVER`; adaptadores e Command Engine nao mudam.
- */
-@Injectable()
-export class UnlinkedIdentityResolver implements ChannelIdentityResolver {
-  resolve(): Promise<AuthenticatedUser | null> {
-    return Promise.resolve(null);
-  }
-}

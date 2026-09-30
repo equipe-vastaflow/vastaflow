@@ -33,6 +33,7 @@ const PERMITIDOS = new Set([
   '@nestjs/common',
   '@nestjs/config',
   '../channels/channel-identity',
+  '../channels/channel-link',
   '../channels/incoming-message',
   '../integration-config',
   '../integration-registry',
@@ -43,6 +44,7 @@ const PERMITIDOS = new Set([
   '../../commands/command-router.service',
   '../../commands/command.types',
   '../../commands/commands.module',
+  '../../external-identities/external-identities.module',
   '../../health/health.types',
   '../../../config/env.validation',
 ]);

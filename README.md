@@ -331,6 +331,11 @@ Detalhes em [frontend/README.md](frontend/README.md).
 | `PATCH /users/:id`     | `users:update`       | Edita nome e e-mail. Senha, perfil e status sao recusados (400) |
 | `PATCH /users/:id/status` | `users:status`    | Ativa ou desativa (`{ "ativo": false }`)                     |
 | `PATCH /users/:id/role` | `users:role`        | Altera o perfil (`{ "role": "OPERADOR" }`)                   |
+| `GET /users/:id/external-identities` | `users:read` | Lista os vinculos ATIVOS de conta externa (Telegram) do usuario |
+| `DELETE /users/:id/external-identities/:linkId` | `users:update` | Remove o vinculo ativo (204) |
+| `GET /users/:id/external-identities/link-requests` | `users:read` | Solicitacoes de vinculo pendentes (sem codigo) |
+| `POST /users/:id/external-identities/link-requests` | `users:update` | Inicia a vinculacao (`{ "canal": "telegram" }`): devolve um codigo de uso unico que a propria conta envia ao bot (`/vincular <codigo>`) |
+| `DELETE /users/:id/external-identities/link-requests/:requestId` | `users:update` | Cancela a solicitacao pendente (204) |
 | `GET /audit-logs?page=&limit=` | permissao `audit:read` | Registros de auditoria, paginado (padrao 20, maximo 100), do mais recente ao mais antigo |
 | `GET /dashboard/summary` | autenticado        | Indicadores do dashboard. Cada secao vem conforme a permissao (ver abaixo) |
 | `GET /finance/entries?page=&limit=` | `finance:read` | Lancamentos financeiros, paginado (padrao 20, maximo 100), por data decrescente |

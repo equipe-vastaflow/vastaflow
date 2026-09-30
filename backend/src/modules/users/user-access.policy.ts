@@ -1,3 +1,4 @@
+import type { Role } from '../roles/entities/role.entity';
 import { RoleName } from '../roles/role-name.enum';
 
 /** O que a politica precisa saber de quem executa a operacao. */
@@ -47,4 +48,9 @@ export function canGrantRole(actor: Actor, role: RoleGrant): boolean {
 /** Gerenciar um usuario exige poder conceder o perfil que ele tem hoje. */
 export function canManageUser(actor: Actor, targetRole: RoleGrant): boolean {
   return canGrantRole(actor, targetRole);
+}
+
+/** O perfil carregado do banco no formato que a politica avalia. */
+export function toRoleGrant(role: Role): RoleGrant {
+  return { nome: role.nome, permissions: role.permissions.map((permission) => permission.code) };
 }

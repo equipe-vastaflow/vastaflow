@@ -1,4 +1,5 @@
 import type { CommandResult } from '../../commands/command.types';
+import { LinkConfirmationOutcome } from '../channels/channel-link';
 
 /** Tamanho maximo do texto de uma mensagem na Bot API. */
 export const TELEGRAM_MESSAGE_LIMIT = 4096;
@@ -7,11 +8,34 @@ const TRUNCATION_MARK = '\n[...]';
 
 /**
  * Resposta a um remetente sem vinculo com um usuario interno. Nao revela nada
- * do sistema: nem quais comandos existem, nem se o id dele e conhecido.
+ * do sistema: nem quais comandos existem, nem se o id dele e conhecido. Diz so
+ * como vincular: com um codigo pedido a quem administra o VastaFlow.
  */
 export const TELEGRAM_UNLINKED_REPLY =
   'Esta conta do Telegram nao esta vinculada a um usuario do VastaFlow. ' +
-  'Nenhum comando pode ser executado por aqui.';
+  'Para vincular, peca um codigo ao administrador e envie aqui: /vincular CODIGO';
+
+/**
+ * Respostas da confirmacao de vinculo. A recusa e UMA so mensagem para codigo
+ * inexistente, expirado, ja usado ou mal formado: nada se aprende sobre codigos.
+ */
+const LINK_REPLIES: Record<
+  Exclude<LinkConfirmationOutcome, LinkConfirmationOutcome.NotAttempted>,
+  string
+> = {
+  [LinkConfirmationOutcome.Confirmed]:
+    'Conta do Telegram vinculada ao VastaFlow. Envie /ajuda para ver os comandos disponiveis.',
+  [LinkConfirmationOutcome.Rejected]:
+    'Nao foi possivel concluir a vinculacao. Confira o codigo ou peca um novo ao administrador.',
+  [LinkConfirmationOutcome.AlreadyLinked]:
+    'Esta conta do Telegram ja esta vinculada a um usuario do VastaFlow.',
+};
+
+export function linkConfirmationReply(
+  outcome: Exclude<LinkConfirmationOutcome, LinkConfirmationOutcome.NotAttempted>,
+): string {
+  return LINK_REPLIES[outcome];
+}
 
 /**
  * Converte o `CommandResult` no texto enviado ao Telegram.

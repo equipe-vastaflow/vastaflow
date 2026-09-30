@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { type EntityManager, In, QueryFailedError, Repository } from 'typeorm';
+import { type EntityManager, In, Repository } from 'typeorm';
+import { isUniqueViolation } from '../../database/unique-violation';
 import type { Role } from '../roles/entities/role.entity';
 import { RoleName } from '../roles/role-name.enum';
 import { User } from './entities/user.entity';
@@ -282,20 +283,4 @@ async function lockAdminsAndTarget(manager: EntityManager, targetId: string): Pr
     .where('r.nome = :admin OR u.id = :targetId', { admin: RoleName.Admin, targetId })
     .setLock('pessimistic_write')
     .getRawMany();
-}
-
-/**
- * A unicidade so pode ser violada pelo e-mail (unica coluna unica alem do id
- * gerado). Cada banco sinaliza de um jeito: MySQL `ER_DUP_ENTRY`/1062, Oracle
- * `ORA-00001`, SQLite `UNIQUE constraint failed` (usado nos testes).
- */
-function isUniqueViolation(error: unknown): boolean {
-  if (!(error instanceof QueryFailedError)) {
-    return false;
-  }
-  const driverError = error.driverError as { code?: unknown; errno?: unknown } | undefined;
-  if (driverError?.code === 'ER_DUP_ENTRY' || driverError?.errno === 1062) {
-    return true;
-  }
-  return /UNIQUE constraint failed|ORA-00001/i.test(error.message);
 }

@@ -1,6 +1,6 @@
 import { Module, type OnModuleInit } from '@nestjs/common';
 import { CommandsModule } from '../../commands/commands.module';
-import { CHANNEL_IDENTITY_RESOLVER, UnlinkedIdentityResolver } from '../channels/channel-identity';
+import { ExternalIdentitiesModule } from '../../external-identities/external-identities.module';
 import { IntegrationRegistry } from '../integration-registry';
 import { IntegrationsModule } from '../integrations.module';
 import { TelegramAdapter } from './telegram.adapter';
@@ -18,22 +18,17 @@ import { TelegramProvider } from './telegram.provider';
  *
  * Nao depende de nenhum modulo de negocio (Finance, Notifications, Users). Nao
  * abre rota HTTP: o recebimento e por long polling, opt-in
- * (`TELEGRAM_POLLING_ENABLED`). Sem entity, tabela ou migration.
+ * (`TELEGRAM_POLLING_ENABLED`). Sem entity, tabela ou migration proprias.
  *
- * O resolvedor de identidade desta etapa e o `UnlinkedIdentityResolver`: ainda
- * nao existe vinculo entre conta do Telegram e usuario interno, entao nenhum
- * comando e executado por este canal. Trocar o resolvedor (quando a vinculacao
- * existir) nao muda adapter, polling nem Command Engine.
+ * A identidade vem do `CHANNEL_IDENTITY_RESOLVER` exportado pelo
+ * `ExternalIdentitiesModule` (vinculos administrativos no banco). O adapter so
+ * conhece o contrato `ChannelIdentityResolver`: nenhuma consulta ao banco mora
+ * neste modulo. Sem vinculo, ou com o usuario inativo, nenhum comando e
+ * executado.
  */
 @Module({
-  imports: [IntegrationsModule, CommandsModule],
-  providers: [
-    TelegramApiClient,
-    TelegramProvider,
-    TelegramAdapter,
-    TelegramPollingService,
-    { provide: CHANNEL_IDENTITY_RESOLVER, useClass: UnlinkedIdentityResolver },
-  ],
+  imports: [IntegrationsModule, CommandsModule, ExternalIdentitiesModule],
+  providers: [TelegramApiClient, TelegramProvider, TelegramAdapter, TelegramPollingService],
 })
 export class TelegramModule implements OnModuleInit {
   constructor(

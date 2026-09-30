@@ -8,13 +8,12 @@ import { AuditAction, AuditModuleName } from '../audit/audit-action.enum';
 import { AuditService } from '../audit/audit.service';
 import type { AuditMetadata } from '../audit/entities/audit-log.entity';
 import type { AuthenticatedUser } from '../auth/auth.types';
-import type { Role } from '../roles/entities/role.entity';
 import { RoleName } from '../roles/role-name.enum';
 import { RolesService } from '../roles/roles.service';
 import type { CreateUserDto } from './dto/create-user.dto';
 import type { UpdateUserDto } from './dto/update-user.dto';
 import type { User } from './entities/user.entity';
-import { canGrantRole, canManageUser, type RoleGrant } from './user-access.policy';
+import { canGrantRole, canManageUser, toRoleGrant } from './user-access.policy';
 import { DuplicateEmailError, UsersRepository } from './users.repository';
 import { normalizeEmail, UsersService } from './users.service';
 
@@ -77,7 +76,7 @@ export class UserManagementService {
   async assignableRoles(actor: AuthenticatedUser): Promise<RoleName[]> {
     const grantable = new Set(
       (await this.rolesService.findAll())
-        .filter((role) => canGrantRole(actor, toGrant(role)))
+        .filter((role) => canGrantRole(actor, toRoleGrant(role)))
         .map((role) => role.nome),
     );
     return Object.values(RoleName).filter((nome) => grantable.has(nome));
@@ -89,7 +88,7 @@ export class UserManagementService {
    */
   async create(actor: AuthenticatedUser, dto: CreateUserDto, ip: string | null): Promise<User> {
     const role = await this.rolesService.getByName(dto.role ?? RoleName.Usuario);
-    if (!canGrantRole(actor, toGrant(role))) {
+    if (!canGrantRole(actor, toRoleGrant(role))) {
       throw new ForbiddenException(`Voce nao pode conceder o perfil ${role.nome}`);
     }
 
@@ -240,7 +239,7 @@ export class UserManagementService {
       const target = this.requireManageable(actor, change.target);
       const previous = target.role.nome;
 
-      if (!canGrantRole(actor, toGrant(role))) {
+      if (!canGrantRole(actor, toRoleGrant(role))) {
         throw new ForbiddenException(`Voce nao pode conceder o perfil ${role.nome}`);
       }
       if (role.nome !== RoleName.Admin && removesActiveAdmin(target, change.activeAdminCount)) {
@@ -277,7 +276,7 @@ export class UserManagementService {
     if (!target) {
       throw new NotFoundException('Usuario nao encontrado');
     }
-    if (target.id !== actor.id && !canManageUser(actor, toGrant(target.role))) {
+    if (target.id !== actor.id && !canManageUser(actor, toRoleGrant(target.role))) {
       throw new ForbiddenException(HIERARCHY_MESSAGE);
     }
     return target;
@@ -299,10 +298,6 @@ export class UserManagementService {
       metadados,
     });
   }
-}
-
-function toGrant(role: Role): RoleGrant {
-  return { nome: role.nome, permissions: role.permissions.map((permission) => permission.code) };
 }
 
 /** O alvo e ADMIN ativo e nao ha outro ADMIN ativo alem dele. */

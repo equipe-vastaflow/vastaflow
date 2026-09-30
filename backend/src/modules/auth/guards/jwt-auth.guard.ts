@@ -6,9 +6,9 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
-import { toUserResponse } from '../../users/dto/user-response.dto';
 import { UsersService } from '../../users/users.service';
 import type { AuthenticatedRequest, JwtPayload } from '../auth.types';
+import { toAuthenticatedUser } from '../authenticated-user';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 
 /**
@@ -43,13 +43,14 @@ export class JwtAuthGuard implements CanActivate {
     }
 
     const userId = await this.verify(token);
-    const user = await this.usersService.findById(userId);
-    if (!user?.ativo) {
+    // Mesma regra dos canais de mensageria (`toAuthenticatedUser`).
+    const user = toAuthenticatedUser(await this.usersService.findById(userId));
+    if (!user) {
       // Mesma resposta para "nao existe" e "inativo": nao revela o estado da conta.
       throw new UnauthorizedException('Token de acesso invalido ou expirado');
     }
 
-    request.user = toUserResponse(user);
+    request.user = user;
     return true;
   }
 

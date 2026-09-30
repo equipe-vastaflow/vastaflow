@@ -5,6 +5,7 @@ import { CommandCatalog } from '../../commands/command-catalog';
 import { CommandRouter, ROUTER_MESSAGES } from '../../commands/command-router.service';
 import {
   CommandChannel,
+  commandOk,
   type CommandContext,
   type CommandHandler,
 } from '../../commands/command.types';
@@ -12,14 +13,27 @@ import { HelpCommandHandler } from '../../commands/handlers/help.command';
 import { StatusCommandHandler } from '../../commands/handlers/status.command';
 import { PermissionCode } from '../../permissions/permission-code.enum';
 import { RoleName } from '../../roles/role-name.enum';
-import {
-  type ChannelIdentityResolver,
-  UnlinkedIdentityResolver,
-} from '../channels/channel-identity';
+import { type ChannelIdentityResolver } from '../channels/channel-identity';
+import { type ChannelLinkConfirmer, LinkConfirmationOutcome } from '../channels/channel-link';
 import type { ExternalIdentity } from '../channels/incoming-message';
+import { DatabaseIdentityResolver } from '../../external-identities/database-identity.resolver';
+import type { ExternalIdentityLink } from '../../external-identities/entities/external-identity-link.entity';
+import type { ExternalIdentitiesRepository } from '../../external-identities/external-identities.repository';
+import { IdentityChannel } from '../../external-identities/external-identity.enums';
+import type { Permission } from '../../permissions/entities/permission.entity';
+import type { User } from '../../users/entities/user.entity';
+import type { UsersService } from '../../users/users.service';
 import { TelegramApiError, type TelegramApiClient } from './telegram-api.client';
 import { TelegramAdapter, TelegramUpdateOutcome } from './telegram.adapter';
-import { TELEGRAM_UNLINKED_REPLY } from './telegram-reply';
+import { linkConfirmationReply, TELEGRAM_UNLINKED_REPLY } from './telegram-reply';
+
+/** Resolvedor sem nenhum vinculo: toda identidade externa resolve para null. */
+const SEM_VINCULO: ChannelIdentityResolver = { resolve: () => Promise.resolve(null) };
+
+/** Confirmador que nunca reconhece a mensagem: ela segue o fluxo normal. */
+const NAO_E_CONFIRMACAO: ChannelLinkConfirmer = {
+  tryConfirm: () => Promise.resolve(LinkConfirmationOutcome.NotAttempted),
+};
 
 const TOKEN_FALSO = 'TOKEN-FALSO-DE-TESTE-nao-e-token-real';
 const CHAT = 4242;
@@ -70,11 +84,14 @@ describe('TelegramAdapter', () => {
     name: 'restrito',
     description: 'Exige finance:read',
     permission: PermissionCode.FinanceRead,
-    handle: () => ({ success: true, outcome: 'OK' as never, reply: 'nao deveria chegar' }),
+    handle: () => commandOk('Conteudo restrito'),
   };
 
-  function adapter(resolver: ChannelIdentityResolver): TelegramAdapter {
-    return new TelegramAdapter(router, client as unknown as TelegramApiClient, resolver);
+  function adapter(
+    resolver: ChannelIdentityResolver,
+    confirmer: ChannelLinkConfirmer = NAO_E_CONFIRMACAO,
+  ): TelegramAdapter {
+    return new TelegramAdapter(router, client as unknown as TelegramApiClient, resolver, confirmer);
   }
 
   function vinculado(): ResolvedorFalso {
@@ -111,11 +128,9 @@ describe('TelegramAdapter', () => {
     jest.restoreAllMocks();
   });
 
-  describe('sem vinculo (resolvedor desta etapa)', () => {
+  describe('sem vinculo', () => {
     it('/ajuda nao chega ao motor: responde que a conta nao esta vinculada', async () => {
-      const resultado = await adapter(new UnlinkedIdentityResolver()).handleUpdate(
-        update('/ajuda'),
-      );
+      const resultado = await adapter(SEM_VINCULO).handleUpdate(update('/ajuda'));
 
       expect(resultado).toBe(TelegramUpdateOutcome.Unlinked);
       expect(execute).not.toHaveBeenCalled();
@@ -123,7 +138,7 @@ describe('TelegramAdapter', () => {
     });
 
     it('/status tambem nao executa, e nada vai para a auditoria', async () => {
-      await adapter(new UnlinkedIdentityResolver()).handleUpdate(update('/status'));
+      await adapter(SEM_VINCULO).handleUpdate(update('/status'));
 
       expect(execute).not.toHaveBeenCalled();
       expect(audit.record).not.toHaveBeenCalled();
@@ -243,6 +258,198 @@ describe('TelegramAdapter', () => {
       const texto = respostaEnviada();
       expect(texto).toBe(ROUTER_MESSAGES.handlerError);
       expect(texto).not.toContain('tabela');
+    });
+  });
+
+  /**
+   * O resolvedor REAL (vinculo -> usuario atual), com o banco trocado por
+   * fakes: prova que o RBAC e o estado da conta valem no canal.
+   */
+  describe('com o resolvedor do banco', () => {
+    let vinculos: Map<string, string>;
+    let usuarios: Map<string, User>;
+
+    function usuario(id: string, codes: string[], ativo = true): User {
+      return {
+        id,
+        nome: id,
+        email: `${id}@vasta.test`,
+        senhaHash: '$2b$04$hash',
+        ativo,
+        role: {
+          id: 'r',
+          nome: codes.length > 0 ? RoleName.Gestor : RoleName.Usuario,
+          descricao: '',
+          permissions: codes.map((code) => ({ id: code, code }) as Permission),
+          createdAt: new Date(),
+        },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+    }
+
+    function doBanco(): DatabaseIdentityResolver {
+      const repo = {
+        findByIdentity: (
+          canal: string,
+          idExterno: string,
+        ): Promise<ExternalIdentityLink | null> => {
+          const usuarioId = vinculos.get(`${canal}:${idExterno}`);
+          return Promise.resolve(
+            usuarioId === undefined
+              ? null
+              : {
+                  id: 'l',
+                  canal: IdentityChannel.Telegram,
+                  idExterno,
+                  usuarioId,
+                  createdAt: new Date(),
+                  updatedAt: new Date(),
+                },
+          );
+        },
+      };
+      const users = { findById: (id: string) => Promise.resolve(usuarios.get(id) ?? null) };
+      return new DatabaseIdentityResolver(
+        repo as unknown as ExternalIdentitiesRepository,
+        users as unknown as UsersService,
+      );
+    }
+
+    beforeEach(() => {
+      vinculos = new Map([[`telegram:${CHAT}`, 'u-vinculado']]);
+      usuarios = new Map([['u-vinculado', usuario('u-vinculado', [])]]);
+    });
+
+    it('vinculado e ativo: /status executa pelo CommandRouter', async () => {
+      expect(await adapter(doBanco()).handleUpdate(update('/status'))).toBe(
+        TelegramUpdateOutcome.Executed,
+      );
+      expect(execute.mock.calls[0][0].user.id).toBe('u-vinculado');
+      expect(respostaEnviada()).toContain('Canal: telegram');
+    });
+
+    it('nao vinculado: nao executa', async () => {
+      vinculos.clear();
+
+      expect(await adapter(doBanco()).handleUpdate(update('/status'))).toBe(
+        TelegramUpdateOutcome.Unlinked,
+      );
+      expect(execute).not.toHaveBeenCalled();
+    });
+
+    it('vinculado mas inativo: nao executa', async () => {
+      usuarios.set('u-vinculado', usuario('u-vinculado', [], false));
+
+      expect(await adapter(doBanco()).handleUpdate(update('/status'))).toBe(
+        TelegramUpdateOutcome.Unlinked,
+      );
+      expect(execute).not.toHaveBeenCalled();
+    });
+
+    it('sem a permissao: comando protegido negado pelo RBAC do motor', async () => {
+      await adapter(doBanco()).handleUpdate(update('/restrito'));
+
+      expect(respostaEnviada()).toBe(ROUTER_MESSAGES.permissionDenied);
+    });
+
+    it('o perfil ATUAL vale: ganhou a permissao, o proximo comando passa', async () => {
+      const resolver = doBanco();
+      await adapter(resolver).handleUpdate(update('/restrito'));
+      usuarios.set('u-vinculado', usuario('u-vinculado', ['finance:read']));
+      await adapter(resolver).handleUpdate(update('/restrito'));
+
+      expect(client.sendMessage.mock.calls.map(([, texto]) => texto)).toEqual([
+        ROUTER_MESSAGES.permissionDenied,
+        'Conteudo restrito',
+      ]);
+    });
+
+    it('texto e payload nao escolhem o usuario: so o remetente vinculado conta', async () => {
+      await adapter(doBanco()).handleUpdate(
+        update('/status {"userId":"u-outro"}', { userId: 'u-outro', from_user_id: 'u-outro' }),
+      );
+
+      // O remetente 4242 esta vinculado a u-vinculado; nada leva a u-outro.
+      expect(execute.mock.calls[0][0].user.id).toBe('u-vinculado');
+    });
+  });
+
+  /**
+   * Confirmacao de posse (`/vincular <codigo>`): tratada pelo confirmador ANTES
+   * da identidade, e nunca chega ao Command Engine.
+   */
+  describe('confirmacao de vinculo', () => {
+    interface ConfirmadorFalso {
+      tryConfirm: jest.Mock<Promise<LinkConfirmationOutcome>, [ExternalIdentity, string]>;
+    }
+
+    function confirmador(resultado: LinkConfirmationOutcome): ConfirmadorFalso {
+      return {
+        tryConfirm: jest.fn((_s: ExternalIdentity, _t: string) => Promise.resolve(resultado)),
+      };
+    }
+
+    it('o confirmador recebe o REMETENTE e o texto - nada mais', async () => {
+      const confirmer = confirmador(LinkConfirmationOutcome.Confirmed);
+
+      await adapter(SEM_VINCULO, confirmer).handleUpdate(
+        update('/vincular K7QM-2XRA-9CVB', { userId: 'admin-interno' }),
+      );
+
+      expect(confirmer.tryConfirm).toHaveBeenCalledWith(
+        { channel: 'telegram', externalId: String(CHAT) },
+        '/vincular K7QM-2XRA-9CVB',
+      );
+    });
+
+    it.each([
+      [LinkConfirmationOutcome.Confirmed, TelegramUpdateOutcome.LinkConfirmed],
+      [LinkConfirmationOutcome.Rejected, TelegramUpdateOutcome.LinkRejected],
+      [LinkConfirmationOutcome.AlreadyLinked, TelegramUpdateOutcome.LinkRejected],
+    ] as const)(
+      '%s: responde e NAO passa pelo motor nem pela identidade',
+      async (resultado, esperado) => {
+        const resolver = vinculado();
+
+        const desfecho = await adapter(resolver, confirmador(resultado)).handleUpdate(
+          update('/vincular K7QM-2XRA-9CVB'),
+        );
+
+        expect(desfecho).toBe(esperado);
+        expect(respostaEnviada()).toBe(linkConfirmationReply(resultado));
+        expect(execute).not.toHaveBeenCalled();
+        expect(resolver.resolve).not.toHaveBeenCalled();
+      },
+    );
+
+    it('falha do confirmador vira recusa, nunca vinculo', async () => {
+      const quebrado: ConfirmadorFalso = {
+        tryConfirm: jest.fn((_s: ExternalIdentity, _t: string) =>
+          Promise.reject<LinkConfirmationOutcome>(new Error('banco fora')),
+        ),
+      };
+      jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+      expect(await adapter(SEM_VINCULO, quebrado).handleUpdate(update('/vincular X'))).toBe(
+        TelegramUpdateOutcome.LinkRejected,
+      );
+      expect(respostaEnviada()).toBe(linkConfirmationReply(LinkConfirmationOutcome.Rejected));
+    });
+
+    it('mensagem que nao e confirmacao segue para identidade e motor', async () => {
+      const confirmer = confirmador(LinkConfirmationOutcome.NotAttempted);
+
+      await adapter(vinculado(), confirmer).handleUpdate(update('/status'));
+
+      expect(confirmer.tryConfirm).toHaveBeenCalledTimes(1);
+      expect(execute).toHaveBeenCalledTimes(1);
+    });
+
+    it('a recusa e a mesma resposta para qualquer motivo (nao ensina sobre codigos)', () => {
+      expect(linkConfirmationReply(LinkConfirmationOutcome.Rejected)).not.toMatch(
+        /expirad|usad|inexistente|inativ/i,
+      );
     });
   });
 

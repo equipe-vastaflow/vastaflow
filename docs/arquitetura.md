@@ -79,6 +79,7 @@ backend/src/
 │   ├── audit/                 [x] entity AuditLog, AuditService, GET /audit-logs (paginado)
 │   │                              usa UserDirectoryModule para nomear o responsavel
 │   ├── dashboard/             [x] GET /dashboard/summary - agrega os modulos acima
+│   ├── external-identities/   [x] vinculo conta externa -> usuario, com prova de posse; resolvedor
 │   └── integrations/          [x] foundation: contrato, estados e registro
 │       ├── channels/          [x] mensagem e identidade externa, neutras de fornecedor
 │       └── telegram/          [x] canal Telegram (long polling) -> Command Engine
@@ -103,6 +104,8 @@ AuditLog   (usuario_id sem FK, de proposito: a trilha sobrevive ao usuario)
 | `financial_entries` | `id`, `tipo`, `descricao`, `valor` DECIMAL(15,2), `data` DATE, `categoria`, `status`, `observacao` (nulo), `criado_por_id` (sem FK), `created_at`, `updated_at` |
 | `system_settings`  | `id`, `chave` (unica), `valor` (texto), `descricao`, `tipo`, `atualizado_por_id` (nulo, sem FK), `created_at`, `updated_at` |
 | `notifications`    | `id`, `usuario_id` (destinatario, sem FK), `titulo`, `mensagem`, `tipo`, `lida`, `created_at`, `updated_at`, `read_at` (nulo enquanto nao lida) |
+| `external_identity_links` | `id`, `canal`, `id_externo` (UNICO com `canal`), `usuario_id` (sem FK), `created_at`, `updated_at` |
+| `identity_link_requests` | `id`, `canal`, `usuario_id`, `codigo_hash` (UNICO), `status`, `pendente_chave` (UNICA, nula fora de PENDENTE), `expira_em`, `criado_por_id`, `created_at`, `updated_at` |
 
 `metadados` guarda detalhes adicionais da operacao como JSON (`text` no MySQL,
 `CLOB` no Oracle). Antes de gravar, o `AuditService` remove valores de chaves
@@ -113,7 +116,9 @@ da recusa) e pelas acoes de administracao de usuarios (o `alvoId` e o que mudou)
 
 Acoes de auditoria implementadas: `REGISTER`, `LOGIN`, `LOGIN_FAILED`, `LOGOUT`
 (modulo `AUTH`); `USER_CREATED`, `USER_UPDATED`, `USER_ACTIVATED`,
-`USER_DEACTIVATED`, `USER_ROLE_CHANGED` (modulo `USERS`); e
+`USER_DEACTIVATED`, `USER_ROLE_CHANGED`, `IDENTITY_LINK_REQUESTED`,
+`IDENTITY_LINK_CANCELLED`, `EXTERNAL_IDENTITY_LINKED`, `EXTERNAL_IDENTITY_UNLINKED`
+(modulo `USERS`); e
 `FINANCE_ENTRY_CREATED`, `FINANCE_ENTRY_UPDATED`,
 `FINANCE_ENTRY_STATUS_CHANGED` (modulo `FINANCE`); e `SYSTEM_SETTING_UPDATED`
 (modulo `SETTINGS`). Previstas
@@ -706,6 +711,7 @@ o unico acrescimo ao motor).
 
 ```
 getUpdates -> TelegramAdapter -> IncomingMessage (neutra)
+           -> ChannelLinkConfirmer: "/vincular <codigo>"? -> confirma posse e responde (fim)
            -> ChannelIdentityResolver -> usuario interno | null
            -> CommandContext -> CommandRouter -> CommandResult
            -> texto -> sendMessage
@@ -715,20 +721,18 @@ getUpdates -> TelegramAdapter -> IncomingMessage (neutra)
 | ---- | ----- |
 | `TelegramApiClient` | Unico ponto de rede. `getMe`, `getUpdates`, `sendMessage` da Bot API oficial, `fetch` nativo, timeout explicito, erros em categorias fixas |
 | `toIncomingMessage` | Reduz o update a `IncomingMessage` (canal, conversa, remetente, texto, data). So texto, so remetente humano, so conversa 1:1 (regra abaixo) |
-| `ChannelIdentityResolver` | Identidade externa -> usuario interno. Nesta etapa: `UnlinkedIdentityResolver` (todos nao vinculados) |
-| `TelegramAdapter` | Monta o `CommandContext`, chama o `CommandRouter`, responde com o `reply` do motor |
+| `ChannelIdentityResolver` | Identidade externa -> usuario interno. Implementado por `DatabaseIdentityResolver` (secao "Vinculo de identidade externa") |
+| `TelegramAdapter` | Oferece a mensagem ao `ChannelLinkConfirmer`; se nao for confirmacao, monta o `CommandContext`, chama o `CommandRouter` e responde com o `reply` do motor. So conhece contratos - nenhum banco |
 | `TelegramPollingService` | Long polling opt-in, um por processo, backoff 1s-60s, shutdown limpo |
 | `TelegramProvider` | `IntegrationProvider` da foundation: `NOT_CONFIGURED`/`READY` sem rede; health via `getMe` |
 
 **Identidade externa, sem vinculo automatico.** O id do remetente no Telegram
-e uma identidade EXTERNA e nunca vira usuario interno por convencao. Ainda nao
-existe mecanismo de vinculacao, entao o resolvedor devolve `null` para todos e
-o adapter responde apenas que a conta nao esta vinculada - **nenhum comando e
-executado pelo Telegram nesta etapa**, nenhum perfil e presumido e o RBAC nunca
-e avaliado para quem o sistema nao conhece. O resolvedor recebe so
-`{ channel, externalId }`: texto e payload nao escolhem o usuario. Quando a
-vinculacao existir, basta registrar outro resolvedor no token
-`CHANNEL_IDENTITY_RESOLVER`; adapter, polling e motor nao mudam.
+e uma identidade EXTERNA e nunca vira usuario interno por convencao: so um
+vinculo administrativo persistido faz essa passagem (secao "Vinculo de
+identidade externa"). Sem vinculo, o adapter responde apenas que a conta nao
+esta vinculada - nenhum comando e executado, nenhum perfil e presumido e o RBAC
+nunca e avaliado para quem o sistema nao conhece. O resolvedor recebe so
+`{ channel, externalId }`: texto e payload nao escolhem o usuario.
 
 **Regra arquitetural temporaria: so conversa 1:1.** O mapper aceita apenas chat
 privado cujo id e o do proprio remetente; grupo, supergrupo e canal ficam fora
@@ -771,6 +775,99 @@ mensagem, id do remetente ou a resposta.
 desconhecido, sem permissao, nao-comando, falha do handler); o adapter so aplica
 o limite de 4096 caracteres e envia sem `parse_mode`. Sem auditoria por mensagem
 e sem comando novo.
+
+## Vinculo de identidade externa
+
+`backend/src/modules/external-identities/`. Liga uma conta EXTERNA (hoje, do
+Telegram) a um usuario interno - mas so depois que a propria conta PROVA A POSSE.
+
+**Solicitacao pendente x vinculo ativo.** Sao duas coisas diferentes:
+
+| | Solicitacao (`identity_link_requests`) | Vinculo ativo (`external_identity_links`) |
+| - | - | - |
+| Criada por | API interna, por quem administra o usuario | Confirmacao enviada pela propria conta externa |
+| Contem | usuario-alvo, canal, HASH do codigo, estado, validade | canal, id externo, usuario |
+| Autentica alguem? | Nao | Sim - resolvido para o usuario a cada mensagem |
+| Id externo | NAO tem: quem inicia nao escolhe a conta | Vem do REMETENTE da confirmacao |
+
+**Fluxo.**
+
+```
+1. POST /users/:id/external-identities/link-requests  { "canal": "telegram" }
+      -> solicitacao PENDENTE, codigo de uso unico (XXXX-XXXX-XXXX), valido 15 min
+      -> o codigo so aparece nesta resposta; no banco fica o SHA-256
+2. A pessoa envia ao bot, pela PROPRIA conta, em conversa privada: /vincular <codigo>
+3. TelegramAdapter -> ChannelLinkConfirmer (antes da identidade e do motor)
+      -> parseCommand (o parser do Command Engine) -> exatamente 1 argumento
+      -> hash do codigo -> solicitacao PENDENTE, nao vencida, usuario ativo
+      -> transacao: UPDATE ... WHERE status = 'PENDENTE' (so uma confirmacao "toma")
+                    + INSERT do vinculo (canal, id do REMETENTE, usuario da solicitacao)
+4. Proxima mensagem: externalId -> vinculo -> usuario atual -> CommandRouter
+```
+
+**O Telegram nunca escolhe o usuario interno.** O usuario vem da solicitacao; a
+identidade externa vem do remetente. `/vincular 123 <userId>` (argumentos a
+mais), `userId`/`role` no payload ou um id no lugar do codigo sao ignorados ou
+recusados. A confirmacao roda antes do Command Engine porque quem confirma ainda
+nao tem usuario - e o motor exige um; ela reusa o parser do motor e nao cria
+comando novo no catalogo.
+
+**Codigo.** 60 bits de `randomBytes` (alfabeto Crockford base32), gravado so
+como SHA-256 (hash rapido basta: o codigo e aleatorio, nao ha dicionario).
+Validade de 15 minutos, uso unico, nunca em log, auditoria nem mensagem de erro.
+Codigo inexistente, expirado, ja usado, cancelado, mal formado ou de usuario
+inativo recebem a MESMA resposta neutra. Nao ha limite de tentativas (rate
+limiting ficou fora desta etapa): a protecao contra adivinhacao e a entropia
+com a validade curta.
+
+**Concorrencia - o banco decide.**
+
+- `ux_link_req_codigo`: hash do codigo unico;
+- `ux_link_req_pendente` sobre `pendente_chave` (`usuario_id:canal` enquanto
+  pendente, nula depois): no maximo UMA pendente por usuario e canal - dois
+  administradores ao mesmo tempo: um 201, um 409. Nulos nao colidem em indice
+  unico no MySQL nem no Oracle; isso substitui o indice parcial, que nao e
+  portavel;
+- a confirmacao e uma transacao: o UPDATE condicionado ao estado PENDENTE deixa
+  passar uma so; o INSERT colide em `ux_ext_ident_canal_id` se a conta ja tiver
+  vinculo, e ai TUDO e desfeito - a solicitacao continua pendente e nada e
+  reassociado. A resposta diz so que a conta ja esta vinculada, sem revelar a quem.
+
+Nos testes (SQLite em memoria, uma conexao) duas transacoes simultaneas se
+anulam: as duas confirmacoes falham e nada e gravado - seguro, mas nao mostra
+"uma passa". A exclusividade e provada sequencialmente; a concorrencia real so
+um MySQL/Oracle demonstra.
+
+**Rotas.**
+
+| Rota | Permissao | O que faz |
+| ---- | --------- | --------- |
+| `GET /users/:id/external-identities` | `users:read` | Vinculos ATIVOS |
+| `DELETE /users/:id/external-identities/:linkId` | `users:update` | Remove um vinculo ativo (204) |
+| `GET /users/:id/external-identities/link-requests` | `users:read` | Solicitacoes pendentes (sem codigo) |
+| `POST /users/:id/external-identities/link-requests` | `users:update` | Inicia: `{ "canal": "telegram" }` -> codigo + instrucao |
+| `DELETE /users/:id/external-identities/link-requests/:requestId` | `users:update` | Cancela a pendente (204); o codigo deixa de valer |
+
+Mesma hierarquia da edicao de usuarios (`canManageUser`); o proprio usuario pode
+iniciar a sua. Nenhuma permissao nova. Nao existe mais rota que aceite um id
+externo: a unica forma de criar vinculo e a confirmacao pela propria conta.
+
+**Vinculo ativo nao contem permissoes.** So `canal`, `id_externo`, `usuario_id`
+e datas. Quem entra pelo canal age com o perfil ATUAL do usuario (relido a cada
+mensagem pela mesma regra do `JwtAuthGuard`). **Usuario inativo perde o acesso**
+na mensagem seguinte, sem precisar remover o vinculo; tambem nao recebe
+solicitacao nova nem confirma uma pendente. Remover o vinculo vale na mensagem
+seguinte (sem cache).
+
+**Auditoria** (modulo `USERS`; codigo, hash e mensagens nunca entram):
+`IDENTITY_LINK_REQUESTED` (`alvoId`, `solicitacaoId`, `canal`, `expiraEm`),
+`IDENTITY_LINK_CANCELLED` (`alvoId`, `solicitacaoId`),
+`EXTERNAL_IDENTITY_LINKED` (feito pelo proprio usuario, via conta externa:
+`alvoId`, `solicitacaoId`, `vinculoId`, `canal`, `idExterno`) e
+`EXTERNAL_IDENTITY_UNLINKED`. Tentativas recusadas nao sao auditadas. Toda acao
+cabe na coluna `acao` (30 caracteres) - ha teste para isso.
+
+**Grupos continuam fora** (regra 1:1 do canal Telegram), inclusive para `/vincular`.
 
 ## Tratamento de erros
 

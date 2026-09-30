@@ -12,6 +12,21 @@ export enum AuditAction {
   UserActivated = 'USER_ACTIVATED',
   UserDeactivated = 'USER_DEACTIVATED',
   UserRoleChanged = 'USER_ROLE_CHANGED',
+  /**
+   * Vinculacao de identidade externa (ex.: conta do Telegram). O codigo de
+   * confirmacao NUNCA entra nos metadados.
+   *
+   * - `IDENTITY_LINK_REQUESTED` / `IDENTITY_LINK_CANCELLED`: `alvoId`, `solicitacaoId`
+   *   (e `canal`, `expiraEm` na criacao);
+   * - `EXTERNAL_IDENTITY_LINKED`: confirmada pela propria conta externa;
+   *   `usuarioId` e o usuario vinculado. `alvoId`, `solicitacaoId`, `vinculoId`,
+   *   `canal`, `idExterno`;
+   * - `EXTERNAL_IDENTITY_UNLINKED`: `alvoId`, `vinculoId`, `canal`, `idExterno`.
+   */
+  ExternalIdentityLinkRequested = 'IDENTITY_LINK_REQUESTED',
+  ExternalIdentityLinkRequestCancelled = 'IDENTITY_LINK_CANCELLED',
+  ExternalIdentityLinked = 'EXTERNAL_IDENTITY_LINKED',
+  ExternalIdentityUnlinked = 'EXTERNAL_IDENTITY_UNLINKED',
 
   // Financeiro. `usuarioId` e quem executou; o lancamento vai em `metadados.alvoId`.
   FinanceEntryCreated = 'FINANCE_ENTRY_CREATED',

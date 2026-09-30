@@ -7,6 +7,7 @@ import { AuditModule } from './modules/audit/audit.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { CommandsModule } from './modules/commands/commands.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { ExternalIdentitiesModule } from './modules/external-identities/external-identities.module';
 import { FinanceModule } from './modules/finance/finance.module';
 import { HealthModule } from './modules/health/health.module';
 import { IntegrationsModule } from './modules/integrations/integrations.module';
@@ -60,6 +61,10 @@ import { UsersModule } from './modules/users/users.module';
     // Foundation das integracoes externas: contrato, estados e registro.
     // Nenhuma integracao real, nenhuma rota e nenhuma chamada externa.
     IntegrationsModule,
+
+    // Vinculos entre contas externas (Telegram) e usuarios internos. Fornece o
+    // resolvedor de identidade que os canais consomem.
+    ExternalIdentitiesModule,
 
     // Canal Telegram: adapter do Command Engine. Sem rota HTTP; o recebimento
     // por polling e opt-in (TELEGRAM_POLLING_ENABLED) e exige o token.

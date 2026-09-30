@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import 'reflect-metadata';
 import { DataSource, type DataSourceOptions, type QueryRunner } from 'typeorm';
 import { DatabaseType } from '../config/env.validation';
+import { AuditAction, AuditModuleName } from '../modules/audit/audit-action.enum';
 import { ENTITIES } from './entities';
 import { MIGRATIONS } from './migrations';
 
@@ -113,6 +114,38 @@ describe.each(Object.values(DatabaseType))('metadata das entities - %s', (type) 
     expect(metadados.isNullable).toBe(true);
   });
 
+  it('IdentityLinkRequest: codigo so em hash, uma pendente por usuario, sem id externo', async () => {
+    const dataSource = await buildDataSource(type);
+    const metadata = dataSource.getMetadata('IdentityLinkRequest');
+    const unico = (nome: string): string[] | undefined => {
+      const index = metadata.indices.find((i) => i.name === nome);
+      return index?.isUnique ? index.columns.map((c) => c.databaseName) : undefined;
+    };
+
+    expect(unico('ux_link_req_codigo')).toEqual(['codigo_hash']);
+    expect(unico('ux_link_req_pendente')).toEqual(['pendente_chave']);
+    expect(metadata.findColumnWithPropertyName('pendenteChave')?.isNullable).toBe(true);
+    expect(metadata.foreignKeys).toEqual([]);
+    // Quem inicia nao escolhe a conta externa, e o codigo em claro nao e gravado.
+    const colunas = metadata.columns.map((column) => column.databaseName);
+    expect(colunas).not.toContain('id_externo');
+    expect(colunas).not.toContain('codigo');
+  });
+
+  it('ExternalIdentityLink: (canal, id_externo) unico, sem FK e sem coluna de perfil', async () => {
+    const dataSource = await buildDataSource(type);
+    const metadata = dataSource.getMetadata('ExternalIdentityLink');
+
+    const unico = metadata.indices.find((index) => index.name === 'ux_ext_ident_canal_id');
+    expect(unico?.isUnique).toBe(true);
+    expect(unico?.columns.map((column) => column.databaseName)).toEqual(['canal', 'id_externo']);
+    expect(metadata.foreignKeys).toEqual([]);
+    // A autorizacao vem do usuario: o vinculo nao copia perfil nem permissao.
+    expect(metadata.columns.map((column) => column.databaseName).sort()).toEqual(
+      ['canal', 'created_at', 'id', 'id_externo', 'updated_at', 'usuario_id'].sort(),
+    );
+  });
+
   it('FinancialEntry.valor e DECIMAL(15,2) e sempre lido como number', async () => {
     const dataSource = await buildDataSource(type);
     const valor = dataSource.getMetadata('FinancialEntry').findColumnWithPropertyName('valor');
@@ -202,6 +235,26 @@ describe('migrations', () => {
     oracle: /`|\bENGINE=|\btinyint\b|\bdatetime\b|\bAUTO_INCREMENT\b|\btext\b|\bboolean\b/i,
   };
 
+  it.each(Object.values(DatabaseType))(
+    '%s: identity_link_requests nasce com os indices UNICOS de codigo e de pendente',
+    async (type) => {
+      const sql = (await captureSql(type, 'up')).join('\n');
+
+      expect(sql).toMatch(/UNIQUE INDEX [`"]ux_link_req_codigo[`"]/);
+      expect(sql).toMatch(/UNIQUE INDEX [`"]ux_link_req_pendente[`"]/);
+    },
+  );
+
+  it.each(Object.values(DatabaseType))(
+    '%s: external_identity_links nasce com o indice UNICO de (canal, id_externo)',
+    async (type) => {
+      const sql = (await captureSql(type, 'up')).join('\n');
+
+      expect(sql).toMatch(/UNIQUE INDEX [`"]ux_ext_ident_canal_id[`"]/);
+      expect(sql).toMatch(/[`"]canal[`"], [`"]id_externo[`"]/);
+    },
+  );
+
   it.each(Object.values(DatabaseType))('%s: nao contem sintaxe do outro banco', async (type) => {
     const sql = [...(await captureSql(type, 'up')), ...(await captureSql(type, 'down'))];
 
@@ -290,5 +343,25 @@ describe('ENTITIES', () => {
       });
 
     expect(ENTITIES.map((entity) => entity.name).sort()).toEqual(declared.sort());
+  });
+});
+
+/**
+ * O SQLite dos testes nao impoe o tamanho de `varchar`; MySQL e Oracle sim. Uma
+ * acao de auditoria maior que a coluna seria recusada em producao - e, como a
+ * auditoria e best-effort, o registro sumiria em silencio.
+ */
+describe('vocabulario da auditoria cabe nas colunas', () => {
+  it.each(Object.values(DatabaseType))('%s', async (type) => {
+    const metadata = (await buildDataSource(type)).getMetadata('AuditLog');
+    const tamanho = (propriedade: string): number =>
+      Number(metadata.findColumnWithPropertyName(propriedade)?.length);
+
+    for (const acao of Object.values(AuditAction)) {
+      expect(acao.length).toBeLessThanOrEqual(tamanho('acao'));
+    }
+    for (const modulo of Object.values(AuditModuleName)) {
+      expect(modulo.length).toBeLessThanOrEqual(tamanho('modulo'));
+    }
   });
 });
