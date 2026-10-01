@@ -702,6 +702,69 @@ Nenhum modulo de negocio depende da foundation ainda.
 publico sera decidido quando o primeiro provider real existir; o ponto de
 extensao (`HEALTH_INDICATORS`) ja esta la.
 
+## Plantae: escopo pedido e pendencia externa
+
+> **PENDENCIA EXTERNA: documentacao/metodo oficial de integracao do Plantae
+> ainda nao fornecido.** Enquanto isso valer, nao existe provider, nao existe
+> configuracao e nao existe nenhuma porta de dominio para o Plantae no codigo.
+
+O Plantae esta **previsto** na arquitetura: ele entra pela foundation acima, como
+qualquer integracao, sem nada de novo a inventar. Quando a documentacao e os
+acessos chegarem, o caminho e o mesmo que o Telegram percorreu - um modulo
+proprio com um `IntegrationProvider`, registrado no `onModuleInit`.
+
+**Por que nenhum codigo foi escrito ainda.** Um provider de Plantae hoje seria
+`getStatus()` devolvendo `NOT_CONFIGURED` fixo (nao se sabe quais chaves de
+configuracao existem) e um `healthCheck()` inalcancavel (o registro so o chama
+em `READY`). Portas de dominio exigiriam inventar os tipos de "fornecedor",
+"extrato" e "lancamento" do Plantae - o modelo de dados de um sistema que ainda
+nao vimos. Seria codigo que *parece* funcionar e e descartado no primeiro
+contato real, o criterio que `integrations/README.md` ja fixou. Nada no sistema
+consome o `IntegrationRegistry` fora dos testes, entao um provider parado
+tambem nao seria visivel a ninguem.
+
+**Capacidades pedidas pelo cliente.** Registradas aqui para nao se perderem; a
+viabilidade de cada uma depende do que o Plantae oferecer.
+
+| Capacidade | Natureza | Depende de |
+| ---------- | -------- | ---------- |
+| Consultar contas, pagamentos, fornecedores, clientes, lancamentos, extratos e movimentacoes | leitura | existir API de leitura e cobrir essas entidades |
+| Gerar relatorios | leitura + agregacao no VastaFlow | os dados de leitura acima |
+| Exportar para Excel | so VastaFlow | nada do Plantae: e formatacao local dos dados ja obtidos |
+| Conferir Plantae x extratos bancarios | leitura dos dois lados | API do Plantae **e** origem do extrato bancario (OFX? CSV? API do banco?) - a segunda nao foi definida |
+| Identificar diferencas e pendencias | regra no VastaFlow | a conferencia acima |
+| Incluir/alterar informacoes no Plantae | escrita | existir API de escrita, e o cliente autorizar escrita automatica |
+
+Observacoes que valem independente da API:
+
+- **Exportacao para Excel e relatorios nao dependem do Plantae** para existirem.
+  Podem ser construidos sobre o financeiro que ja esta no sistema, e depois
+  passar a incluir dados do Plantae. Sao escopo proprio, nao desta pendencia.
+- **A conferencia com extratos bancarios tem uma segunda pendencia**, separada
+  do Plantae: de onde vem o extrato do banco. Sem isso definido, metade da
+  comparacao nao tem fonte.
+- **Escrita no Plantae e decisao de negocio, nao so tecnica.** Toda operacao que
+  altere dados la passara pelo `AuditService` existente, com RBAC e usuario
+  autenticado - sem mecanismo paralelo de autenticacao e sem credencial em log
+  ou em resposta, como nas demais integracoes.
+
+**O que falta saber para escrever a primeira linha de codigo.**
+
+1. Existe API? Se sim, de que tipo - REST, SOAP, GraphQL? Se nao, qual o meio
+   suportado (exportacao de arquivo, acesso ao banco, ETL)?
+2. Autenticacao: API key, OAuth2, usuario e senha, certificado? Onde a
+   credencial e emitida e com que validade?
+3. Ambientes: existe homologacao separada de producao? Com quais dados?
+4. Entidades e campos realmente disponiveis para leitura, entre os sete pedidos.
+5. Existe API de escrita? Quais operacoes, e com que regras de idempotencia?
+6. Limites: throttling, paginacao, volume maximo, janela de manutencao.
+7. Versionamento e politica de mudanca de contrato.
+8. Para a conferencia bancaria: origem e formato do extrato do banco.
+
+Nenhum desses pontos pode ser suposto. Qualquer valor inventado aqui viraria
+variavel de ambiente, tipo e teste - tres lugares para corrigir depois, com a
+aparencia de integracao pronta no meio do caminho.
+
 ## Canal Telegram
 
 Primeira integracao externa real: `backend/src/modules/integrations/telegram/`.
