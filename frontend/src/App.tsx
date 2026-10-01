@@ -9,6 +9,7 @@ import { DashboardPage } from './pages/dashboard/DashboardPage';
 import { FinanceEntryDetailPage } from './pages/finance/FinanceEntryDetailPage';
 import { FinanceEntryFormPage } from './pages/finance/FinanceEntryFormPage';
 import { FinancePage } from './pages/finance/FinancePage';
+import { FinanceReportsPage } from './pages/finance/FinanceReportsPage';
 import { LoginPage } from './pages/LoginPage';
 import { ProfilePage } from './pages/profile/ProfilePage';
 import { NotificationsPage } from './pages/notifications/NotificationsPage';
@@ -53,6 +54,10 @@ export function App(): ReactNode {
             a checa de novo em cada requisicao. */}
         <Route element={<RequirePermission permission={Permission.FinanceRead} />}>
           <Route path="/finance" element={<FinancePage />} />
+          {/* Antes de `/finance/:id`, senao "relatorios" seria lido como um id.
+              Relatorios e exportacao usam `finance:read`: nao existe permissao
+              propria de exportacao. */}
+          <Route path="/finance/relatorios" element={<FinanceReportsPage />} />
           <Route path="/finance/:id" element={<FinanceEntryDetailPage />} />
         </Route>
         <Route element={<RequirePermission permission={Permission.FinanceCreate} />}>

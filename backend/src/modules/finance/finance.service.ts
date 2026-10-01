@@ -13,6 +13,7 @@ import {
   isFrozen,
   rejectedEdits,
 } from './entry-status.policy';
+import type { FinanceFilter } from './finance-filter';
 import { FinancialEntryStatus } from './financial-entry.enums';
 import { FinanceRepository } from './finance.repository';
 
@@ -60,13 +61,17 @@ export class FinanceService {
   ) {}
 
   /**
-   * Pagina de lancamentos com o autor de cada um.
+   * Pagina de lancamentos com o autor de cada um, aplicando o recorte informado.
    *
    * Duas consultas por pagina, sempre: a pagina (com `COUNT`) e UMA busca em
-   * lote dos autores - nunca uma consulta por lancamento.
+   * lote dos autores - nunca uma consulta por lancamento. Os filtros vao para o
+   * SQL; nada e descartado em memoria, entao o `total` e o `COUNT` do conjunto
+   * filtrado e a paginacao segue coerente.
+   *
+   * Filtro vazio mantem o comportamento anterior aos filtros: lista tudo.
    */
-  async list(page: number, limit: number): Promise<FinancialEntryPage> {
-    const [entries, total] = await this.repository.findPage((page - 1) * limit, limit);
+  async list(filter: FinanceFilter, page: number, limit: number): Promise<FinancialEntryPage> {
+    const [entries, total] = await this.repository.findPage(filter, (page - 1) * limit, limit);
     return { items: await this.withAuthors(entries), total };
   }
 

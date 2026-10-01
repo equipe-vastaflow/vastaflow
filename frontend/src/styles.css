@@ -760,3 +760,19 @@ a.button {
 .field-error {
   color: var(--danger-text);
 }
+
+/* Campos de recorte do financeiro, na listagem e nos relatorios. Mesmo grid
+ * automatico dos cartoes: uma coluna no celular, varias conforme a largura,
+ * sem breakpoint novo. */
+.filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr));
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+/* Explica o que o numero do cartao inclui (ex.: se conta os cancelados). */
+.stat-hint {
+  margin: 0;
+  font-size: 0.8rem;
+}

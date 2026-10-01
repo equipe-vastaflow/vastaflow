@@ -161,6 +161,87 @@ export interface CreateFinancialEntryInput {
 export type UpdateFinancialEntryInput = Partial<CreateFinancialEntryInput>;
 
 /**
+ * Recorte de lancamentos. Os MESMOS filtros servem a listagem e aos relatorios.
+ *
+ * O periodo compara a data do lancamento (`data`), inclusiva nas duas pontas.
+ * Nao existe data de pagamento no modelo, portanto nao ha como filtrar por
+ * "quando foi pago".
+ *
+ * Campo ausente significa "sem esse filtro". String vazia NAO e enviada: o
+ * backend recusaria uma data vazia com 400.
+ */
+export interface FinanceFilter {
+  /** `YYYY-MM-DD`. */
+  de?: string;
+  /** `YYYY-MM-DD`. */
+  ate?: string;
+  status?: FinancialEntryStatus;
+  tipo?: FinancialEntryType;
+  categoria?: string;
+}
+
+/** Recorte de relatorio: aqui o periodo e obrigatorio. */
+export interface FinanceReportFilter extends FinanceFilter {
+  de: string;
+  ate: string;
+}
+
+/** Uma linha de agrupamento do resumo. `valor` e sempre positivo. */
+export interface FinanceGroupTotal {
+  quantidade: number;
+  valor: number;
+}
+
+export interface FinanceStatusTotal extends FinanceGroupTotal {
+  status: FinancialEntryStatus;
+}
+
+export interface FinanceTypeTotal extends FinanceGroupTotal {
+  tipo: FinancialEntryType;
+}
+
+export interface FinanceCategoryTotal extends FinanceGroupTotal {
+  categoria: string;
+}
+
+/**
+ * Resumo financeiro do recorte, calculado INTEIRAMENTE no backend.
+ *
+ * A tela nao soma nada: paginar e somar no cliente daria um total so da pagina
+ * visivel. Nao existe um `valorTotal` generico de proposito - somar receita com
+ * despesa nao significa nada, porque o sinal esta no `tipo`. Quem representa
+ * dinheiro liquido e o `saldo`.
+ */
+export interface FinanceReportSummary {
+  /** O recorte aplicado, como o backend o entendeu. Ausente vem como `null`. */
+  filtros: {
+    de: string;
+    ate: string;
+    status: FinancialEntryStatus | null;
+    tipo: FinancialEntryType | null;
+    categoria: string | null;
+  };
+  /** Inclui os CANCELADOS. */
+  totalRegistros: number;
+  /** Soma das RECEITAS, sem os CANCELADOS. */
+  totalReceitas: number;
+  /** Soma das DESPESAS, sem os CANCELADOS. */
+  totalDespesas: number;
+  /** Receitas menos despesas, sem os CANCELADOS. Pode ser negativo. */
+  saldo: number;
+  /** Inclui a linha de CANCELADO, que fica fora do saldo. */
+  porStatus: FinanceStatusTotal[];
+  porTipo: FinanceTypeTotal[];
+  porCategoria: FinanceCategoryTotal[];
+}
+
+/** Planilha baixada, com o nome que o backend definiu. */
+export interface DownloadedFile {
+  blob: Blob;
+  filename: string;
+}
+
+/**
  * Canal cuja identidade externa pode ser vinculada a um usuario.
  *
  * So `telegram` - e o unico canal que o backend conhece
@@ -356,6 +437,50 @@ async function request<T>(
   return (response.status === 204 ? undefined : await response.json()) as T;
 }
 
+/**
+ * Baixa uma resposta binaria (hoje so a planilha do financeiro).
+ *
+ * Separado de `request` porque aquele sempre interpreta o corpo como JSON. Erro
+ * continua vindo em JSON mesmo nesta rota - o backend confere periodo e volume
+ * ANTES de escrever qualquer byte -, portanto a leitura da mensagem e a mesma.
+ */
+async function requestBlob(
+  path: string,
+  options: { token?: string; fallbackFilename: string },
+): Promise<DownloadedFile> {
+  const headers: Record<string, string> = {};
+  if (options.token) {
+    headers.Authorization = `Bearer ${options.token}`;
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}${path}`, { method: 'GET', headers });
+  } catch {
+    throw new NetworkError();
+  }
+
+  if (!response.ok) {
+    throw new ApiError(response.status, await readErrorMessage(response));
+  }
+
+  return {
+    blob: await response.blob(),
+    // O backend e a fonte do nome. Entre origens diferentes o navegador so
+    // entrega este cabecalho porque a API o declara em `exposedHeaders`; se por
+    // algum motivo nao vier, o nome local evita um download sem nome util.
+    filename:
+      filenameFromDisposition(response.headers.get('Content-Disposition')) ??
+      options.fallbackFilename,
+  };
+}
+
+/** Le `attachment; filename="..."`. Devolve `null` quando nao da para extrair. */
+function filenameFromDisposition(header: string | null): string | null {
+  const match = header?.match(/filename="([^"]+)"/);
+  return match ? match[1] : null;
+}
+
 /** O backend responde `{ message: string | string[] }`. */
 async function readErrorMessage(response: Response): Promise<string> {
   try {
@@ -370,6 +495,32 @@ const userPath = (id: string): string => `/users/${encodeURIComponent(id)}`;
 const externalIdentitiesPath = (userId: string): string =>
   `${userPath(userId)}/external-identities`;
 const entryPath = (id: string): string => `/finance/entries/${encodeURIComponent(id)}`;
+
+/**
+ * Monta a query string do recorte, omitindo o que nao foi informado.
+ *
+ * Omitir e diferente de enviar vazio: `de=` levaria um 400, porque o backend
+ * valida o formato da data. Por isso campo vazio nem entra na URL.
+ */
+function financeFilterParams(filter: FinanceFilter): URLSearchParams {
+  // Campo por campo, e nao `Object.entries`: aquele perde o tipo do valor e
+  // deixaria passar um campo novo do recorte sem ninguem notar.
+  const campos: [string, string | undefined][] = [
+    ['de', filter.de],
+    ['ate', filter.ate],
+    ['status', filter.status],
+    ['tipo', filter.tipo],
+    ['categoria', filter.categoria],
+  ];
+
+  const params = new URLSearchParams();
+  for (const [chave, valor] of campos) {
+    if (valor !== undefined && valor !== '') {
+      params.set(chave, valor);
+    }
+  }
+  return params;
+}
 const settingPath = (chave: string): string => `/settings/${encodeURIComponent(chave)}`;
 const notificationPath = (id: string): string => `/notifications/${encodeURIComponent(id)}`;
 
@@ -503,11 +654,23 @@ export const api = {
   },
 
   finance: {
-    list: (token: string, page: number, limit: number): Promise<FinancialEntryPage> =>
-      request(
-        `/finance/entries?${new URLSearchParams({ page: String(page), limit: String(limit) }).toString()}`,
-        { token },
-      ),
+    /**
+     * Pagina de lancamentos, com o recorte aplicado no banco.
+     *
+     * `total` passa a ser o total do conjunto FILTRADO: e o que mantem a
+     * paginacao coerente com o que foi pedido.
+     */
+    list: (
+      token: string,
+      page: number,
+      limit: number,
+      filter: FinanceFilter = {},
+    ): Promise<FinancialEntryPage> => {
+      const params = financeFilterParams(filter);
+      params.set('page', String(page));
+      params.set('limit', String(limit));
+      return request(`/finance/entries?${params.toString()}`, { token });
+    },
 
     get: (token: string, id: string): Promise<FinancialEntry> => request(entryPath(id), { token }),
 
@@ -523,5 +686,26 @@ export const api = {
     /** Transicoes validas: PENDENTE -> PAGO | CANCELADO e PAGO -> CANCELADO. */
     setStatus: (token: string, id: string, status: FinancialEntryStatus): Promise<FinancialEntry> =>
       request(`${entryPath(id)}/status`, { method: 'PATCH', body: { status }, token }),
+
+    /**
+     * Relatorios. Exigem `finance:read`, a mesma permissao da listagem - nao ha
+     * permissao propria de exportacao.
+     */
+    reports: {
+      summary: (token: string, filter: FinanceReportFilter): Promise<FinanceReportSummary> =>
+        request(`/finance/reports/summary?${financeFilterParams(filter).toString()}`, { token }),
+
+      /**
+       * Baixa a planilha dos lancamentos do recorte.
+       *
+       * Responde 409 quando o recorte passa do limite de linhas; a mensagem do
+       * backend ja orienta a reduzir o periodo.
+       */
+      export: (token: string, filter: FinanceReportFilter): Promise<DownloadedFile> =>
+        requestBlob(`/finance/reports/export?${financeFilterParams(filter).toString()}`, {
+          token,
+          fallbackFilename: `vastaflow-financeiro-${filter.de}-a-${filter.ate}.xlsx`,
+        }),
+    },
   },
 };

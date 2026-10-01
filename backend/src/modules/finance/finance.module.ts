@@ -3,6 +3,8 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuditModule } from '../audit/audit.module';
 import { UserDirectoryModule } from '../users/user-directory.module';
 import { FinancialEntry } from './entities/financial-entry.entity';
+import { FinanceReportsController } from './finance-reports.controller';
+import { FinanceReportsService } from './finance-reports.service';
 import { FinanceController } from './finance.controller';
 import { FinanceRepository } from './finance.repository';
 import { FinanceService } from './finance.service';
@@ -15,12 +17,13 @@ import { FinanceService } from './finance.service';
  * `UsersModule`, que traria regra de negocio de usuarios para dentro daqui.
  *
  * Exporta o `FinanceService` porque o comando `/financeiro` depende dele: o
- * handler usa o service, nunca o repositorio.
+ * handler usa o service, nunca o repositorio. O `FinanceReportsService` NAO e
+ * exportado: nada fora do modulo consome relatorio.
  */
 @Module({
   imports: [TypeOrmModule.forFeature([FinancialEntry]), AuditModule, UserDirectoryModule],
-  controllers: [FinanceController],
-  providers: [FinanceRepository, FinanceService],
+  controllers: [FinanceController, FinanceReportsController],
+  providers: [FinanceRepository, FinanceService, FinanceReportsService],
   exports: [FinanceService],
 })
 export class FinanceModule {}

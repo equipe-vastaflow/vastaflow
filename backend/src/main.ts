@@ -29,7 +29,15 @@ async function bootstrap(): Promise<void> {
     .split(',')
     .map((origin) => origin.trim())
     .filter((origin) => origin !== '');
-  app.enableCors({ origin: allowedOrigins.length > 0 ? allowedOrigins : false });
+  app.enableCors({
+    origin: allowedOrigins.length > 0 ? allowedOrigins : false,
+    // `Content-Disposition` precisa ser exposto para o navegador conseguir ler o
+    // nome do arquivo na exportacao do financeiro: entre origens diferentes, o
+    // JavaScript so ve os cabecalhos de resposta liberados aqui. Expor um
+    // cabecalho nao amplia quem pode chamar a API - a origem ja tinha de estar
+    // na lista acima.
+    exposedHeaders: ['Content-Disposition'],
+  });
 
   app.enableShutdownHooks();
 

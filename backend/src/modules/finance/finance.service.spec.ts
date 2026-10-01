@@ -7,6 +7,7 @@ import { RoleName } from '../roles/role-name.enum';
 import type { UserDirectoryService } from '../users/user-directory.service';
 import type { CreateFinancialEntryDto } from './dto/create-financial-entry.dto';
 import type { FinancialEntry } from './entities/financial-entry.entity';
+import type { FinanceFilter } from './finance-filter';
 import { FinancialEntryStatus, FinancialEntryType } from './financial-entry.enums';
 import type { FinanceRepository } from './finance.repository';
 import { FinanceService, OVERVIEW_LIMIT } from './finance.service';
@@ -168,18 +169,36 @@ describe('FinanceService', () => {
   });
 
   describe('list', () => {
-    it('converte a pagina (1-based) no deslocamento do banco', async () => {
-      await service.list(1, 20);
-      expect(repository.findPage).toHaveBeenCalledWith(0, 20);
+    const SEM_FILTRO: FinanceFilter = {};
 
-      await service.list(3, 10);
-      expect(repository.findPage).toHaveBeenLastCalledWith(20, 10);
+    it('converte a pagina (1-based) no deslocamento do banco', async () => {
+      await service.list(SEM_FILTRO, 1, 20);
+      expect(repository.findPage).toHaveBeenCalledWith(SEM_FILTRO, 0, 20);
+
+      await service.list(SEM_FILTRO, 3, 10);
+      expect(repository.findPage).toHaveBeenLastCalledWith(SEM_FILTRO, 20, 10);
+    });
+
+    it('repassa o recorte ao banco sem alterar nada', async () => {
+      const filtro: FinanceFilter = {
+        de: '2026-01-01',
+        ate: '2026-01-31',
+        status: FinancialEntryStatus.Pago,
+        tipo: FinancialEntryType.Despesa,
+        categoria: 'Insumos',
+      };
+
+      await service.list(filtro, 2, 15);
+
+      // O filtro chega ao SQL inteiro: nada de filtrar em memoria depois, que
+      // quebraria a paginacao e o total.
+      expect(repository.findPage).toHaveBeenCalledWith(filtro, 15, 15);
     });
 
     it('devolve os itens e o total vindos do banco', async () => {
       repository.findPage.mockResolvedValue([[entry({ id: 'a' }), entry({ id: 'b' })], 42]);
 
-      const { items, total } = await service.list(1, 20);
+      const { items, total } = await service.list(SEM_FILTRO, 1, 20);
 
       expect(items.map(({ entry: e }) => e.id)).toEqual(['a', 'b']);
       expect(total).toBe(42);
@@ -191,14 +210,14 @@ describe('FinanceService', () => {
         3,
       ]);
 
-      await service.list(1, 20);
+      await service.list(SEM_FILTRO, 1, 20);
 
       expect(userDirectory.findByIds).toHaveBeenCalledTimes(1);
       expect(userDirectory.findByIds).toHaveBeenCalledWith(['user-1', 'user-1', 'user-2']);
     });
 
     it('listar nao gera auditoria', async () => {
-      await service.list(1, 20);
+      await service.list(SEM_FILTRO, 1, 20);
 
       expect(auditService.record).not.toHaveBeenCalled();
     });

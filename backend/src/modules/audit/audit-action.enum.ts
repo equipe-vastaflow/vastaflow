@@ -32,6 +32,13 @@ export enum AuditAction {
   FinanceEntryCreated = 'FINANCE_ENTRY_CREATED',
   FinanceEntryUpdated = 'FINANCE_ENTRY_UPDATED',
   FinanceEntryStatusChanged = 'FINANCE_ENTRY_STATUS_CHANGED',
+  /**
+   * Exportacao de relatorio financeiro em planilha. Consultar relatorio NAO e
+   * auditado; exportar e, porque gera um arquivo que sai do sistema. Os
+   * metadados levam so o recorte (`de`, `ate`, `status`, `tipo`, `categoria`) e
+   * a `quantidade` de linhas - nenhum valor monetario, nenhuma descricao.
+   */
+  FinanceReportExported = 'FINANCE_REPORT_EXPORTED',
 
   /** Configuracoes do sistema. A chave alterada vai em `metadados.chave`; o valor nunca entra. */
   SystemSettingUpdated = 'SYSTEM_SETTING_UPDATED',

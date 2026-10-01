@@ -14,6 +14,13 @@ import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { Pagination } from '../../components/Pagination';
 import { EntryStatusBadge, EntryTypeBadge } from './EntryBadges';
 import { entryCapabilities } from './entry-capabilities';
+import { FinanceFilterFields } from './FinanceFilterFields';
+import {
+  EMPTY_FILTER_FORM,
+  isEmptyFilterForm,
+  toFinanceFilter,
+  type FinanceFilterForm,
+} from './finance-filter-form';
 import { formatCurrency, formatEntryDate, STATUS_LABELS } from './finance-format';
 
 const PAGE_SIZE = 20;
@@ -46,9 +53,15 @@ export function FinancePage(): ReactNode {
 
   const [page, setPage] = useState(1);
   const [reloads, setReloads] = useState(0);
+  // Dois estados para o filtro: `form` e o que esta nos campos e `applied` e o
+  // que a consulta esta usando. Sem essa separacao, digitar na categoria
+  // disparia uma requisicao por tecla.
+  const [form, setForm] = useState<FinanceFilterForm>(EMPTY_FILTER_FORM);
+  const [applied, setApplied] = useState<FinanceFilterForm>(EMPTY_FILTER_FORM);
   // O resultado guarda a chave da consulta que o produziu: enquanto a chave
   // atual nao tem resultado, a tela esta carregando (mesmo padrao das outras).
-  const requestKey = `${page}:${reloads}`;
+  // O recorte entra na chave para que trocar de filtro conte como nova consulta.
+  const requestKey = `${page}:${reloads}:${JSON.stringify(applied)}`;
   const [result, setResult] = useState<{ key: string; outcome: Outcome } | null>(null);
 
   const [notice, setNotice] = useState<string | null>(
@@ -74,7 +87,7 @@ export function FinancePage(): ReactNode {
     }
     let cancelled = false;
     api.finance
-      .list(token, page, PAGE_SIZE)
+      .list(token, page, PAGE_SIZE, toFinanceFilter(applied))
       .then((entryPage) => {
         if (!cancelled) {
           setResult({ key: requestKey, outcome: { ok: true, page: entryPage } });
@@ -88,7 +101,7 @@ export function FinancePage(): ReactNode {
     return () => {
       cancelled = true;
     };
-  }, [token, page, requestKey, handleError]);
+  }, [token, page, applied, requestKey, handleError]);
 
   const closeDialog = useCallback(() => {
     setPending(null);
@@ -143,12 +156,49 @@ export function FinancePage(): ReactNode {
           <h1>Financeiro</h1>
           <p className="muted">Receitas e despesas registradas no VastaFlow.</p>
         </div>
-        {hasPermission(me, Permission.FinanceCreate) && (
-          <Link to="/finance/novo" className="button">
-            Novo lançamento
+        <div className="row-actions">
+          {/* Relatorios exigem `finance:read`, a mesma permissao desta tela:
+              quem chegou aqui ja pode abri-los. */}
+          <Link to="/finance/relatorios" className="button button-secondary">
+            Relatórios
           </Link>
-        )}
+          {hasPermission(me, Permission.FinanceCreate) && (
+            <Link to="/finance/novo" className="button">
+              Novo lançamento
+            </Link>
+          )}
+        </div>
       </div>
+
+      <form
+        className="card"
+        onSubmit={(event) => {
+          event.preventDefault();
+          // Volta para a primeira pagina: a pagina 3 do recorte anterior pode
+          // nem existir no novo.
+          setPage(1);
+          setApplied(form);
+        }}
+      >
+        <FinanceFilterFields idPrefix="lancamentos" value={form} onChange={setForm} />
+        <div className="row-actions">
+          <button type="submit" className="button">
+            Filtrar
+          </button>
+          <button
+            type="button"
+            className="button button-secondary"
+            disabled={isEmptyFilterForm(form) && isEmptyFilterForm(applied)}
+            onClick={() => {
+              setForm(EMPTY_FILTER_FORM);
+              setApplied(EMPTY_FILTER_FORM);
+              setPage(1);
+            }}
+          >
+            Limpar filtros
+          </button>
+        </div>
+      </form>
 
       {notice && (
         <p className="notice" role="status">
@@ -184,9 +234,11 @@ export function FinancePage(): ReactNode {
 
       {outcome?.ok && outcome.page.items.length === 0 && (
         <p className="card muted">
-          {outcome.page.total === 0
-            ? 'Nenhum lançamento registrado ainda.'
-            : 'Nenhum lançamento nesta página.'}
+          {outcome.page.total > 0
+            ? 'Nenhum lançamento nesta página.'
+            : isEmptyFilterForm(applied)
+              ? 'Nenhum lançamento registrado ainda.'
+              : 'Nenhum lançamento corresponde aos filtros aplicados.'}
         </p>
       )}
 

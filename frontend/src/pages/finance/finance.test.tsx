@@ -863,8 +863,16 @@ describe('sessao e chamadas a API', () => {
     // Nem valor, nem saldo, nem total inventados; nem badges de tipo/status.
     expect(screen.queryByText(/R\$/)).not.toBeInTheDocument();
     expect(screen.queryByText(/saldo|total/i)).not.toBeInTheDocument();
+    // Procura os BADGES, nao o texto solto: "Receita" e "Pendente" tambem sao
+    // opcoes do filtro, que existem mesmo sem nenhum lancamento. O que nao pode
+    // aparecer e o selo de um lancamento.
+    expect(document.querySelectorAll('.badge')).toHaveLength(0);
     for (const rotulo of ['Receita', 'Despesa', 'Pendente', 'Pago', 'Cancelado']) {
-      expect(screen.queryByText(rotulo)).not.toBeInTheDocument();
+      // Fora dos `<option>` do filtro, nenhum destes rotulos aparece na tela.
+      const ocorrencias = screen
+        .queryAllByText(rotulo)
+        .filter((elemento) => elemento.tagName !== 'OPTION');
+      expect(ocorrencias).toHaveLength(0);
     }
     expect(screen.queryByRole('navigation', { name: /pagina/i })).not.toBeInTheDocument();
   });

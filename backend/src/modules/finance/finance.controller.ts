@@ -25,6 +25,7 @@ import {
 import { DEFAULT_PAGE_SIZE, ListEntriesQuery } from './dto/list-entries.query';
 import { UpdateEntryStatusDto } from './dto/update-entry-status.dto';
 import { UpdateFinancialEntryDto } from './dto/update-financial-entry.dto';
+import { toFinanceFilter } from './finance-filter';
 import { FinanceService } from './finance.service';
 
 /**
@@ -45,15 +46,21 @@ export class FinanceController {
   @Get()
   @RequirePermissions(PermissionCode.FinanceRead)
   @ApiOperation({
-    summary: 'Lista os lancamentos, paginado',
-    description: 'Exige `finance:read`. Ordenado por data decrescente; o id desempata.',
+    summary: 'Lista os lancamentos, paginado e filtrado',
+    description:
+      'Exige `finance:read`. Ordenado por data decrescente; o id desempata. Os filtros ' +
+      '(`de`, `ate`, `status`, `tipo`, `categoria`) sao todos opcionais e sao os MESMOS dos ' +
+      'relatorios. O periodo compara a data do lancamento, inclusiva nas duas pontas. Sem ' +
+      'nenhum filtro, lista tudo - como antes dos filtros existirem.',
   })
   @ApiOkResponse({ type: FinancialEntryPageResponseDto })
-  @ApiBadRequestResponse({ description: 'Parametros de paginacao invalidos' })
+  @ApiBadRequestResponse({ description: 'Parametros de paginacao ou de filtro invalidos' })
   async findPage(@Query() query: ListEntriesQuery): Promise<FinancialEntryPageResponseDto> {
     const page = query.page ?? 1;
     const limit = query.limit ?? DEFAULT_PAGE_SIZE;
-    const { items, total } = await this.financeService.list(page, limit);
+    // `total` passa a ser o total do conjunto FILTRADO, nao da tabela: e o que
+    // faz a paginacao fechar com o que foi pedido.
+    const { items, total } = await this.financeService.list(toFinanceFilter(query), page, limit);
 
     return {
       items: items.map(({ entry, autor }) => toFinancialEntryResponse(entry, autor)),
