@@ -852,6 +852,15 @@ Mesma hierarquia da edicao de usuarios (`canManageUser`); o proprio usuario pode
 iniciar a sua. Nenhuma permissao nova. Nao existe mais rota que aceite um id
 externo: a unica forma de criar vinculo e a confirmacao pela propria conta.
 
+**Interface.** A administracao fica no detalhe do usuario (`/users/:id`), na
+secao "Vinculos externos": vinculos ativos e solicitacoes pendentes, com as
+acoes de vincular, cancelar e remover. As acoes aparecem pela mesma capacidade
+do botao Editar (`userCapabilities(...).edit`), que ja reflete `users:update`
+mais a hierarquia - nenhuma permissao nova no frontend. O codigo e exibido uma
+unica vez, em dialogo, e vive apenas em estado React: nao vai para
+`localStorage`, `sessionStorage`, URL, historico nem log. Nao ha polling; o
+vinculo confirmado aparece na proxima consulta.
+
 **Vinculo ativo nao contem permissoes.** So `canal`, `id_externo`, `usuario_id`
 e datas. Quem entra pelo canal age com o perfil ATUAL do usuario (relido a cada
 mensagem pela mesma regra do `JwtAuthGuard`). **Usuario inativo perde o acesso**

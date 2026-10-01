@@ -7,6 +7,7 @@ import { AppShell } from '../../components/AppShell';
 import { StatusLabel } from '../../components/StatusLabel';
 import { ROLE_LABELS } from '../../roles';
 import { userCapabilities } from './capabilities';
+import { ExternalIdentitiesSection } from './ExternalIdentitiesSection';
 import { formatDateTime } from './format';
 
 type Loaded =
@@ -117,6 +118,14 @@ export function UserDetailPage(): ReactNode {
               <dd>{formatDateTime(current.user.updatedAt)}</dd>
             </div>
           </dl>
+
+          {/* As mutacoes de vinculo exigem `users:update` com a mesma
+              hierarquia da edicao, entao a capacidade e a mesma do botao
+              Editar - nenhuma permissao nova. */}
+          <ExternalIdentitiesSection
+            userId={current.user.id}
+            podeGerenciar={userCapabilities(me, current.user, current.assignable).edit}
+          />
         </>
       )}
     </AppShell>

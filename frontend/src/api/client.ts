@@ -160,6 +160,56 @@ export interface CreateFinancialEntryInput {
 /** Edicao parcial. O status muda pela rota propria, nunca por aqui. */
 export type UpdateFinancialEntryInput = Partial<CreateFinancialEntryInput>;
 
+/**
+ * Canal cuja identidade externa pode ser vinculada a um usuario.
+ *
+ * So `telegram` - e o unico canal que o backend conhece
+ * (`IdentityChannel`). Canal novo entra aqui junto com o adaptador dele.
+ */
+export type IdentityChannel = 'telegram';
+
+/**
+ * Situacao de uma solicitacao de vinculo, como o backend a define.
+ *
+ * `PENDENTE` aguarda a conta externa enviar o codigo; as outras tres sao
+ * terminais. A listagem de pendentes devolve apenas `PENDENTE`.
+ */
+export type LinkRequestStatus = 'PENDENTE' | 'CONFIRMADA' | 'CANCELADA' | 'EXPIRADA';
+
+/**
+ * Vinculo ATIVO entre um usuario e uma conta externa.
+ *
+ * `idExterno` e o identificador da conta no canal (no Telegram, o id numerico
+ * do chat). Nao ha nome nem username: o backend nao os fornece.
+ */
+export interface ExternalIdentity {
+  id: string;
+  canal: IdentityChannel;
+  idExterno: string;
+  createdAt: string;
+}
+
+/** Solicitacao de vinculo pendente. Nunca traz o codigo. */
+export interface IdentityLinkRequest {
+  id: string;
+  canal: IdentityChannel;
+  status: LinkRequestStatus;
+  /** Instante em que o codigo deixa de valer. */
+  expiraEm: string;
+  createdAt: string;
+}
+
+/**
+ * Solicitacao recem-criada: a UNICA resposta que traz o codigo.
+ *
+ * O backend nao o guarda em texto e nao o devolve de novo - nem em listagem,
+ * nem em log, nem na auditoria. Quem recebe mostra uma vez e descarta.
+ */
+export interface CreatedIdentityLinkRequest extends IdentityLinkRequest {
+  codigo: string;
+  instrucao: string;
+}
+
 /** Tipo declarado de uma configuracao do sistema. */
 export type SystemSettingType = 'STRING' | 'NUMBER' | 'BOOLEAN';
 
@@ -277,7 +327,7 @@ export class NetworkError extends Error {
 
 async function request<T>(
   path: string,
-  options: { method?: 'GET' | 'POST' | 'PATCH'; body?: unknown; token?: string } = {},
+  options: { method?: 'GET' | 'POST' | 'PATCH' | 'DELETE'; body?: unknown; token?: string } = {},
 ): Promise<T> {
   const headers: Record<string, string> = {};
   if (options.body !== undefined) {
@@ -302,7 +352,7 @@ async function request<T>(
     throw new ApiError(response.status, await readErrorMessage(response));
   }
 
-  // 204 No Content (logout) nao tem corpo.
+  // 204 No Content (logout, remocao de vinculo) nao tem corpo.
   return (response.status === 204 ? undefined : await response.json()) as T;
 }
 
@@ -317,6 +367,8 @@ async function readErrorMessage(response: Response): Promise<string> {
 }
 
 const userPath = (id: string): string => `/users/${encodeURIComponent(id)}`;
+const externalIdentitiesPath = (userId: string): string =>
+  `${userPath(userId)}/external-identities`;
 const entryPath = (id: string): string => `/finance/entries/${encodeURIComponent(id)}`;
 const settingPath = (chave: string): string => `/settings/${encodeURIComponent(chave)}`;
 const notificationPath = (id: string): string => `/notifications/${encodeURIComponent(id)}`;
@@ -364,6 +416,48 @@ export const api = {
 
     setRole: (token: string, id: string, role: RoleName): Promise<User> =>
       request(`${userPath(id)}/role`, { method: 'PATCH', body: { role }, token }),
+  },
+
+  /**
+   * Vinculos de identidade externa de um usuario.
+   *
+   * Consultar exige `users:read`; iniciar, cancelar e desvincular exigem
+   * `users:update` com a hierarquia da edicao de usuarios - as mesmas
+   * permissoes que o backend aplica, sem nenhuma nova.
+   */
+  externalIdentities: {
+    list: (token: string, userId: string): Promise<ExternalIdentity[]> =>
+      request(externalIdentitiesPath(userId), { token }),
+
+    listLinkRequests: (token: string, userId: string): Promise<IdentityLinkRequest[]> =>
+      request(`${externalIdentitiesPath(userId)}/link-requests`, { token }),
+
+    /**
+     * Inicia a vinculacao. O corpo leva SOMENTE o canal: nao existe campo de id
+     * externo - quem prova a posse e a propria conta, enviando o codigo ao bot.
+     */
+    createLinkRequest: (
+      token: string,
+      userId: string,
+      canal: IdentityChannel,
+    ): Promise<CreatedIdentityLinkRequest> =>
+      request(`${externalIdentitiesPath(userId)}/link-requests`, {
+        method: 'POST',
+        body: { canal },
+        token,
+      }),
+
+    cancelLinkRequest: (token: string, userId: string, requestId: string): Promise<void> =>
+      request(`${externalIdentitiesPath(userId)}/link-requests/${encodeURIComponent(requestId)}`, {
+        method: 'DELETE',
+        token,
+      }),
+
+    remove: (token: string, userId: string, linkId: string): Promise<void> =>
+      request(`${externalIdentitiesPath(userId)}/${encodeURIComponent(linkId)}`, {
+        method: 'DELETE',
+        token,
+      }),
   },
 
   profile: {

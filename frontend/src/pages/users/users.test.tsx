@@ -83,6 +83,10 @@ function session(me: User, extra: Record<string, Handler> = {}): Record<string, 
       status: 200,
       body: me.role === 'ADMIN' ? ['ADMIN', 'GESTOR', 'OPERADOR', 'USUARIO'] : ['OPERADOR', 'USUARIO'],
     },
+    // O detalhe do usuario carrega a secao de vinculos externos; ela tem
+    // cobertura propria em pages/users/external-identities.test.tsx.
+    'GET /users/admin/external-identities': { status: 200, body: [] },
+    'GET /users/admin/external-identities/link-requests': { status: 200, body: [] },
     ...extra,
   };
 }
