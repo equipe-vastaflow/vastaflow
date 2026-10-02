@@ -324,10 +324,15 @@ recorrencia, moeda nem documento fiscal.
 
 | Permissao         | Rota                                  |
 | ----------------- | ------------------------------------- |
-| `finance:read`    | `GET /finance/entries`, `GET /finance/entries/:id`, comando `/financeiro` |
+| `finance:read`    | `GET /finance/entries`, `GET /finance/entries/:id`, `GET /finance/reports/summary`, `GET /finance/reports/export`, comando `/financeiro` |
 | `finance:create`  | `POST /finance/entries`               |
 | `finance:update`  | `PATCH /finance/entries/:id`          |
 | `finance:status`  | `PATCH /finance/entries/:id/status`   |
+
+Nao existe `finance:export`. Relatorio e exportacao entregam o mesmo conjunto
+que quem tem `finance:read` ja percorre pagina por pagina pela listagem; uma
+permissao separada sugeriria uma barreira que de fato nao existe. O que
+diferencia a exportacao e a trilha de auditoria, nao o acesso.
 
 **Status.** Todo lancamento nasce `PENDENTE`. Transicoes permitidas:
 `PENDENTE -> PAGO`, `PENDENTE -> CANCELADO` e `PAGO -> CANCELADO`. `CANCELADO` e
@@ -365,7 +370,9 @@ identificador de usuario. `criado_por_id` nao tem FK (mesmo motivo de
 metadados minimos: `alvoId`, e conforme o caso `tipo`/`status`, os NOMES dos
 campos alterados, ou `de`/`para`. Valor e descricao do lancamento **nao** vao
 para a trilha - sao dados de negocio, e quem tem `finance:read` os consulta pela
-API. **Nenhuma leitura audita**: nem `GET /finance/entries`, nem `GET /finance/entries/:id`, nem o comando `/financeiro`.
+API. **Nenhuma leitura audita**: nem `GET /finance/entries`, nem `GET /finance/entries/:id`,
+nem o resumo dos relatorios, nem o comando `/financeiro`. A unica excecao e a
+EXPORTACAO, pelo motivo explicado em [Relatorios e exportacao](#relatorios-e-exportacao).
 
 ### Dinheiro e data: duas armadilhas de portabilidade, ambas verificadas
 
@@ -394,8 +401,190 @@ repositorio, e nao conhece HTTP, Telegram nem WhatsApp.
 A execucao **nao** entra na trilha: a auditoria do motor e opt-in e este comando
 so consulta, como `/ajuda` e `/status`. A trilha registra o que muda.
 
-Nao existe `/receitas`, `/despesas`, `/pagar`, `/saldo` nem relatorio: este
-comando e apenas o ponto de entrada do dominio.
+Nao existe `/receitas`, `/despesas`, `/pagar`, `/saldo` nem `/relatorio`: este
+comando e apenas o ponto de entrada do dominio. Relatorio existe, mas por HTTP
+(abaixo) - nao ha comando de chat que o produza, e a planilha nao seria
+entregavel por um canal de texto.
+
+### Relatorios e exportacao
+
+Duas rotas de leitura sobre os MESMOS lancamentos, sem modelo novo e sem
+migration: `GET /finance/reports/summary` devolve os totais agregados do periodo
+e `GET /finance/reports/export` devolve a planilha das linhas daquele periodo.
+
+**Filtros: uma estrutura so.** `FinanceFilter` (`de`, `ate`, `status`, `tipo`,
+`categoria`) atende a listagem e os dois relatorios, pelo mesmo caminho no
+repositorio. Dois dialetos de filtro divergiriam no primeiro ajuste - e os
+numeros do relatorio deixariam de corresponder ao que a tela lista. A diferenca
+e so a obrigatoriedade do periodo:
+
+| Rota | `de` / `ate` | Demais filtros |
+| ---- | ------------ | -------------- |
+| `GET /finance/entries` | opcionais (sem eles, lista tudo, como antes) | opcionais |
+| `GET /finance/reports/*` | **obrigatorios**, no maximo 366 dias | opcionais |
+
+O periodo e obrigatorio nos relatorios porque e ele que limita o custo da
+consulta: sem recorte de data, um relatorio varreria a tabela inteira. O maximo
+e 366 dias, e nao 365, para que "01/01 a 31/12" de um ano bissexto caiba.
+
+`de`/`ate` filtram a coluna `data` - o dia do lancamento/vencimento. **Nao
+existe data de pagamento no modelo**, e `data` fica congelada quando o
+lancamento vira `PAGO`; portanto um periodo recorta por quando o lancamento
+ocorre ou vence, nunca por quando foi pago. Um relatorio de caixa por data de
+pagamento exigiria uma coluna que o modelo nao tem, e inventa-la aqui seria
+inventar o dado.
+
+As regras que dependem das DUAS datas ficam em `report-period.policy.ts`, funcao
+pura como `entry-status.policy.ts`. Ela tambem valida se o dia existe no
+calendario, de forma redundante com o `@IsISO8601({ strict: true })` do DTO - e
+de proposito: a politica e a autoridade sobre o periodo e nao pode depender de
+quem a chama ter passado por um DTO. `Date.parse` nao serve sozinho: recusa mes
+fora de faixa (`2026-13-01` da `NaN`) mas **rola dia fora do mes em silencio**
+(`2026-02-30` vira 02/03), o que produziria um relatorio de um periodo diferente
+do pedido.
+
+**O que o resumo devolve.** Totais do conjunto filtrado e tres agrupamentos
+(por status, por tipo, por categoria), todos calculados no banco.
+
+Nao existe um `valorTotal` generico. `valor` e sempre positivo e o sinal esta no
+`tipo`, entao somar receitas com despesas daria um numero sem significado -
+medido num MySQL real, 2.500,74 contra um saldo verdadeiro de 500,25. Quem
+representa dinheiro liquido e o `saldo`.
+
+| Campo | Inclui `CANCELADO`? |
+| ----- | ------------------- |
+| `totalRegistros` | **sim** - descreve o conjunto filtrado |
+| `totalReceitas`, `totalDespesas`, `saldo` | **nao** - lancamento cancelado nao e dinheiro |
+| `porStatus` | **sim**, em linha propria |
+| `porTipo`, `porCategoria` | sim (soma bruta do grupo) |
+
+O cancelado aparece contado e agrupado, mas fora do saldo: oculta-lo faria o
+total de registros nao fechar com a listagem, e soma-lo faria o saldo mentir.
+
+**Tudo agregado no banco.** O resumo custa **4 consultas** (`COUNT`+`SUM`
+condicional numa, e um `GROUP BY` para cada agrupamento), independentemente do
+volume. Medido contra MySQL 8.4 real: 6 consultas por requisicao de ponta a
+ponta tanto para um recorte de 55 linhas quanto para um de 50.001 - 909x mais
+dados, mesmo custo -, das quais 2 sao a autenticacao (o guard rele o usuario a
+cada requisicao, como em qualquer rota autenticada) e 4 sao o relatorio. O Node
+nunca percorre lancamentos para somar dinheiro.
+
+Agregacao **nao passa pelo transformer da entidade**: `getRawOne`/`getRawMany`
+devolvem o que o driver deu. Verificado em MySQL real: o TypeORM devolve
+`COUNT` como a string `"5"` e `SUM(DECIMAL)` como `"1250.50"`, enquanto a
+entidade hidratada traz `number`. Sem normalizar, o tipo do JSON da API mudaria
+conforme o banco; `readCount`/`readMoney` uniformizam, e `SUM` de conjunto vazio
+(`NULL`) vira zero.
+
+**A exportacao** entrega as LINHAS do recorte, nao o resumo - quem recebe a
+planilha quer poder conferir e filtrar lancamento por lancamento. Oito colunas:
+ID, Tipo, Descricao, Valor, Data, Categoria, Status, Observacao.
+
+`criado_por_id` **nao** vai na planilha: um UUID interno nao diz nada a quem le,
+e resolver o nome exigiria uma consulta extra por lote, sem pedido de ninguem.
+
+Escrita em modo streaming (`WorkbookWriter` do `exceljs`), em lotes de 500 lidos
+por **cursor** `(data, id)` - e nao por `OFFSET`: a exportacao le varios lotes em
+sequencia e, com offset, uma insercao no meio deslocaria as paginas seguintes,
+repetindo ou pulando linhas no arquivo. Verificado com 20.000 linhas em MySQL
+real: 20.000 linhas distintas, nenhuma repetida, nenhuma faltando, e ordem
+decrescente de data preservada no arquivo inteiro (0,85 MB em ~1,7 s, resposta
+`chunked`).
+
+**Limite de 50.000 linhas**, acima disso **409**. O volume e conferido *antes* de
+qualquer byte sair, o que e o ponto central do desenho: o service recebe o
+destino como funcao (`open: () => Writable`) e so a invoca depois de o periodo e
+a contagem passarem. Se o cabecalho de download fosse escrito antes da checagem,
+o cliente receberia um `.xlsx` corrompido no lugar da mensagem de erro.
+Verificado em MySQL real com 50.001 linhas: 409 em 26 ms, corpo JSON, nenhum
+`Content-Disposition`, e nenhum registro de auditoria.
+
+**Datas na planilha** sao gravadas como numero de serie do Excel calculado com
+aritmetica inteira em UTC (`Date.UTC(...) - Date.UTC(1899, 11, 30)`), com formato
+`dd/mm/yyyy`. Passar a string por `new Date()` arriscaria o mesmo deslocamento de
+um dia que `utc: true` evita na coluna; gravar texto manteria o dia certo mas a
+celula nao seria ordenavel nem filtravel como data. Verificado ponta a ponta:
+todas as celulas voltam como meia-noite UTC exata do mesmo dia do banco.
+
+**Texto do usuario nao vira formula.** Uma `descricao` como `=HYPERLINK(...)` ou
+uma `observacao` como `-1+1` permanecem texto inerte: o `exceljs` grava celula de
+string e o arquivo gerado nao contem nenhum elemento `<f>`. Confirmado no arquivo
+produzido pela aplicacao real. Por isso **nao** ha prefixo defensivo na
+exportacao - ele corromperia dado legitimo, como uma descricao que comece com
+"-", para resolver um problema que o formato XLSX nao tem. (Um CSV teria.)
+
+**Auditoria: consultar nao, exportar sim.** O resumo nao entra na trilha, pelo
+mesmo criterio que mantem toda leitura fora dela. A exportacao entra
+(`FINANCE_REPORT_EXPORTED`, modulo `FINANCE`), porque produz um arquivo que sai
+do sistema - "quem extraiu a base, de que periodo e quantas linhas" e exatamente
+o que a trilha deve responder.
+
+Os metadados levam **somente** o recorte e o volume:
+`{ de, ate, status, tipo, categoria, quantidade }`. Filtro ausente vai como
+`null`, nunca omitido. Nenhum valor monetario, nenhuma descricao de lancamento,
+nada do conteudo do arquivo - mesmo criterio do resto do financeiro. O nome do
+arquivo (`vastaflow-financeiro-<de>-a-<ate>.xlsx`) tambem leva so o periodo: a
+categoria filtrada nao entra nele.
+
+O registro e gravado **depois** de o arquivo terminar de sair - a contagem de
+linhas so existe no fim, e a resposta nao pode ficar aberta esperando a escrita
+da trilha. Quem baixa recebe o arquivo um instante antes de o registro existir.
+Isso e consistente com a auditoria best-effort do sistema: ela nunca desfaz nem
+atrasa a operacao.
+
+**Front-end.** `/finance/relatorios`, protegida por `finance:read`. O periodo
+comeca no mes corrente e nada e consultado antes de o usuario pedir. Nenhum
+numero e calculado na tela - ela exibe o que o backend mandou; o teste prova isso
+alimentando totais deliberadamente incoerentes e exigindo que aparecam como
+vieram.
+
+O limite de 366 dias **nao** e repetido no frontend: duplicar a constante faria
+as duas versoes divergirem, entao periodo longo demais recebe a mensagem do
+backend. A tela valida apenas o que nao depende de regra de negocio - as duas
+datas presentes e na ordem certa -, com `noValidate` no formulario para que haja
+uma unica via de validacao (sem isso, o botao que submete mostraria a bolha do
+navegador e o botao de exportar mostraria a mensagem da tela).
+
+A planilha e baixada por `fetch` autenticado e entregue via `createObjectURL`,
+porque a rota exige `Authorization` - um `<a href>` comum nao o envia. O
+endereco temporario e revogado no ciclo seguinte; revogar na mesma volta do laco
+de eventos chega a cancelar o download em alguns navegadores.
+
+`Content-Disposition` e declarado em `exposedHeaders` no CORS: entre origens
+diferentes, o JavaScript so le os cabecalhos de resposta liberados ali, e sem
+isso o nome do arquivo definido pelo backend nao chegaria ao navegador. Expor um
+cabecalho nao amplia quem pode chamar a API - a origem ja tem de estar na lista
+de origens permitidas.
+
+**Dependencia nova: `exceljs`.** A primeira do projeto desde a fundacao. Escrita
+de XLSX nao e algo a implementar a mao: o formato e um pacote OOXML compactado
+com varios XML inter-referenciados. O `exceljs` tem writer em streaming, que e o
+que permite nao montar a planilha inteira em memoria. `npm audit` reporta 2
+avisos moderados, ambos vindos do `uuid@8.3.2` transitivo
+(GHSA-w5hq-g745-h8pq): o problema esta em `v3/v5/v6` quando se passa um buffer
+explicito, e o `exceljs` importa **apenas `v4`**, num unico arquivo
+(`cf-rule-ext-xform.js`) - o caminho vulneravel nao e alcancavel por este uso.
+`npm audit fix --force` rebaixaria o `exceljs` para 3.4.0, uma mudanca
+incompativel: pior do que o aviso.
+
+**Sem migration.** O recurso nao adiciona coluna, tabela nem indice. O recorte
+por periodo usa o `ix_fin_data` que ja existia - confirmado por `EXPLAIN` em
+MySQL real (`key=ix_fin_data`). As 7 migrations existentes foram aplicadas num
+MySQL 8.4 limpo e os dois endpoints funcionaram sobre esse schema, sem nenhuma
+oitava migration.
+
+**Collation.** `categoria` e texto livre e a igualdade segue a collation da
+coluna. No MySQL (`utf8mb4_0900_ai_ci`), "Insumos" e "insumos" sao o MESMO grupo
+- verificado em banco real. Num banco com collation sensivel a caixa seriam
+dois. A diferenca e do banco e nao e corrigida em silencio na aplicacao.
+
+**Oracle.** Nao validado em banco real - nao ha instancia Oracle disponivel.
+O SQL emitido usa apenas construcoes comuns aos dois bancos (`COUNT`, `SUM`,
+`CASE WHEN`, `GROUP BY`, comparacao de `DATE` por parametro e a comparacao de
+cursor em duas partes, escrita assim justamente porque a sintaxe de construtor
+de linha difere entre eles), e o `database-compatibility.spec.ts` continua
+passando. Isso e analise estatica, nao validacao: **Oracle segue pendente de
+verificacao em instancia real.**
 
 ## Configuracoes do sistema
 
