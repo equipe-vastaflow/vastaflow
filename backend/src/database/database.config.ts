@@ -21,7 +21,40 @@ export type DatabaseEnvironment = Pick<
   | 'DATABASE_ORACLE_SID'
   | 'DATABASE_ORACLE_SERVICE_NAME'
   | 'DATABASE_SYNCHRONIZE'
+  | 'DATABASE_SSL'
+  | 'DATABASE_SSL_CA'
 >;
+
+/**
+ * Pacote de CAs que o `mysql2` embarca para os bancos gerenciados da AWS.
+ *
+ * O driver resolve este nome internamente (`lib/constants/ssl_profiles.js`) e
+ * valida o certificado do servidor contra ele. Usar o pacote do driver evita
+ * ter certificado no repositorio e evita um arquivo para montar no servidor.
+ */
+const MANAGED_CA_PROFILE = 'Amazon RDS';
+
+/** Configuracao TLS do MySQL, ou `undefined` quando TLS esta desligado. */
+type MysqlSslOptions = string | { ca: string; rejectUnauthorized: true };
+
+/**
+ * Traduz `DATABASE_SSL`/`DATABASE_SSL_CA` na opcao `ssl` do `mysql2`.
+ *
+ * `rejectUnauthorized` e sempre `true`, e nao ha variavel para desliga-lo:
+ * cifrar sem verificar a identidade do servidor protege contra escuta passiva
+ * e nao contra um intermediario ativo.
+ *
+ * Sem CA informada, cai no pacote embarcado pelo driver - o caminho previsto
+ * para banco gerenciado. Com CA informada, usa exatamente aquela.
+ */
+function buildMysqlSsl(env: DatabaseEnvironment): MysqlSslOptions | undefined {
+  if (!env.DATABASE_SSL) {
+    return undefined;
+  }
+  return env.DATABASE_SSL_CA
+    ? { ca: env.DATABASE_SSL_CA, rejectUnauthorized: true }
+    : MANAGED_CA_PROFILE;
+}
 
 /**
  * Traduz as variaveis `DATABASE_*` na configuracao do TypeORM.
@@ -35,6 +68,9 @@ export type DatabaseEnvironment = Pick<
  *   (`docker-compose.yml`) em si ainda nao foi executado.
  * - Oracle: metadata e DDL verificados offline por testes automatizados;
  *   NUNCA executado contra uma instancia Oracle real.
+ * - TLS do MySQL: a montagem da opcao `ssl` e coberta por testes de unidade;
+ *   NENHUMA conexao TLS real foi estabelecida, porque nao ha servidor MySQL
+ *   com TLS disponivel nesta etapa.
  */
 export function buildDataSourceOptions(env: DatabaseEnvironment): DataSourceOptions {
   const type = env.DATABASE_TYPE;
@@ -65,6 +101,8 @@ export function buildDataSourceOptions(env: DatabaseEnvironment): DataSourceOpti
     };
   }
 
+  const ssl = buildMysqlSsl(env);
+
   return {
     ...common,
     ...connection,
@@ -73,5 +111,9 @@ export function buildDataSourceOptions(env: DatabaseEnvironment): DataSourceOpti
     charset: 'utf8mb4',
     // Datas sempre em UTC; a conversao para o fuso local fica no cliente.
     timezone: 'Z',
+    // Omitido quando desligado, em vez de `ssl: undefined`: o driver trata as
+    // duas formas igual, mas a opcao ausente deixa claro no objeto quando TLS
+    // nao esta em uso.
+    ...(ssl === undefined ? {} : { ssl }),
   };
 }

@@ -15,7 +15,8 @@ describe('validateEnv', () => {
       NODE_ENV: Environment.Development,
       PORT: 3000,
       APP_NAME: 'vasta-flow',
-      SWAGGER_ENABLED: true,
+      // Mudou de `true` para `false` no hardening: documentacao e opt-in.
+      SWAGGER_ENABLED: false,
       DATABASE_TYPE: DatabaseType.Mysql,
       DATABASE_SYNCHRONIZE: false,
       JWT_EXPIRES_IN: '1h',
@@ -134,6 +135,99 @@ describe('validateEnv', () => {
         SEED_ADMIN_PASSWORD: 'Senha@1234',
       });
       expect(env.SEED_ADMIN_EMAIL).toBe('admin@example.com');
+    });
+  });
+
+  describe('swagger', () => {
+    /** Producao exige TLS no MySQL; sem isto a recusa viria por outro motivo. */
+    const prodEnv = { ...baseEnv, NODE_ENV: Environment.Production, DATABASE_SSL: 'true' };
+
+    it('producao sem a variavel: Swagger nasce DESLIGADO', () => {
+      expect(validateEnv(prodEnv).SWAGGER_ENABLED).toBe(false);
+    });
+
+    it('producao com false: aceito e desligado', () => {
+      expect(validateEnv({ ...prodEnv, SWAGGER_ENABLED: 'false' }).SWAGGER_ENABLED).toBe(false);
+    });
+
+    it('producao com true: configuracao RECUSADA no boot', () => {
+      // Mesmo tratamento de DATABASE_SYNCHRONIZE: a aplicacao nao sobe, em vez
+      // de subir com a documentacao exposta.
+      expect(() => validateEnv({ ...prodEnv, SWAGGER_ENABLED: 'true' })).toThrow(/SWAGGER_ENABLED/);
+    });
+
+    it('desenvolvimento com true: aceito e ligado', () => {
+      expect(validateEnv({ ...baseEnv, SWAGGER_ENABLED: 'true' }).SWAGGER_ENABLED).toBe(true);
+    });
+
+    it('desenvolvimento sem a variavel: tambem nasce desligado', () => {
+      // Padrao seguro em TODO ambiente; o `.env.example` liga explicitamente.
+      expect(validateEnv(baseEnv).SWAGGER_ENABLED).toBe(false);
+    });
+
+    it("qualquer valor diferente de 'true' mantem desligado", () => {
+      for (const valor of ['TRUE', '1', 'yes', 'sim', '']) {
+        expect(validateEnv({ ...baseEnv, SWAGGER_ENABLED: valor }).SWAGGER_ENABLED).toBe(false);
+      }
+    });
+  });
+
+  describe('TLS do banco', () => {
+    const prodEnv = { ...baseEnv, NODE_ENV: Environment.Production, SWAGGER_ENABLED: 'false' };
+
+    it('padrao e desligado, para nao exigir TLS do MySQL local', () => {
+      expect(validateEnv(baseEnv).DATABASE_SSL).toBe(false);
+      expect(validateEnv(baseEnv).DATABASE_SSL_CA).toBeUndefined();
+    });
+
+    it("interpreta DATABASE_SSL='true' como booleano", () => {
+      expect(validateEnv({ ...baseEnv, DATABASE_SSL: 'true' }).DATABASE_SSL).toBe(true);
+    });
+
+    it("qualquer valor diferente de 'true' e tratado como false", () => {
+      // Nao ha coercao perigosa: 'TRUE', '1' e 'yes' NAO ligam TLS por acidente.
+      for (const valor of ['TRUE', '1', 'yes', 'sim', '']) {
+        expect(validateEnv({ ...baseEnv, DATABASE_SSL: valor }).DATABASE_SSL).toBe(false);
+      }
+    });
+
+    it('producao com MySQL e sem TLS: configuracao RECUSADA', () => {
+      expect(() => validateEnv(prodEnv)).toThrow(/DATABASE_SSL/);
+    });
+
+    it('producao com MySQL e TLS ligado: aceito', () => {
+      expect(validateEnv({ ...prodEnv, DATABASE_SSL: 'true' }).DATABASE_SSL).toBe(true);
+    });
+
+    it('producao com Oracle nao exige DATABASE_SSL', () => {
+      // O TLS do Oracle e configurado na string de conexao do proprio driver.
+      const oracle = validateEnv({
+        ...prodEnv,
+        DATABASE_TYPE: DatabaseType.Oracle,
+        DATABASE_ORACLE_SERVICE_NAME: 'VASTA',
+      });
+
+      expect(oracle.DATABASE_SSL).toBe(false);
+    });
+
+    it('desenvolvimento sem TLS continua valido', () => {
+      expect(validateEnv(baseEnv).NODE_ENV).toBe(Environment.Development);
+    });
+
+    it('a CA e lida como texto e tem os espacos das pontas removidos', () => {
+      const pem = '-----BEGIN CERTIFICATE-----\nconteudo\n-----END CERTIFICATE-----';
+
+      expect(
+        validateEnv({ ...baseEnv, DATABASE_SSL: 'true', DATABASE_SSL_CA: `  ${pem}  ` })
+          .DATABASE_SSL_CA,
+      ).toBe(pem);
+    });
+
+    it('nao existe variavel para desligar a verificacao do certificado', () => {
+      // Blinda a decisao: `rejectUnauthorized: false` nao e configuravel.
+      const chaves = Object.keys(validateEnv({ ...baseEnv, DATABASE_SSL: 'true' }));
+
+      expect(chaves.filter((chave) => /REJECT|VERIFY|INSECURE/i.test(chave))).toEqual([]);
     });
   });
 

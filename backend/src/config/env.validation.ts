@@ -74,11 +74,22 @@ export class EnvironmentVariables {
   @IsNotEmpty()
   APP_NAME: string = 'vasta-flow';
 
-  @Transform(({ value }: TransformInput): boolean =>
-    isBlank(value) ? true : value === 'true' || value === true,
-  )
+  /**
+   * Expoe a documentacao interativa em `/docs`.
+   *
+   * Padrao `false`: a documentacao descreve toda a superficie da API, incluindo
+   * os schemas de entrada, e e opt-in explicito. Antes o padrao era `true`, o
+   * que significava que esquecer a variavel em producao expunha tudo.
+   *
+   * Ligar explicitamente em producao nao reabre a porta: a regra cruzada
+   * `validateCrossFieldRules` recusa a configuracao e a aplicacao nao sobe -
+   * mesmo tratamento dado a `DATABASE_SYNCHRONIZE`. O `.env.example` ja traz
+   * `SWAGGER_ENABLED=true`, entao o ambiente de desenvolvimento segue com a
+   * documentacao disponivel.
+   */
+  @Transform(({ value }: TransformInput): boolean => value === 'true' || value === true)
   @IsBoolean({ message: "SWAGGER_ENABLED deve ser 'true' ou 'false'" })
-  SWAGGER_ENABLED: boolean = true;
+  SWAGGER_ENABLED: boolean = false;
 
   /**
    * Origens autorizadas a chamar a API pelo navegador (CORS), separadas por
@@ -152,6 +163,42 @@ export class EnvironmentVariables {
   @Transform(({ value }: TransformInput): boolean => value === 'true' || value === true)
   @IsBoolean({ message: "DATABASE_SYNCHRONIZE deve ser 'true' ou 'false'" })
   DATABASE_SYNCHRONIZE: boolean = false;
+
+  /**
+   * Exige TLS na conexao com o MySQL, com verificacao do certificado do
+   * servidor.
+   *
+   * Default `false` para nao quebrar o MySQL local de desenvolvimento, que
+   * normalmente nao tem TLS. Em PRODUCAO com MySQL e obrigatorio: a regra
+   * cruzada recusa o boot sem ele.
+   *
+   * NAO existe opcao para desligar a verificacao do certificado
+   * (`rejectUnauthorized: false`) - TLS sem verificar quem esta do outro lado
+   * protege contra escuta passiva e nao contra um intermediario ativo, que e o
+   * ataque que importa.
+   *
+   * Nao se aplica ao Oracle: ali o TLS e configurado na string de conexao do
+   * proprio driver.
+   */
+  @Transform(({ value }: TransformInput): boolean => value === 'true' || value === true)
+  @IsBoolean({ message: "DATABASE_SSL deve ser 'true' ou 'false'" })
+  DATABASE_SSL: boolean = false;
+
+  /**
+   * CA que assina o certificado do servidor MySQL, em PEM.
+   *
+   * Recebe o CONTEUDO do certificado, nao um caminho: evita depender do
+   * filesystem (a aplicacao nao le arquivo em nenhum outro ponto) e funciona
+   * direto com gerenciadores de segredo.
+   *
+   * Vazio com `DATABASE_SSL=true` usa o pacote de CAs que o proprio driver
+   * `mysql2` embarca para bancos gerenciados da AWS - suficiente para RDS, e
+   * sem certificado algum no repositorio.
+   */
+  @Transform(optionalString)
+  @IsOptional()
+  @IsString()
+  DATABASE_SSL_CA?: string;
 
   // ---------------------------------------------------------------------
   // Autenticacao
@@ -265,6 +312,22 @@ function validateCrossFieldRules(env: EnvironmentVariables): string[] {
 
   if (env.DATABASE_SYNCHRONIZE && env.NODE_ENV === Environment.Production) {
     problems.push('DATABASE_SYNCHRONIZE=true e proibido em producao (use migrations)');
+  }
+
+  if (env.SWAGGER_ENABLED && env.NODE_ENV === Environment.Production) {
+    problems.push(
+      'SWAGGER_ENABLED=true e proibido em producao (a documentacao descreve toda a superficie da API)',
+    );
+  }
+
+  if (
+    env.NODE_ENV === Environment.Production &&
+    env.DATABASE_TYPE === DatabaseType.Mysql &&
+    !env.DATABASE_SSL
+  ) {
+    problems.push(
+      'DATABASE_SSL=true e obrigatorio em producao com MySQL (a conexao sairia sem TLS)',
+    );
   }
 
   if (Boolean(env.SEED_ADMIN_EMAIL) !== Boolean(env.SEED_ADMIN_PASSWORD)) {

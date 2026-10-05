@@ -17,3 +17,11 @@
  * `NODE_ENV=test`.
  */
 process.env.NODE_ENV = 'production';
+
+// A validacao de ambiente exige TLS no MySQL em producao, e o Swagger nasce
+// desligado. Sem isto a aplicacao nao subiria - o que e justamente o
+// comportamento desejado, mas impediria o teste de exercitar as rotas.
+// A conexao e trocada por SQLite em memoria no `test-app`, entao nenhuma
+// conexao TLS real acontece.
+process.env.DATABASE_SSL = 'true';
+process.env.SWAGGER_ENABLED = 'false';

@@ -185,11 +185,13 @@ caracteres), `DATABASE_PASSWORD` e, para ter um usuario administrador,
 | `NODE_ENV`                | `development`   | `development` \| `production` \| `test`                       |
 | `PORT`                    | `3000`          | Porta HTTP do backend                                         |
 | `APP_NAME`                | `vasta-flow`    | Identificador devolvido por `/health`                          |
-| `SWAGGER_ENABLED`         | `true`          | Expor `/docs`. Use `false` em producao                        |
+| `SWAGGER_ENABLED`         | `false`         | Expor `/docs`. A aplicacao recusa iniciar com `true` em producao |
 | `FRONTEND_ORIGIN`         | vazio (CORS off) | Origens autorizadas a chamar a API, separadas por virgula     |
 | `DATABASE_TYPE`           | `mysql`         | `mysql` \| `oracle`                                            |
 | `DATABASE_HOST/PORT/NAME/USER/PASSWORD` | -   | Conexao. Dispensadas se `DATABASE_URL` estiver preenchida     |
 | `DATABASE_SYNCHRONIZE`    | `false`         | Cria as tabelas a partir das entities. So dev; proibido em producao |
+| `DATABASE_SSL`            | `false`         | Exige TLS no MySQL. Obrigatorio em producao                   |
+| `DATABASE_SSL_CA`         | (vazio)         | CA em PEM. Vazio usa o pacote embarcado no driver             |
 | `JWT_SECRET`              | **obrigatorio** | Segredo de assinatura, >= 32 caracteres                        |
 | `JWT_EXPIRES_IN`          | `1h`            | Validade do token: `30s`, `15m`, `1h`, `7d`                    |
 | `BCRYPT_SALT_ROUNDS`      | `12`            | Custo do hash (4 a 15)                                        |

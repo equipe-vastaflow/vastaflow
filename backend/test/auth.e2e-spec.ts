@@ -514,6 +514,7 @@ describe('Auth, usuarios e RBAC (e2e)', () => {
           '/finance/reports/export',
           '/finance/reports/summary',
           '/health',
+          '/health/readiness',
           '/notifications',
           '/notifications/read-all',
           '/notifications/unread-count',

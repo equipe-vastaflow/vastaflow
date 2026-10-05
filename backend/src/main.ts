@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import { Logger, type INestApplication } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { configureApp } from './app.setup';
@@ -12,7 +13,9 @@ const SWAGGER_PATH = 'docs';
 
 async function bootstrap(): Promise<void> {
   const logger = new Logger('Bootstrap');
-  const app = await NestFactory.create(AppModule);
+  // Tipado como aplicacao Express porque `configureApp` precisa de
+  // `set('trust proxy')` e `useBodyParser`, que nao existem em `INestApplication`.
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
   const configService = app.get(ConfigService<EnvironmentVariables, true>);
   const appName = configService.get('APP_NAME', { infer: true });
@@ -41,7 +44,12 @@ async function bootstrap(): Promise<void> {
 
   app.enableShutdownHooks();
 
-  if (swaggerEnabled) {
+  // Segunda barreira: a validacao de ambiente ja recusa
+  // `SWAGGER_ENABLED=true` em producao, e aqui a documentacao nao e montada
+  // nesse ambiente em nenhuma hipotese. Duas camadas porque o custo e uma
+  // condicao e o erro seria expor toda a superficie da API.
+  const swaggerMounted = swaggerEnabled && nodeEnv !== Environment.Production;
+  if (swaggerMounted) {
     setupSwagger(app, appName);
   }
 
@@ -50,11 +58,8 @@ async function bootstrap(): Promise<void> {
   logger.log(`${appName} iniciado em modo '${nodeEnv}'`);
   logger.log(`Health check:  http://localhost:${port}/health`);
 
-  if (swaggerEnabled) {
+  if (swaggerMounted) {
     logger.log(`Documentacao:  http://localhost:${port}/${SWAGGER_PATH}`);
-    if (nodeEnv === Environment.Production) {
-      logger.warn('SWAGGER_ENABLED=true em producao: a documentacao esta publicamente acessivel.');
-    }
   }
 }
 

@@ -30,6 +30,18 @@ export interface HealthIndicator {
 }
 
 /**
- * Token de injecao da lista de indicadores registrados.
+ * Token de injecao dos indicadores de LIVENESS (`GET /health`).
+ *
+ * Fica vazio de proposito: liveness responde "o processo esta vivo" e nao deve
+ * depender de banco nem de integracao - senao uma queda de dependencia faria o
+ * processo ser reiniciado sem motivo.
  */
 export const HEALTH_INDICATORS = Symbol('HEALTH_INDICATORS');
+
+/**
+ * Token de injecao dos indicadores de READINESS (`GET /health/readiness`).
+ *
+ * Aqui entram as dependencias sem as quais a aplicacao nao consegue atender -
+ * hoje so o banco. Integracao externa NAO entra: ver `ReadinessService`.
+ */
+export const READINESS_INDICATORS = Symbol('READINESS_INDICATORS');

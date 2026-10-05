@@ -1,5 +1,5 @@
-import type { INestApplication } from '@nestjs/common';
 import { Module } from '@nestjs/common';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppModule } from '../../src/app.module';
@@ -16,13 +16,17 @@ class InMemoryDatabaseModule {}
  * Sobe a aplicacao COMPLETA (mesmos modulos, guards, pipes e filtros de
  * producao), trocando apenas a conexao com o banco.
  */
-export async function createTestApp(): Promise<INestApplication> {
+export async function createTestApp(): Promise<NestExpressApplication> {
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
     .overrideModule(DatabaseModule)
     .useModule(InMemoryDatabaseModule)
     .compile();
 
-  const app = moduleRef.createNestApplication();
+  // Tipado como aplicacao Express pelo mesmo motivo de `main.ts`: e o que
+  // permite ao `configureApp` ajustar `trust proxy` e o limite de corpo. Assim
+  // o e2e exercita exatamente o pipeline de producao, incluindo essas duas
+  // configuracoes.
+  const app = moduleRef.createNestApplication<NestExpressApplication>();
   configureApp(app);
   await app.init();
   return app;

@@ -32,6 +32,8 @@ import { PendingMigrationsCheck } from './pending-migrations.check';
           DATABASE_ORACLE_SID: config.get('DATABASE_ORACLE_SID', { infer: true }),
           DATABASE_ORACLE_SERVICE_NAME: config.get('DATABASE_ORACLE_SERVICE_NAME', { infer: true }),
           DATABASE_SYNCHRONIZE: config.get('DATABASE_SYNCHRONIZE', { infer: true }),
+          DATABASE_SSL: config.get('DATABASE_SSL', { infer: true }),
+          DATABASE_SSL_CA: config.get('DATABASE_SSL_CA', { infer: true }),
         }),
     }),
   ],

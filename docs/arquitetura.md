@@ -1130,6 +1130,155 @@ cabe na coluna `acao` (30 caracteres) - ha teste para isso.
 
 **Grupos continuam fora** (regra 1:1 do canal Telegram), inclusive para `/vincular`.
 
+## Hardening de producao
+
+Ajustes feitos para que a aplicacao possa rodar exposta na internet. Nenhum
+depende de infraestrutura: sao decisoes de codigo, validadas por teste.
+
+### Cadastro publico fechado em producao
+
+`POST /auth/register` cria conta sem autenticacao alguma. Num sistema interno,
+isso significaria que qualquer pessoa na internet poderia criar um usuario - e o
+caminho correto ja existe: um administrador cria a conta pelo modulo de
+usuarios, com perfil e permissoes definidos.
+
+Em producao a rota responde **404**, com a mesma mensagem que o Nest daria para
+uma rota inexistente (`Cannot POST /auth/register`). Fora de producao nada muda.
+
+Tres decisoes merecem registro:
+
+- **404 e nao 403**, para seguir o criterio que o projeto ja usa em
+  `commands/non-production.guard.ts`: rota indisponivel em producao se comporta
+  como rota que nao existe. Os dois guards fazem a mesma coisa e poderiam ser um
+  so; unifica-los exige mexer no Command Engine e ficou para depois.
+- **Guard, e nao checagem no service**, porque guard roda antes do
+  `ValidationPipe`: a recusa e identica para corpo valido ou invalido, entao a
+  resposta nao revela o formato esperado.
+- **Sem variavel de ambiente propria.** A decisao vem so do `NODE_ENV`. Uma
+  variavel seria mais uma coisa a configurar errado, e errar aqui reabriria o
+  cadastro na internet - sem variavel, nao ha como reabrir por engano.
+
+### Swagger nunca em producao
+
+`SWAGGER_ENABLED` tinha padrao `true`: esquecer a variavel expunha toda a
+superficie da API, incluindo os schemas de entrada. Agora sao duas camadas:
+
+1. **Padrao `false`** em qualquer ambiente - a documentacao e opt-in explicito.
+   O `.env.example` traz `true`, entao o ambiente de desenvolvimento segue com
+   `/docs` disponivel.
+2. **`SWAGGER_ENABLED=true` em producao e recusado no boot**, pela mesma regra
+   cruzada que ja proibia `DATABASE_SYNCHRONIZE=true`. A aplicacao nao sobe, em
+   vez de subir com a documentacao aberta.
+
+Alem disso, o `main.ts` nao monta a documentacao em producao em hipotese alguma.
+Tres barreiras para um erro cujo custo e expor a API inteira.
+
+### IP real atras do proxy reverso
+
+A arquitetura de producao poe um proxy reverso na frente do Node. Sem
+configuracao, `request.ip` devolveria o endereco do proxy, e toda a trilha de
+auditoria registraria o mesmo IP.
+
+O Express e configurado com `trust proxy = 1`: confia em **um** salto, que e a
+topologia prevista. Deliberadamente um numero, e nao `true` - com `true` o
+Express confiaria na cadeia inteira de `X-Forwarded-For`, e qualquer cliente
+poderia inventar o proprio IP escrevendo o header, justamente num campo que vai
+para a auditoria.
+
+Com cadeia (`198.51.100.1, 203.0.113.9`), o valor usado e o **ultimo** - o que o
+proxy confiavel acrescentou. Os anteriores vem do cliente e sao ignorados.
+
+Isto pressupoe que o processo nunca recebe conexao direta da internet. Se um dia
+for exposto sem proxy, o valor tem de voltar a zero, senao o IP auditado passa a
+ser falsificavel.
+
+### Limite de corpo da requisicao
+
+Limite global de **100 kB**, igual ao padrao do Express, agora explicito: as
+rotas atuais trocam JSON pequeno (o maior campo do sistema tem 500 caracteres).
+Explicitar protege de uma mudanca de padrao do framework e deixa o limite
+visivel para quem opera.
+
+Corpo acima do limite responde **413**. Antes virava **500**: o erro do
+`body-parser` nao e uma `HttpException`, entao o filtro global o tratava como
+falha do servidor - o cliente nao distinguia "mandei corpo grande demais" de "o
+servidor quebrou", e cada tentativa gerava um `incidentId` e um stack trace no
+log, um incidente falso para o que e pedido invalido. O filtro agora reconhece
+especificamente `entity.too.large`; qualquer outro erro desconhecido segue sendo
+500.
+
+Este **nao** e o limite de upload de documento. Quando a fundacao de arquivos
+existir, ela tera regra propria, e este valor global nao deve ser aumentado para
+acomoda-la.
+
+### TLS na conexao com o MySQL
+
+`DATABASE_SSL=true` liga TLS com verificacao do certificado do servidor.
+`DATABASE_SSL_CA` recebe o **conteudo** do certificado em PEM, nao um caminho -
+evita depender do filesystem (a aplicacao nao le arquivo em nenhum outro ponto)
+e funciona direto com gerenciadores de segredo. Vazio, usa o pacote de CAs que o
+proprio `mysql2` embarca para bancos gerenciados, o que dispensa certificado no
+repositorio.
+
+Em producao com MySQL, `DATABASE_SSL=true` e **obrigatorio**: a validacao de
+ambiente recusa o boot sem ele.
+
+Nao existe variavel para desligar a verificacao do certificado. Cifrar sem
+verificar a identidade do servidor protege contra escuta passiva e nao contra um
+intermediario ativo, que e o ataque que importa.
+
+Nao se aplica ao Oracle, onde o TLS e configurado na string de conexao do proprio
+driver. **A montagem da opcao e coberta por teste de unidade; nenhuma conexao
+TLS real foi estabelecida** - nao ha servidor MySQL com TLS disponivel.
+
+### Liveness e readiness
+
+Duas perguntas diferentes, dois endpoints:
+
+| Rota | Pergunta | Verifica | Resposta quando falha |
+| ---- | -------- | -------- | --------------------- |
+| `GET /health` | o processo esta vivo? | nada | sempre 200 enquanto o processo responde |
+| `GET /health/readiness` | consegue trabalhar? | banco (`SELECT 1`, 2 s) | **503** |
+
+Separados de proposito: liveness decide reiniciar, readiness decide mandar
+trafego. Juntar as duas faria uma queda do banco derrubar tambem o liveness, e o
+processo seria reiniciado sem motivo - reiniciar nao conserta banco fora do ar.
+
+O readiness verifica **somente** o que impede a aplicacao de funcionar. Integracao
+externa nao entra: uma indisponibilidade de fornecedor nao deve tirar o VastaFlow
+do ar.
+
+`SELECT 1` nao le tabela e nao depende de migration aplicada - responde
+exatamente "a conexao serve?". O detalhe da resposta e uma de duas frases fixas;
+a mensagem do erro original nunca e repassada, porque erros de driver costumam
+trazer host, usuario e as vezes a string de conexao inteira.
+
+O 503 e escrito direto na resposta em vez de lancar excecao: o filtro global
+trata 5xx como falha do servidor e substituiria o corpo por "Erro interno do
+servidor" com `incidentId`, registrando stack trace a cada consulta da sonda.
+Readiness negativo e resposta esperada, nao incidente.
+
+### Rate limiting: responsabilidade do proxy, nao da aplicacao
+
+`POST /auth/login` nao tem limite de tentativas, e **isso nao foi resolvido no
+codigo**. A decisao foi deliberada:
+
+- o proxy reverso previsto para producao faz limite por IP com uma diretiva de
+  configuracao, sem dependencia nova e sem estado na aplicacao;
+- implementar tambem na aplicacao criaria duas camadas com limites proprios, e
+  um `429` viria de um lugar diferente conforme o caso;
+- a alternativa que o proxy **nao** cobre - bloqueio por conta apos N tentativas
+  - exige estado persistente. Em memoria nao sobrevive a restart nem a uma
+  segunda instancia; em banco exige migration. E um bloqueio por conta tambem
+  cria um jeito de trancar a conta de um usuario legitimo de proposito.
+
+O que ja existe hoje e **deteccao, nao prevencao**: toda tentativa recusada gera
+`LOGIN_FAILED` na trilha de auditoria, com IP - e o IP so e confiavel por causa
+do `trust proxy` descrito acima.
+
+**Requisito obrigatorio da configuracao do proxy reverso:** limite de taxa em
+`POST /auth/login`. Enquanto nao existir, nao ha protecao contra forca bruta.
+
 ## Tratamento de erros
 
 Toda falha sai no formato de `ErrorResponseDto`:

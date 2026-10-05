@@ -1,11 +1,28 @@
 import { randomUUID } from 'node:crypto';
 import { STATUS_CODES } from 'node:http';
-import { ArgumentsHost, Catch, ExceptionFilter, HttpException, Logger } from '@nestjs/common';
+import {
+  ArgumentsHost,
+  Catch,
+  ExceptionFilter,
+  HttpException,
+  HttpStatus,
+  Logger,
+} from '@nestjs/common';
 import type { Request, Response } from 'express';
 import type { ErrorResponseDto } from '../dto/error-response.dto';
 
 /** Codigo a partir do qual a falha e tratada como erro do servidor. */
 const SERVER_ERROR_THRESHOLD = 500;
+
+/**
+ * Tipo do erro que o `body-parser` lanca quando o corpo passa do limite.
+ *
+ * Nao e uma `HttpException`, entao sem este tratamento viraria 500: o cliente
+ * nao conseguiria distinguir "mandei corpo grande demais" de "o servidor
+ * quebrou", e cada tentativa geraria um `incidentId` e um stack trace no log -
+ * incidente falso para algo que e pedido invalido.
+ */
+const BODY_TOO_LARGE_TYPE = 'entity.too.large';
 
 /**
  * Filtro global de excecoes.
@@ -25,8 +42,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
 
-    const status =
-      exception instanceof HttpException ? exception.getStatus() : SERVER_ERROR_THRESHOLD;
+    const status = resolveStatus(exception);
 
     const isServerError = status >= SERVER_ERROR_THRESHOLD;
     const incidentId = isServerError ? randomUUID() : undefined;
@@ -56,6 +72,34 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     this.logger.warn(`${context} ${describe(exception)}`);
   }
+}
+
+/**
+ * Status HTTP da falha.
+ *
+ * `HttpException` traz o proprio. Fora dela, a unica excecao reconhecida e o
+ * corpo acima do limite (`entity.too.large`), que e pedido invalido do cliente
+ * e nao falha do servidor. Qualquer outra coisa segue sendo 500 - alargar isto
+ * para "qualquer erro com campo status" faria o filtro confiar em propriedade
+ * de erro desconhecido para decidir o que responder.
+ */
+function resolveStatus(exception: unknown): number {
+  if (exception instanceof HttpException) {
+    return exception.getStatus();
+  }
+  if (isBodyTooLarge(exception)) {
+    return HttpStatus.PAYLOAD_TOO_LARGE;
+  }
+  return SERVER_ERROR_THRESHOLD;
+}
+
+/** Reconhece o erro de corpo grande pelo `type` que o `body-parser` define. */
+function isBodyTooLarge(exception: unknown): boolean {
+  return (
+    exception instanceof Error &&
+    'type' in exception &&
+    (exception as { type?: unknown }).type === BODY_TOO_LARGE_TYPE
+  );
 }
 
 /**

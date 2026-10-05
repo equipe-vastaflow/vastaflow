@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Post, UseGuards } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
@@ -6,6 +6,7 @@ import {
   ApiCreatedResponse,
   ApiForbiddenResponse,
   ApiNoContentResponse,
+  ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
   ApiTags,
@@ -17,6 +18,7 @@ import { AuthService } from './auth.service';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { Public } from './decorators/public.decorator';
 import { AuthResponseDto } from './dto/auth-response.dto';
+import { PublicRegistrationGuard } from './guards/public-registration.guard';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 
@@ -26,16 +28,20 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Public()
+  @UseGuards(PublicRegistrationGuard)
   @Post('register')
   @ApiOperation({
     summary: 'Cadastra um novo usuario',
     description:
-      'Cadastro publico. O usuario sempre nasce com o perfil USUARIO e ja recebe um token de acesso.',
+      'Cadastro publico. O usuario sempre nasce com o perfil USUARIO e ja recebe um token de ' +
+      'acesso. INDISPONIVEL em producao, onde a rota responde 404 como se nao existisse: la as ' +
+      'contas sao criadas por um administrador pelo modulo de usuarios.',
   })
   @ApiCreatedResponse({ type: AuthResponseDto })
   @ApiBadRequestResponse({
     description: 'Dados invalidos (e-mail malformado, senha fora da politica)',
   })
+  @ApiNotFoundResponse({ description: 'Ambiente de producao: a rota nao esta disponivel' })
   @ApiConflictResponse({ description: 'E-mail ja cadastrado' })
   register(@Body() dto: RegisterDto, @ClientIp() ip: string | null): Promise<AuthResponseDto> {
     return this.authService.register(dto, ip);
