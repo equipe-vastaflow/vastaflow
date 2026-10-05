@@ -23,6 +23,12 @@ export enum PermissionCode {
 
   SettingsRead = 'settings:read',
   SettingsUpdate = 'settings:update',
+
+  // Documentos. Apenas ler e enviar: renomear, excluir e versionar nao existem
+  // nesta fase, e permissao sem operacao correspondente e vocabulario inerte -
+  // foi o criterio que levou a NAO criar `finance:export`.
+  DocumentsRead = 'documents:read',
+  DocumentsCreate = 'documents:create',
 }
 
 export const PERMISSION_DESCRIPTIONS: Record<PermissionCode, string> = {
@@ -38,4 +44,6 @@ export const PERMISSION_DESCRIPTIONS: Record<PermissionCode, string> = {
   [PermissionCode.FinanceStatus]: 'Alterar o status de lancamentos financeiros',
   [PermissionCode.SettingsRead]: 'Consultar as configuracoes do sistema',
   [PermissionCode.SettingsUpdate]: 'Alterar o valor das configuracoes do sistema',
+  [PermissionCode.DocumentsRead]: 'Listar e baixar documentos',
+  [PermissionCode.DocumentsCreate]: 'Enviar documentos',
 };

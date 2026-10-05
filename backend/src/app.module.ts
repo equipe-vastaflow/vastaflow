@@ -7,6 +7,7 @@ import { AuditModule } from './modules/audit/audit.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { CommandsModule } from './modules/commands/commands.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { DocumentsModule } from './modules/documents/documents.module';
 import { ExternalIdentitiesModule } from './modules/external-identities/external-identities.module';
 import { FinanceModule } from './modules/finance/finance.module';
 import { HealthModule } from './modules/health/health.module';
@@ -53,6 +54,9 @@ import { UsersModule } from './modules/users/users.module';
 
     // Primeiro dominio de negocio.
     FinanceModule,
+
+    // Fundacao de documentos: metadados no banco, bytes atras da StoragePort.
+    DocumentsModule,
 
     // Nucleo do motor de comandos. Independe de canal: os adaptadores
     // (Telegram, WhatsApp) entrarao como modulos proprios que o importam.

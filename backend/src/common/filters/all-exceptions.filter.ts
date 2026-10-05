@@ -25,6 +25,16 @@ const SERVER_ERROR_THRESHOLD = 500;
 const BODY_TOO_LARGE_TYPE = 'entity.too.large';
 
 /**
+ * Codigo do erro que o `multer` lanca quando o ARQUIVO passa do limite.
+ *
+ * Mesmo raciocinio do anterior, em outra camada: o limite de corpo e do
+ * `body-parser` e vale para JSON; o limite de arquivo e do interceptor de
+ * upload. Os dois chegam aqui como erro comum, e os dois descrevem um pedido
+ * grande demais - logo, 413 nos dois casos.
+ */
+const FILE_TOO_LARGE_CODE = 'LIMIT_FILE_SIZE';
+
+/**
  * Filtro global de excecoes.
  *
  * Garante duas coisas exigidas pelo briefing:
@@ -87,19 +97,25 @@ function resolveStatus(exception: unknown): number {
   if (exception instanceof HttpException) {
     return exception.getStatus();
   }
-  if (isBodyTooLarge(exception)) {
+  if (isTooLarge(exception)) {
     return HttpStatus.PAYLOAD_TOO_LARGE;
   }
   return SERVER_ERROR_THRESHOLD;
 }
 
-/** Reconhece o erro de corpo grande pelo `type` que o `body-parser` define. */
-function isBodyTooLarge(exception: unknown): boolean {
-  return (
-    exception instanceof Error &&
-    'type' in exception &&
-    (exception as { type?: unknown }).type === BODY_TOO_LARGE_TYPE
-  );
+/**
+ * Reconhece "pedido grande demais" nas duas camadas que podem recusa-lo.
+ *
+ * Deliberadamente por marcador especifico (`type` do `body-parser`, `code` do
+ * `multer`), e nao por "qualquer erro com campo status": alargar isto faria o
+ * filtro confiar em propriedade de erro desconhecido para decidir a resposta.
+ */
+function isTooLarge(exception: unknown): boolean {
+  if (!(exception instanceof Error)) {
+    return false;
+  }
+  const { type, code } = exception as { type?: unknown; code?: unknown };
+  return type === BODY_TOO_LARGE_TYPE || code === FILE_TOO_LARGE_CODE;
 }
 
 /**

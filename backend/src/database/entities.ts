@@ -1,4 +1,5 @@
 import { AuditLog } from '../modules/audit/entities/audit-log.entity';
+import { Document } from '../modules/documents/entities/document.entity';
 import { ExternalIdentityLink } from '../modules/external-identities/entities/external-identity-link.entity';
 import { IdentityLinkRequest } from '../modules/external-identities/entities/identity-link-request.entity';
 import { FinancialEntry } from '../modules/finance/entities/financial-entry.entity';
@@ -26,4 +27,5 @@ export const ENTITIES = [
   Notification,
   ExternalIdentityLink,
   IdentityLinkRequest,
+  Document,
 ];

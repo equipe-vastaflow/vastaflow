@@ -42,6 +42,21 @@ export enum AuditAction {
 
   /** Configuracoes do sistema. A chave alterada vai em `metadados.chave`; o valor nunca entra. */
   SystemSettingUpdated = 'SYSTEM_SETTING_UPDATED',
+
+  /**
+   * Documentos. `usuarioId` e quem executou; o documento vai em
+   * `metadados.alvoId`.
+   *
+   * Baixar E auditado, diferente das outras leituras do sistema: o download
+   * tira uma copia do conteudo do sistema, e "quem baixou o que" e justamente
+   * o que a trilha deve responder - mesmo critério de
+   * `FINANCE_REPORT_EXPORTED`.
+   *
+   * Os metadados levam so identificacao e tamanho. Conteudo, bytes, base64 e a
+   * chave fisica do storage NUNCA entram.
+   */
+  DocumentCreated = 'DOCUMENT_CREATED',
+  DocumentDownloaded = 'DOCUMENT_DOWNLOADED',
 }
 
 /** Modulo do sistema onde a acao ocorreu. */
@@ -50,4 +65,5 @@ export enum AuditModuleName {
   Users = 'USERS',
   Finance = 'FINANCE',
   Settings = 'SETTINGS',
+  Documents = 'DOCUMENTS',
 }

@@ -50,6 +50,18 @@ export enum DatabaseType {
  * implementado - validar antes disso impediria a aplicacao de subir sem
  * necessidade.
  */
+/** Limite inicial de tamanho de documento: 10 MB. Conservador e configuravel. */
+export const DEFAULT_DOCUMENT_MAX_FILE_SIZE = 10 * 1024 * 1024;
+
+/**
+ * Teto do que `DOCUMENT_MAX_FILE_SIZE` pode valer: 100 MB.
+ *
+ * O arquivo passa pela memoria do processo antes de ir ao storage, entao um
+ * valor absurdo transformaria o endpoint em alvo de exaustao de memoria. Subir
+ * deste teto exige antes trocar o upload para streaming direto ao storage.
+ */
+export const MAX_DOCUMENT_MAX_FILE_SIZE = 100 * 1024 * 1024;
+
 export class EnvironmentVariables {
   @Transform(({ value }: TransformInput): unknown =>
     isBlank(value) ? Environment.Development : value,
@@ -255,6 +267,50 @@ export class EnvironmentVariables {
    * `NOT_CONFIGURED` e a aplicacao sobe normalmente. E SEGREDO - nunca vai para
    * log, resposta, relatorio de status nem mensagem de erro.
    */
+  // ---------------------------------------------------------------------
+  // Documentos
+  // ---------------------------------------------------------------------
+
+  /**
+   * Onde o adapter local grava os bytes dos documentos.
+   *
+   * Relativo ao diretorio de trabalho do processo quando nao for absoluto. Vale
+   * SOMENTE para o adapter de filesystem; quando o storage em S3 existir, ele
+   * tera a propria configuracao e esta variavel deixa de ser usada.
+   */
+  @Transform(({ value }: TransformInput): string =>
+    isBlank(value) ? './storage/documents' : String(value).trim(),
+  )
+  @IsString()
+  @IsNotEmpty({ message: 'DOCUMENT_STORAGE_PATH nao pode ser vazio' })
+  DOCUMENT_STORAGE_PATH: string = './storage/documents';
+
+  /**
+   * Tamanho maximo de UM documento, em bytes.
+   *
+   * ATENCAO: 10 MB e um valor inicial conservador, NAO aprovado pelo negocio -
+   * nao havia decisao alguma no repositorio. Precisa ser revisto com a Vasta
+   * antes do uso real, e por isso e configuravel.
+   *
+   * Nao confundir com o limite global de corpo de requisicao (100 kB, Fase A),
+   * que continua valendo para as rotas JSON: este vale somente para o endpoint
+   * multipart de documentos, e e aplicado pelo `MulterModule`.
+   *
+   * O minimo de 1 byte impede configurar zero ou negativo, que desabilitaria o
+   * upload de um jeito dificil de diagnosticar. O maximo existe para que um
+   * erro de digitacao (um zero a mais) nao transforme a aplicacao em alvo de
+   * exaustao de memoria - o arquivo e bufferizado antes de ir ao storage.
+   */
+  @Transform(({ value }: TransformInput): number =>
+    isBlank(value) ? DEFAULT_DOCUMENT_MAX_FILE_SIZE : Number(value),
+  )
+  @IsInt({ message: 'DOCUMENT_MAX_FILE_SIZE deve ser um numero inteiro de bytes' })
+  @Min(1, { message: 'DOCUMENT_MAX_FILE_SIZE deve ser maior que zero' })
+  @Max(MAX_DOCUMENT_MAX_FILE_SIZE, {
+    message: `DOCUMENT_MAX_FILE_SIZE nao pode passar de ${MAX_DOCUMENT_MAX_FILE_SIZE} bytes`,
+  })
+  DOCUMENT_MAX_FILE_SIZE: number = DEFAULT_DOCUMENT_MAX_FILE_SIZE;
+
   @Transform(optionalString)
   @IsOptional()
   @IsString()
