@@ -776,3 +776,19 @@ a.button {
   margin: 0;
   font-size: 0.8rem;
 }
+
+/* O seletor de arquivo nativo nao aceita estilo, entao o `<input type="file">`
+ * fica oculto e um `<label>` faz o papel de botao. Como `label` nao e botao, o
+ * cursor e o estado desabilitado precisam ser declarados. */
+label.button {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* Reflete o `disabled` do input oculto associado. */
+input:disabled + label.button,
+label.button:has(+ input:disabled) {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

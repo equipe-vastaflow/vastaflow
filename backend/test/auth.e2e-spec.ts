@@ -508,6 +508,8 @@ describe('Auth, usuarios e RBAC (e2e)', () => {
           '/auth/register',
           '/commands/execute',
           '/dashboard/summary',
+          '/documents',
+          '/documents/{id}/download',
           '/finance/entries',
           '/finance/entries/{id}',
           '/finance/entries/{id}/status',
@@ -555,11 +557,14 @@ describe('Auth, usuarios e RBAC (e2e)', () => {
       expect(roles.map((role) => role.nome).sort()).toEqual(
         [RoleName.Admin, RoleName.Gestor, RoleName.Operador, RoleName.Usuario].sort(),
       );
-      // GESTOR administra usuarios, auditoria e financeiro; as configuracoes do
-      // sistema sao exclusivas do ADMIN nesta etapa. Fora isso, a diferenca
-      // entre os dois esta na hierarquia (`user-access.policy.ts`).
+      // GESTOR administra usuarios, auditoria, financeiro e documentos; as
+      // configuracoes do sistema sao exclusivas do ADMIN nesta etapa. Fora
+      // isso, a diferenca entre os dois esta na hierarquia
+      // (`user-access.policy.ts`).
       const doGestor = [
         'audit:read',
+        'documents:create',
+        'documents:read',
         'finance:create',
         'finance:read',
         'finance:status',

@@ -8,7 +8,7 @@ import {
 } from 'typeorm';
 import { NAME_MAX_BYTES } from '../document-file.policy';
 import { STORAGE_KEY_MAX_LENGTH } from '../storage/storage-key';
-import { sizeTransformer } from './size.transformer';
+import { SIZE_PRECISION, sizeTransformer } from './size.transformer';
 
 /** Comprimento da coluna de MIME. O mais longo em uso tem 71 caracteres. */
 export const MIME_TYPE_MAX_LENGTH = 100;
@@ -57,12 +57,25 @@ export class Document {
   /**
    * Tamanho em bytes.
    *
-   * `bigint` e nao `int`: `int` do MySQL estoura em 2 GB, e escolher certo
-   * agora custa zero. O driver devolve `bigint` como STRING no MySQL e como
-   * number em outros - o `sizeTransformer` uniformiza, mesmo motivo do
-   * `moneyTransformer` do financeiro.
+   * `decimal(20,0)` - inteiro exato, nao ponto flutuante, e com folga muito
+   * acima dos 2 GB em que o `int` do MySQL estouraria.
+   *
+   * NAO e `bigint`: o driver Oracle do TypeORM recusa esse tipo ("Data type
+   * bigint ... is not supported by oracle"), o que foi descoberto gerando o DDL
+   * Oracle a partir desta entity. `decimal` existe nos dois bancos
+   * (`decimal(20,0)` no MySQL, `number(20,0)` no Oracle) e e o mesmo tipo que o
+   * financeiro ja usa com sucesso em ambos.
+   *
+   * O driver devolve decimal como STRING no MySQL e como number em outros - o
+   * `sizeTransformer` uniformiza, mesmo motivo do `moneyTransformer`.
    */
-  @Column({ name: 'tamanho', type: 'bigint', transformer: sizeTransformer })
+  @Column({
+    name: 'tamanho',
+    type: 'decimal',
+    precision: SIZE_PRECISION,
+    scale: 0,
+    transformer: sizeTransformer,
+  })
   tamanho: number;
 
   /**

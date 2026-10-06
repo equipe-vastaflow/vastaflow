@@ -1279,6 +1279,261 @@ do `trust proxy` descrito acima.
 **Requisito obrigatorio da configuracao do proxy reverso:** limite de taxa em
 `POST /auth/login`. Enquanto nao existir, nao ha protecao contra forca bruta.
 
+## Documentos
+
+Fundacao de arquivos: metadados no banco, bytes atras de uma porta de storage.
+Deliberadamente pequena - enviar, listar e baixar. Nao ha renomear, excluir,
+versionar, compartilhar nem vinculo com entidade de negocio.
+
+### Desenho
+
+```text
+Controller  (multipart, RBAC, cabecalhos de download)
+    v
+DocumentsService  (validacao, chave, auditoria, rollback)
+    v
+StoragePort  (write / read / remove)
+    v
+LocalStorageAdapter          <- IMPLEMENTADO (filesystem)
+InMemoryStorageAdapter       <- IMPLEMENTADO (testes)
+S3StorageAdapter             <- NAO EXISTE. Proxima etapa.
+```
+
+O service **nao conhece filesystem nem AWS**. O adapter e amarrado num unico
+lugar, no token `DOCUMENT_STORAGE` do `documents.module.ts`; trocar o
+filesystem por S3 e trocar aquela `useFactory`, sem tocar em entity, service,
+controllers, DTOs, RBAC, auditoria ou validacao.
+
+`LocalStorageAdapter` e o UNICO arquivo da aplicacao que importa `node:fs`.
+
+**S3 nao foi implementado.** Nao existe adapter de S3, dependencia de SDK, bucket,
+credencial nem configuracao. Tambem NAO existe variavel escolhendo provider:
+oferecer a opcao `s3` apontando para um adapter inexistente seria configuracao
+que falha no boot. A escolha entra junto com o adapter.
+
+### Modelo
+
+| Campo | Tipo | Regra |
+| ----- | ---- | ----- |
+| `id` | uuid | padrao do projeto |
+| `nome` | varchar(255) | nome logico; comeca igual ao original |
+| `nome_original` | varchar(255) | o que o usuario enviou, preservado |
+| `mime_type` | varchar(100) | validado contra a extensao |
+| `tamanho` | decimal(20,0) | bytes, inteiro exato |
+| `storage_key` | varchar(120) | **UNIQUE**, gerada pelo servidor, nunca sai na API |
+| `criado_por_id` | varchar(36) | sem FK; metadado, nao isolamento |
+| `created_at` / `updated_at` | timestamp | padrao do projeto |
+
+Tres decisoes de tipo que merecem registro:
+
+**`tamanho` e `decimal(20,0)`, nao `bigint`.** O driver Oracle do TypeORM
+RECUSA `bigint` ("Data type bigint ... is not supported by oracle") - descoberto
+gerando o DDL Oracle a partir da propria entity, nao por suposicao. `decimal`
+existe nos dois bancos e e o mesmo tipo que o financeiro ja usa. Inteiro exato,
+nunca ponto flutuante; o `sizeTransformer` normaliza a leitura, porque o MySQL
+devolve decimal como string.
+
+**Nome limitado por BYTES, nao por caracteres.** `varchar2(n)` do Oracle conta
+bytes; `varchar(n)` do MySQL conta caracteres. Sem isso, um nome de 255
+caracteres acentuados caberia num banco e estouraria no outro. Mesmo criterio de
+`PASSWORD_MAX_BYTES`.
+
+**Nenhum indice em `criado_por_id`.** Nenhuma consulta desta fase filtra por
+autor, e indice sem consulta e custo de escrita sem retorno. Ha dois indices:
+`storage_key` UNIQUE (impede duas linhas apontarem para o mesmo objeto, o que
+faria uma remocao futura apagar o conteudo de outro documento) e `created_at`
+(a listagem ordena por ele).
+
+### Nome logico, nome original e chave fisica
+
+Tres coisas distintas, e confundi-las e a origem classica de travessia de
+diretorio:
+
+```text
+nome_original:  Contrato João Pedro.pdf     <- metadado, preservado
+nome:           Contrato João Pedro.pdf     <- logico, exibido
+storage_key:    2026/10/05/<uuid>.bin       <- fisica, do servidor
+```
+
+A chave e sempre gerada pelo servidor, por lista BRANCA de formato:
+`AAAA/MM/DD/<uuid>.bin`. Nada que nao case exatamente com esse formato e aceito
+pelos adapters - entao `../`, `..\`, caminho absoluto, byte nulo e UUID
+maiusculo nao passam, nao por serem recusados um a um, mas porque nada alem do
+formato e aceito.
+
+O UUID vem de `randomUUID` (gerador criptografico): a chave nao e adivinhavel.
+O prefixo de data existe para distribuir os objetos, nao para proteger - e por
+isso o UUID e obrigatorio. A extensao fisica e sempre `.bin`, nunca a original:
+um objeto gravado como `.html` ou `.svg` poderia ser interpretado por algum
+intermediario que olhasse so o caminho.
+
+O nome enviado nao entra no caminho em nenhuma forma - nem como nome, nem como
+slug, nem como extensao.
+
+### Upload
+
+```text
+JWT -> documents:create -> multipart -> valida -> gera chave
+    -> STORAGE -> BANCO -> AUDITORIA
+```
+
+A ordem storage-antes-do-banco vem da assimetria entre as duas falhas possiveis:
+
+- **bytes gravados e banco falhando** deixa um objeto que ninguem referencia:
+  desperdicio de espaco, invisivel a aplicacao;
+- **banco gravado e bytes falhando** deixa um documento que APARECE na listagem
+  e nao baixa: corrupcao visivel ao usuario.
+
+O primeiro e aceitavel, o segundo nao. Por isso nunca a ordem inversa.
+
+Se o banco falhar, os bytes sao removidos em regime **best-effort**, e o erro
+ORIGINAL do banco e repropagado - esconder a causa atras de uma falha de limpeza
+deixaria o problema real sem rastro. Se a remocao tambem falhar, a chave orfa e
+as duas causas vao para o log. Storage externo **nao participa da transacao
+SQL**: a compensacao e explicita e pode falhar. Nao ha transacao distribuida,
+outbox, fila nem job de limpeza.
+
+### Download
+
+Sempre **anexo**, com `X-Content-Type-Options: nosniff`. O conteudo nunca e
+renderizado pelo navegador - e o que impede um `.xml` contendo SVG, ou um `.csv`
+contendo HTML, de virar pagina na origem da aplicacao.
+
+O arquivo e transmitido em streaming, sem ser carregado inteiro na memoria. O
+objeto e aberto ANTES de qualquer cabecalho ser escrito, de modo que 404 e 500
+saiam como JSON de erro em vez de no meio de um arquivo ja comecado.
+
+O nome do arquivo vai para dentro de um cabecalho HTTP, o que faz dele vetor de
+injecao. O tratamento segue a RFC 6266: `filename=` leva so ASCII imprimivel,
+sem aspas, barra nem ponto-e-virgula, e `filename*=` leva o nome completo em
+UTF-8 percent-encoded. CR e LF nao sobrevivem a nenhuma das duas partes - e e so
+isso que caracteriza injecao. Nome sem base ASCII (`中文文件.pdf`) recebe nome
+generico com a extensao preservada.
+
+### Validacao do arquivo
+
+| Camada | O que confere |
+| ------ | ------------- |
+| presenca | arquivo existe e o conteudo e um buffer |
+| tamanho | maior que zero e dentro de `DOCUMENT_MAX_FILE_SIZE`; usa o tamanho do BUFFER, nao o campo informado |
+| nome | presente, <= 255 BYTES, sem byte nulo |
+| extensao | na lista de aceitas, normalizada em minusculas, so o ULTIMO ponto |
+| MIME | coerente com a extensao, ignorando parametros e caixa |
+
+Aceitos hoje: **PDF, XLSX, XLS, CSV, DOCX, XML**.
+
+> **Esta lista NAO foi aprovada pelo negocio.** Nao havia decisao alguma no
+> repositorio; e o conjunto minimo para o endpoint existir e precisa ser revisto
+> com a Vasta. Imagens ficaram fora por nao haver caso de uso.
+
+`application/octet-stream` nao esta em lista nenhuma: aceita-lo equivaleria a
+desligar a conferencia, porque qualquer arquivo pode ser enviado com esse tipo.
+
+Extensao dupla e tratada pelo ultimo ponto: `contrato.pdf.exe` e um `.exe` e e
+recusado. `malicioso.exe.pdf` e um `.pdf` e passa - e passar esta correto,
+porque a chave fisica nao leva a extensao original, o download sai como anexo e
+nada no servidor executa o arquivo.
+
+**O que a validacao NAO faz, e precisa ser dito:** ela nao abre o arquivo e nao
+olha o conteudo. Um `.pdf` com `application/pdf` que seja na verdade um
+executavel renomeado PASSA. Conferir os bytes iniciais (magic bytes) exigiria
+dependencia nova, que nao foi aprovada. **Isto nao e antivirus e nao substitui
+um.**
+
+### Nome de arquivo em multipart
+
+O `busboy` (dentro do `multer`) decodifica o nome do arquivo como **latin1**,
+nao UTF-8. Os navegadores enviam UTF-8, entao todo nome com acento chegava
+corrompido: `Declaração.pdf` virava `DeclaraÃ§Ã£o.pdf`. Em portugues isso atinge
+a maioria dos nomes reais. O nome e reinterpretado na borda
+(`multipart-filename.ts`), e o original e mantido quando os bytes nao formam
+UTF-8 valido.
+
+O proprio `busboy` tambem reduz o nome ao basename, descartando componentes de
+caminho - barreira a mais, antes da nossa.
+
+### RBAC
+
+| Permissao | Rotas |
+| --------- | ----- |
+| `documents:read` | `GET /documents`, `GET /documents/:id/download` |
+| `documents:create` | `POST /documents` |
+
+Somente duas. Nao ha `documents:update`, `documents:delete` nem
+`documents:admin`, porque as operacoes correspondentes nao existem - permissao
+sem operacao e vocabulario inerte, que foi o criterio que levou a nao criar
+`finance:export`.
+
+ADMIN recebe as duas automaticamente (`Object.values(PermissionCode)`). GESTOR
+recebe as duas explicitamente, mesmo criterio do financeiro: usa o dominio por
+completo, e por completo hoje e ler e enviar. OPERADOR e USUARIO nao recebem
+nenhuma, como nos outros dominios.
+
+**Nao ha isolamento por usuario.** Quem tem `documents:read` ve e baixa todos os
+documentos. `criado_por_id` e metadado de auditoria, nao controle de acesso. Nao
+ha dono, ACL, compartilhamento, equipe nem permissao por arquivo.
+
+### Auditoria
+
+| Acao | Quando | Metadados |
+| ---- | ------ | --------- |
+| `DOCUMENT_CREATED` | upload bem-sucedido | `alvoId`, `nome`, `mimeType`, `tamanho` |
+| `DOCUMENT_DOWNLOADED` | download bem-sucedido | `alvoId`, `nome`, `tamanho` |
+
+Modulo `DOCUMENTS`. Baixar E auditado, diferente das outras leituras do sistema,
+pelo mesmo criterio de `FINANCE_REPORT_EXPORTED`: o download tira uma copia do
+conteudo do sistema, e "quem baixou o que" e justamente o que a trilha deve
+responder.
+
+**NAO entram na trilha:** conteudo do arquivo, bytes, base64, a chave fisica do
+storage, caminho, nem o nome do arquivo em caso de falha. Listar nao audita.
+Upload recusado antes da persistencia nao gera `DOCUMENT_CREATED`; download que
+falha nao gera `DOCUMENT_DOWNLOADED`.
+
+### Limites
+
+Dois limites distintos, e confundi-los daria erro dificil de diagnosticar:
+
+| Limite | Valor | Onde se aplica |
+| ------ | ----- | -------------- |
+| corpo de requisicao JSON | 100 kB | todas as rotas JSON (Fase A) |
+| arquivo de documento | `DOCUMENT_MAX_FILE_SIZE`, padrao 10 MB | somente `POST /documents` |
+
+O limite global de 100 kB **nao** foi aumentado: o endpoint multipart tem limite
+proprio, aplicado pelo `MulterModule`. Arquivo acima do limite responde **413**,
+nao 500 - o filtro global reconhece tanto `entity.too.large` (corpo) quanto
+`LIMIT_FILE_SIZE` (arquivo).
+
+> **10 MB e valor inicial conservador, NAO aprovado pelo negocio.** O teto
+> configuravel e 100 MB, porque o arquivo passa pela memoria do processo antes
+> de ir ao storage; subir dali exigiria antes trocar o upload para streaming
+> direto ao storage.
+
+### Inconsistencia entre banco e storage
+
+Registro no banco sem objeto no storage **nao** responde 404. Responde 500, com
+a chave apenas no log: responder "nao encontrado" esconderia uma inconsistencia
+que alguem precisa investigar. A resposta mantem o formato padrao de erro da
+aplicacao, com `incidentId`, e nao leva chave, caminho nem stack.
+
+Nao ha job de limpeza de orfaos nesta fase: criar infraestrutura de agendamento
+(que o projeto nao tem) para limpar bytes que nada referencia seria
+desproporcional.
+
+### Limitacoes conhecidas
+
+- **S3 nao implementado** - proxima etapa.
+- **Sem verificacao de conteudo** (magic bytes): depende de decisao de dependencia.
+- **Lista de tipos e tamanho maximo nao aprovados** pelo negocio.
+- **Sem excluir, renomear nem versionar** - nenhum deles foi pedido, e cada um
+  depende de decisao que ainda nao existe (retencao, exigencia legal).
+- **Sem vinculo com entidade de negocio**: o requisito nao nomeia entidade alvo.
+  A evolucao prevista e tabela de associacao, aditiva.
+- **Upload bufferiza o arquivo em memoria** antes de gravar; e o que o teto de
+  100 MB protege.
+- **Oracle nao validado em instancia real** - a migration foi conferida contra o
+  mapeamento de tipos do proprio driver, nao executada.
+
 ## Tratamento de erros
 
 Toda falha sai no formato de `ErrorResponseDto`:

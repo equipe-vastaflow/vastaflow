@@ -35,6 +35,7 @@ import { PermissionCode } from '../permissions/permission-code.enum';
 import { contentDispositionFor } from './content-disposition';
 import { ALLOWED_EXTENSIONS, type UploadedFileLike } from './document-file.policy';
 import { DocumentsService } from './documents.service';
+import { decodeMultipartFilename } from './multipart-filename';
 import { DocumentPageResponseDto } from './dto/document-page-response.dto';
 import { DEFAULT_PAGE_SIZE, ListDocumentsQuery } from './dto/list-documents.query';
 import { DocumentResponseDto, toDocumentResponse } from './dto/document-response.dto';
@@ -92,7 +93,15 @@ export class DocumentsController {
     @UploadedFile() file: UploadedFileLike | undefined,
     @ClientIp() ip: string | null,
   ): Promise<DocumentResponseDto> {
-    const { document, autor } = await this.documentsService.create(actor, file, ip);
+    // O nome do arquivo e corrigido AQUI, na borda: o `busboy` o decodifica
+    // como latin1 e todo acento chega corrompido. E peculiaridade do transporte
+    // multipart, nao regra de documento - por isso nao fica no service.
+    const corrigido =
+      file === undefined
+        ? undefined
+        : { ...file, originalname: decodeMultipartFilename(file.originalname) };
+
+    const { document, autor } = await this.documentsService.create(actor, corrigido, ip);
     return toDocumentResponse(document, autor);
   }
 

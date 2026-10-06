@@ -6,7 +6,12 @@ import { ApiError, NetworkError } from './client';
  */
 export function describeApiError(
   error: unknown,
-  messages: { conflict?: string; badRequest?: string; notFound?: string } = {},
+  messages: {
+    conflict?: string;
+    badRequest?: string;
+    notFound?: string;
+    payloadTooLarge?: string;
+  } = {},
 ): string {
   if (error instanceof NetworkError) {
     return 'Não foi possível conectar ao servidor. Verifique sua conexão e tente novamente.';
@@ -22,6 +27,10 @@ export function describeApiError(
         return messages.notFound ?? 'Usuário não encontrado.';
       case 409:
         return messages.conflict ?? error.message;
+      case 413:
+        // Corpo ou arquivo acima do limite do servidor. Sem este caso, cairia
+        // na mensagem genarica de "algo deu errado", que nao diz o que fazer.
+        return messages.payloadTooLarge ?? 'Conteudo grande demais para enviar.';
     }
   }
   return 'Algo deu errado. Tente novamente em instantes.';

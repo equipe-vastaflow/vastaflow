@@ -5,6 +5,8 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppModule } from '../../src/app.module';
 import { configureApp } from '../../src/app.setup';
 import { DatabaseModule } from '../../src/database/database.module';
+import { InMemoryStorageAdapter } from '../../src/modules/documents/storage/in-memory-storage.adapter';
+import { DOCUMENT_STORAGE } from '../../src/modules/documents/storage/storage.port';
 
 /** Banco SQLite em memoria: sem MySQL/Docker, e isolado por instancia da aplicacao. */
 @Module({
@@ -20,6 +22,12 @@ export async function createTestApp(): Promise<NestExpressApplication> {
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
     .overrideModule(DatabaseModule)
     .useModule(InMemoryDatabaseModule)
+    // Storage em memoria: o e2e nao escreve arquivo de verdade. E a MESMA
+    // `StoragePort` de producao, entao a regra exercitada e a mesma - muda so
+    // onde os bytes ficam. Os testes alcancam o adapter por
+    // `app.get(DOCUMENT_STORAGE)` para conferir rollback.
+    .overrideProvider(DOCUMENT_STORAGE)
+    .useClass(InMemoryStorageAdapter)
     .compile();
 
   // Tipado como aplicacao Express pelo mesmo motivo de `main.ts`: e o que

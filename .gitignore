@@ -60,6 +60,9 @@ coverage/
 Thumbs.db
 desktop.ini
 
+# Documentos enviados em desenvolvimento (storage local)
+storage/
+
 # Dados locais de banco / dumps
 *.sqlite
 *.sqlite3

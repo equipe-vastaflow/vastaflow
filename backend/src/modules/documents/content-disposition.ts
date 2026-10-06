@@ -47,7 +47,14 @@ function toAsciiFilename(nome: string): string {
     .join('')
     .trim();
 
-  return limpo === '' ? FALLBACK_NAME : limpo;
+  if (!/[a-zA-Z0-9]/.test(limpo)) {
+    return FALLBACK_NAME;
+  }
+  // Nome inteiramente nao-ASCII (`中文文件.pdf`) sobra como `.pdf` depois do
+  // filtro: so a extensao, sem nome base. Em sistema Unix isso seria um arquivo
+  // oculto sem nome. Preserva-se a extensao e completa-se o nome base, porque
+  // `documento.pdf` e util e `.pdf` nao e. O nome real continua no `filename*`.
+  return limpo.startsWith('.') ? `${FALLBACK_NAME}${limpo}` : limpo;
 }
 
 /**

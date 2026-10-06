@@ -57,10 +57,7 @@ export class DocumentResponseDto {
   updatedAt: Date;
 }
 
-export function toDocumentResponse(
-  document: Document,
-  autor?: UserIdentity,
-): DocumentResponseDto {
+export function toDocumentResponse(document: Document, autor?: UserIdentity): DocumentResponseDto {
   return {
     id: document.id,
     nome: document.nome,

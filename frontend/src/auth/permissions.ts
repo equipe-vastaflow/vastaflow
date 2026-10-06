@@ -14,6 +14,8 @@ export const Permission = {
   FinanceStatus: 'finance:status',
   SettingsRead: 'settings:read',
   SettingsUpdate: 'settings:update',
+  DocumentsRead: 'documents:read',
+  DocumentsCreate: 'documents:create',
 } as const;
 
 export type PermissionCode = (typeof Permission)[keyof typeof Permission];

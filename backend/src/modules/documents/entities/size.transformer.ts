@@ -1,6 +1,14 @@
 import type { ValueTransformer } from 'typeorm';
 
 /**
+ * Digitos da coluna `tamanho`.
+ *
+ * 20 digitos cobrem qualquer arquivo imaginavel com folga. Escala zero: byte
+ * nao tem fracao.
+ */
+export const SIZE_PRECISION = 20;
+
+/**
  * Maior tamanho de arquivo representavel sem perder precisao.
  *
  * `Number.MAX_SAFE_INTEGER` sao ~9 PB. Nenhum arquivo chega perto, entao
@@ -10,12 +18,12 @@ import type { ValueTransformer } from 'typeorm';
 export const SIZE_MAX_SAFE = Number.MAX_SAFE_INTEGER;
 
 /**
- * Uniformiza a leitura da coluna `bigint`.
+ * Uniformiza a leitura da coluna `decimal`.
  *
- * Os drivers divergem e o TypeORM nao normaliza: o MySQL devolve `bigint` como
+ * Os drivers divergem e o TypeORM nao normaliza: o MySQL devolve decimal como
  * STRING (`"1048576"`), outros como number. Sem tratar, o tipo do JSON da API
- * mudaria conforme o banco - foi exatamente o que aconteceu com `DECIMAL` no
- * financeiro, e a solucao aqui e a mesma do `moneyTransformer`.
+ * mudaria conforme o banco - foi exatamente o que aconteceu com o valor
+ * monetario no financeiro, e a solucao aqui e a mesma do `moneyTransformer`.
  */
 export const sizeTransformer: ValueTransformer = {
   /** Escrita: inteiro, sempre. Tamanho de arquivo nao tem fracao. */

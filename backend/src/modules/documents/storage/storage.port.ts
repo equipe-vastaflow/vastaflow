@@ -61,14 +61,20 @@ export class StorageObjectNotFoundError extends Error {
 }
 
 export class StorageWriteError extends Error {
-  constructor(readonly storageKey: string, readonly cause?: unknown) {
+  constructor(
+    readonly storageKey: string,
+    readonly cause?: unknown,
+  ) {
     super(`Falha ao gravar no storage: ${storageKey}`);
     this.name = 'StorageWriteError';
   }
 }
 
 export class StorageReadError extends Error {
-  constructor(readonly storageKey: string, readonly cause?: unknown) {
+  constructor(
+    readonly storageKey: string,
+    readonly cause?: unknown,
+  ) {
     super(`Falha ao ler do storage: ${storageKey}`);
     this.name = 'StorageReadError';
   }

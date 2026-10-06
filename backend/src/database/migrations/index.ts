@@ -2,6 +2,7 @@ import type { MigrationInterface } from 'typeorm';
 import type { DatabaseType } from '../../config/env.validation';
 import { ExternalIdentityLinks1790798470956 as MysqlExternalIdentityLinks } from './mysql/1790798470956-ExternalIdentityLinks';
 import { FinancialEntries1790136699120 as MysqlFinancialEntries } from './mysql/1790136699120-FinancialEntries';
+import { Documents1791257785308 as MysqlDocuments } from './mysql/1791257785308-Documents';
 import { IdentityLinkRequests1790799667076 as MysqlIdentityLinkRequests } from './mysql/1790799667076-IdentityLinkRequests';
 import { InitialSchema1790020288252 as MysqlInitialSchema } from './mysql/1790020288252-InitialSchema';
 import { Notifications1790305530902 as MysqlNotifications } from './mysql/1790305530902-Notifications';
@@ -9,6 +10,7 @@ import { NotificationsReadAt1790706805546 as MysqlNotificationsReadAt } from './
 import { SystemSettings1790303010994 as MysqlSystemSettings } from './mysql/1790303010994-SystemSettings';
 import { ExternalIdentityLinks1790798470956 as OracleExternalIdentityLinks } from './oracle/1790798470956-ExternalIdentityLinks';
 import { FinancialEntries1790136699120 as OracleFinancialEntries } from './oracle/1790136699120-FinancialEntries';
+import { Documents1791257785308 as OracleDocuments } from './oracle/1791257785308-Documents';
 import { IdentityLinkRequests1790799667076 as OracleIdentityLinkRequests } from './oracle/1790799667076-IdentityLinkRequests';
 import { InitialSchema1790020288252 as OracleInitialSchema } from './oracle/1790020288252-InitialSchema';
 import { Notifications1790305530902 as OracleNotifications } from './oracle/1790305530902-Notifications';
@@ -34,6 +36,7 @@ export const MIGRATIONS: Record<DatabaseType, MigrationClass[]> = {
     MysqlNotificationsReadAt,
     MysqlExternalIdentityLinks,
     MysqlIdentityLinkRequests,
+    MysqlDocuments,
   ],
   oracle: [
     OracleInitialSchema,
@@ -43,5 +46,6 @@ export const MIGRATIONS: Record<DatabaseType, MigrationClass[]> = {
     OracleNotificationsReadAt,
     OracleExternalIdentityLinks,
     OracleIdentityLinkRequests,
+    OracleDocuments,
   ],
 };

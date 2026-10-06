@@ -192,6 +192,8 @@ caracteres), `DATABASE_PASSWORD` e, para ter um usuario administrador,
 | `DATABASE_SYNCHRONIZE`    | `false`         | Cria as tabelas a partir das entities. So dev; proibido em producao |
 | `DATABASE_SSL`            | `false`         | Exige TLS no MySQL. Obrigatorio em producao                   |
 | `DATABASE_SSL_CA`         | (vazio)         | CA em PEM. Vazio usa o pacote embarcado no driver             |
+| `DOCUMENT_STORAGE_PATH`   | `./storage/documents` | Raiz do storage local de documentos                     |
+| `DOCUMENT_MAX_FILE_SIZE`  | `10485760`      | Tamanho maximo de um documento, em bytes (10 MB)              |
 | `JWT_SECRET`              | **obrigatorio** | Segredo de assinatura, >= 32 caracteres                        |
 | `JWT_EXPIRES_IN`          | `1h`            | Validade do token: `30s`, `15m`, `1h`, `7d`                    |
 | `BCRYPT_SALT_ROUNDS`      | `12`            | Custo do hash (4 a 15)                                        |

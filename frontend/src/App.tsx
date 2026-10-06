@@ -6,6 +6,7 @@ import { NotificationsProvider } from './notifications/NotificationsContext';
 import { RequirePermission } from './auth/RequirePermission';
 import { AuditLogsPage } from './pages/audit/AuditLogsPage';
 import { DashboardPage } from './pages/dashboard/DashboardPage';
+import { DocumentsPage } from './pages/documents/DocumentsPage';
 import { FinanceEntryDetailPage } from './pages/finance/FinanceEntryDetailPage';
 import { FinanceEntryFormPage } from './pages/finance/FinanceEntryFormPage';
 import { FinancePage } from './pages/finance/FinancePage';
@@ -65,6 +66,12 @@ export function App(): ReactNode {
         </Route>
         <Route element={<RequirePermission permission={Permission.FinanceUpdate} />}>
           <Route path="/finance/:id/editar" element={<FinanceEntryFormPage key="editar" />} />
+        </Route>
+
+        {/* Documentos. Enviar exige `documents:create`, checado no backend em
+            cada requisicao; a tela so esconde o botao. */}
+        <Route element={<RequirePermission permission={Permission.DocumentsRead} />}>
+          <Route path="/documents" element={<DocumentsPage />} />
         </Route>
 
         {/* Configuracoes do sistema. Hoje so o ADMIN tem `settings:read`. */}

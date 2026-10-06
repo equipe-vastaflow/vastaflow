@@ -44,6 +44,11 @@ export function AppShell({ children, wide = false }: { children: ReactNode; wide
                 Financeiro
               </NavLink>
             )}
+            {hasPermission(user, Permission.DocumentsRead) && (
+              <NavLink to="/documents" className="nav-link">
+                Documentos
+              </NavLink>
+            )}
             {hasPermission(user, Permission.AuditRead) && (
               <NavLink to="/audit-logs" className="nav-link">
                 Auditoria

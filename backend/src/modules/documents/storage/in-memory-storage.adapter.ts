@@ -23,20 +23,29 @@ import {
  * A validacao da chave e repetida aqui de proposito. Se so o adapter local
  * recusasse chave insegura, um teste de travessia passaria por acidente - e o
  * teste estaria medindo o adapter, nao a regra.
+ *
+ * Os tres metodos REJEITAM a promessa em caso de chave invalida, em vez de
+ * lancar sincronamente: a porta declara `Promise`, e um `throw` sincrono
+ * quebraria quem tratasse o erro com `.catch()` em vez de `await`. Foi assim
+ * que o teste de chave hostil pegou o problema.
  */
 @Injectable()
 export class InMemoryStorageAdapter implements StoragePort {
   private readonly objects = new Map<string, Buffer>();
 
   write(storageKey: string, content: Buffer): Promise<void> {
-    this.assertSafe(storageKey);
+    if (!isSafeStorageKey(storageKey)) {
+      return Promise.reject(new UnsafeStorageKeyError());
+    }
     // Copia o buffer: quem chamou pode reaproveitar o dele.
     this.objects.set(storageKey, Buffer.from(content));
     return Promise.resolve();
   }
 
   read(storageKey: string): Promise<StoredObject> {
-    this.assertSafe(storageKey);
+    if (!isSafeStorageKey(storageKey)) {
+      return Promise.reject(new UnsafeStorageKeyError());
+    }
     const conteudo = this.objects.get(storageKey);
     if (!conteudo) {
       return Promise.reject(new StorageObjectNotFoundError(storageKey));
@@ -45,7 +54,9 @@ export class InMemoryStorageAdapter implements StoragePort {
   }
 
   remove(storageKey: string): Promise<void> {
-    this.assertSafe(storageKey);
+    if (!isSafeStorageKey(storageKey)) {
+      return Promise.reject(new UnsafeStorageKeyError());
+    }
     // Idempotente, como manda o contrato.
     this.objects.delete(storageKey);
     return Promise.resolve();
@@ -59,11 +70,5 @@ export class InMemoryStorageAdapter implements StoragePort {
   /** `true` se a chave existe. Usado SOMENTE por teste. */
   has(storageKey: string): boolean {
     return this.objects.has(storageKey);
-  }
-
-  private assertSafe(storageKey: string): void {
-    if (!isSafeStorageKey(storageKey)) {
-      throw new UnsafeStorageKeyError();
-    }
   }
 }

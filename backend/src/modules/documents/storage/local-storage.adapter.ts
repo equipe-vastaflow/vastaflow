@@ -74,8 +74,13 @@ export class LocalStorageAdapter implements StoragePort {
   }
 
   async remove(storageKey: string): Promise<void> {
+    // FORA do try: `resolveSafe` lanca `UnsafeStorageKeyError`, e capturar isso
+    // aqui o reempacotaria como falha de escrita - uma tentativa de manipulacao
+    // de chave passaria a parecer problema de disco, perdendo o sinal.
+    const caminho = this.resolveSafe(storageKey);
+
     try {
-      await unlink(this.resolveSafe(storageKey));
+      await unlink(caminho);
     } catch (error) {
       // Idempotente: quem chama isto e o rollback do upload, que nao sabe se a
       // escrita chegou a acontecer.
@@ -103,11 +108,18 @@ export class LocalStorageAdapter implements StoragePort {
   }
 }
 
-/** Reconhece o erro de caminho inexistente sem assumir a forma do objeto de erro. */
+/**
+ * Reconhece o erro de caminho inexistente pelo `code` do Node.
+ *
+ * Deliberadamente SEM `instanceof Error`: `instanceof` compara a cadeia de
+ * prototipos de um realm especifico, e um erro criado em outro contexto de VM
+ * (como acontece sob o Jest, e aconteceria com worker threads) falha na
+ * comparacao mesmo sendo um erro de verdade. Isso fazia um ENOENT ser
+ * classificado como falha de leitura, e um teste pegou. O `code` nao tem esse
+ * problema.
+ */
 function isNotFound(error: unknown): boolean {
   return (
-    error instanceof Error &&
-    'code' in error &&
-    (error as { code?: unknown }).code === NOT_FOUND
+    typeof error === 'object' && error !== null && (error as { code?: unknown }).code === NOT_FOUND
   );
 }

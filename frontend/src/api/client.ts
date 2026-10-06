@@ -242,6 +242,37 @@ export interface DownloadedFile {
 }
 
 /**
+ * Documento armazenado pelo sistema.
+ *
+ * NAO existe campo de chave de storage, caminho fisico, bucket nem regiao: o
+ * backend nao os expoe, porque sao infraestrutura. O download recebe o `id`.
+ */
+export interface DocumentFile {
+  id: string;
+  /** Nome logico exibido. */
+  nome: string;
+  /** Nome como foi enviado, preservado como metadado. */
+  nomeOriginal: string;
+  mimeType: string;
+  /** Tamanho em bytes. O backend normaliza para `number` antes de responder. */
+  tamanho: number;
+  /** Quem enviou. Metadado de auditoria, NAO controle de acesso. */
+  criadoPorId: string;
+  /** Autor ja identificado pelo backend. Nulo quando o usuario nao existe mais. */
+  criadoPor: { id: string; nome: string; email: string } | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DocumentPage {
+  items: DocumentFile[];
+  /** Total de documentos, em todas as paginas. Vem do backend. */
+  total: number;
+  page: number;
+  limit: number;
+}
+
+/**
  * Canal cuja identidade externa pode ser vinculada a um usuario.
  *
  * So `telegram` - e o unico canal que o backend conhece
@@ -475,6 +506,44 @@ async function requestBlob(
   };
 }
 
+/**
+ * Envia `FormData` (hoje so o upload de documento).
+ *
+ * Terceira funcao de HTTP, e nao um parametro novo em `request`: aquela fixa
+ * `Content-Type: application/json` e serializa o corpo com `JSON.stringify`, o
+ * que transformaria um `FormData` em `"{}"`. Sao incompativeis por construcao.
+ *
+ * O `Content-Type` NAO e definido aqui de proposito: quem monta o cabecalho com
+ * o `boundary` correto e o proprio navegador, a partir do `FormData`. Definir a
+ * mao quebraria o parser do servidor.
+ */
+async function requestMultipart<T>(
+  path: string,
+  options: { body: FormData; token?: string },
+): Promise<T> {
+  const headers: Record<string, string> = {};
+  if (options.token) {
+    headers.Authorization = `Bearer ${options.token}`;
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}${path}`, {
+      method: 'POST',
+      headers,
+      body: options.body,
+    });
+  } catch {
+    throw new NetworkError();
+  }
+
+  if (!response.ok) {
+    throw new ApiError(response.status, await readErrorMessage(response));
+  }
+
+  return (await response.json()) as T;
+}
+
 /** Le `attachment; filename="..."`. Devolve `null` quando nao da para extrair. */
 function filenameFromDisposition(header: string | null): string | null {
   const match = header?.match(/filename="([^"]+)"/);
@@ -651,6 +720,42 @@ export const api = {
      */
     update: (token: string, chave: string, valor: SettingValue): Promise<SystemSetting> =>
       request(settingPath(chave), { method: 'PATCH', body: { valor }, token }),
+  },
+
+  /**
+   * Documentos. Ler exige `documents:read`; enviar, `documents:create`.
+   *
+   * Nao ha renomear, excluir nem versionar: essas operacoes nao existem no
+   * backend desta fase.
+   */
+  documents: {
+    list: (token: string, page: number, limit: number): Promise<DocumentPage> =>
+      request(
+        `/documents?${new URLSearchParams({ page: String(page), limit: String(limit) }).toString()}`,
+        { token },
+      ),
+
+    /**
+     * Envia um arquivo. O campo do multipart e `arquivo`, como o backend espera.
+     *
+     * O nome vai junto no `FormData`; o servidor o guarda como metadado e gera
+     * a propria chave fisica.
+     */
+    upload: (token: string, file: File): Promise<DocumentFile> => {
+      const body = new FormData();
+      body.append('arquivo', file);
+      return requestMultipart('/documents', { body, token });
+    },
+
+    /**
+     * Baixa o conteudo. Reusa o mesmo caminho binario da exportacao do
+     * financeiro - nada de base64.
+     */
+    download: (token: string, document: DocumentFile): Promise<DownloadedFile> =>
+      requestBlob(`/documents/${encodeURIComponent(document.id)}/download`, {
+        token,
+        fallbackFilename: document.nomeOriginal,
+      }),
   },
 
   finance: {
