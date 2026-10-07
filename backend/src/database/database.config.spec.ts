@@ -1,5 +1,9 @@
 import { DatabaseType } from '../config/env.validation';
-import { buildDataSourceOptions, type DatabaseEnvironment } from './database.config';
+import {
+  buildDataSourceOptions,
+  MISSING_CA_MESSAGE,
+  type DatabaseEnvironment,
+} from './database.config';
 
 const baseEnv: DatabaseEnvironment = {
   DATABASE_TYPE: DatabaseType.Mysql,
@@ -28,28 +32,85 @@ describe('buildDataSourceOptions', () => {
       expect('ssl' in options).toBe(false);
     });
 
-    it('com DATABASE_SSL e sem CA usa o pacote de CAs do proprio driver', () => {
-      // Evita certificado no repositorio e arquivo para montar no servidor.
-      expect(sslDe({ ...baseEnv, DATABASE_SSL: true })).toBe('Amazon RDS');
+    it('com DATABASE_SSL e sem CA a configuracao e RECUSADA', () => {
+      // Antes isto caia no perfil embarcado 'Amazon RDS' do driver - uma CA que
+      // assina os certificados de toda instancia RDS de todo cliente AWS.
+      // Numa instalacao self-hosted nao chega a conectar; apontando para RDS
+      // seria confiar numa CA compartilhada com milhares de instancias alheias.
+      expect(() => buildDataSourceOptions({ ...baseEnv, DATABASE_SSL: true })).toThrow(
+        MISSING_CA_MESSAGE,
+      );
     });
 
-    it('com CA informada usa exatamente aquela CA', () => {
+    it('a recusa por CA ausente nomeia a variavel e nao expoe valor algum', () => {
+      expect(MISSING_CA_MESSAGE).toContain('DATABASE_SSL_CA');
+      expect(MISSING_CA_MESSAGE).not.toMatch(/-----BEGIN|senha|password|secret/i);
+    });
+
+    it('a opcao ssl e sempre um objeto, nunca o nome de um perfil do driver', () => {
+      // Blinda a remocao do fallback: `ssl` como string faria o mysql2 resolver
+      // um perfil de CA embarcado (`getSSLProfile`), que e o comportamento
+      // retirado. Com CA ausente nao ha caminho nenhum - lanca, como o teste
+      // acima comprova.
+      const ssl = sslDe({ ...baseEnv, DATABASE_SSL: true, DATABASE_SSL_CA: 'pem-qualquer' });
+
+      expect(typeof ssl).toBe('object');
+    });
+
+    it.each(['', '   ', '\n\t '])('CA em branco (%j) conta como ausente', (ca) => {
+      // Uma string so com espacos e truthy: sem o `trim` ela seria repassada ao
+      // driver e a falha apareceria no handshake, com mensagem obscura.
+      expect(() =>
+        buildDataSourceOptions({ ...baseEnv, DATABASE_SSL: true, DATABASE_SSL_CA: ca }),
+      ).toThrow(MISSING_CA_MESSAGE);
+    });
+
+    it('com CA informada exige cadeia E identidade', () => {
       const ca = '-----BEGIN CERTIFICATE-----\nconteudo\n-----END CERTIFICATE-----';
 
+      // As duas garantias sao opcoes SEPARADAS no mysql2, e apenas
+      // `rejectUnauthorized` tem valor padrao. Sem `verifyIdentity` o driver
+      // troca `checkServerIdentity` por uma funcao vazia: qualquer certificado
+      // assinado por esta CA passaria a servir para qualquer hostname.
       expect(sslDe({ ...baseEnv, DATABASE_SSL: true, DATABASE_SSL_CA: ca })).toEqual({
         ca,
         rejectUnauthorized: true,
+        verifyIdentity: true,
       });
     });
 
-    it('a verificacao do certificado NUNCA e desligada', () => {
-      // O ponto central: TLS sem verificar a identidade do servidor protege
-      // contra escuta passiva, nao contra um intermediario ativo.
-      for (const ca of [undefined, 'pem-qualquer']) {
-        const ssl = sslDe({ ...baseEnv, DATABASE_SSL: true, DATABASE_SSL_CA: ca });
+    it('a verificacao da CADEIA nunca e desligada', () => {
+      const ssl = sslDe({ ...baseEnv, DATABASE_SSL: true, DATABASE_SSL_CA: 'pem-qualquer' });
 
-        expect(JSON.stringify(ssl ?? null)).not.toContain('rejectUnauthorized":false');
-      }
+      expect((ssl as { rejectUnauthorized?: unknown }).rejectUnauthorized).toBe(true);
+      expect(JSON.stringify(ssl)).not.toContain('"rejectUnauthorized":false');
+    });
+
+    it('a verificacao da IDENTIDADE nunca e desligada', () => {
+      // Este e o teste que a configuracao anterior nao tinha, e por isso a
+      // conferencia de hostname ficou desligada sem ninguem notar.
+      const ssl = sslDe({ ...baseEnv, DATABASE_SSL: true, DATABASE_SSL_CA: 'pem-qualquer' });
+
+      expect((ssl as { verifyIdentity?: unknown }).verifyIdentity).toBe(true);
+      expect(JSON.stringify(ssl)).not.toContain('"verifyIdentity":false');
+    });
+
+    it('nenhuma variavel de ambiente consegue desligar as duas garantias', () => {
+      // Mesmo que alguem tente passar as chaves pelo ambiente, elas nao fazem
+      // parte de `DatabaseEnvironment` e o objeto e montado do zero aqui.
+      const hostil = {
+        ...baseEnv,
+        DATABASE_SSL: true,
+        DATABASE_SSL_CA: 'pem-qualquer',
+        rejectUnauthorized: false,
+        verifyIdentity: false,
+      } as unknown as DatabaseEnvironment;
+
+      expect(sslDe(hostil)).toEqual({
+        ca: 'pem-qualquer',
+        rejectUnauthorized: true,
+        verifyIdentity: true,
+      });
     });
 
     it('a CA informada nao vaza para nenhum outro campo da configuracao', () => {
@@ -66,20 +127,39 @@ describe('buildDataSourceOptions', () => {
     });
 
     it('TLS vale tambem quando a conexao vem por DATABASE_URL', () => {
-      // O deploy pode usar a URL em vez dos campos separados; o TLS nao pode
-      // depender dessa escolha.
+      // O deploy pode usar a URL em vez dos campos separados; as duas garantias
+      // nao podem depender dessa escolha.
       const options = buildDataSourceOptions({
         ...baseEnv,
         DATABASE_URL: 'mysql://usuario:senha@host:3306/vastaflow',
         DATABASE_SSL: true,
+        DATABASE_SSL_CA: 'pem-qualquer',
       });
 
-      expect((options as { ssl?: unknown }).ssl).toBe('Amazon RDS');
+      expect((options as { ssl?: unknown }).ssl).toEqual({
+        ca: 'pem-qualquer',
+        rejectUnauthorized: true,
+        verifyIdentity: true,
+      });
       expect((options as { url?: string }).url).toBeDefined();
     });
 
+    it('a CA tambem e exigida quando a conexao vem por DATABASE_URL', () => {
+      expect(() =>
+        buildDataSourceOptions({
+          ...baseEnv,
+          DATABASE_URL: 'mysql://usuario:senha@host:3306/vastaflow',
+          DATABASE_SSL: true,
+        }),
+      ).toThrow(MISSING_CA_MESSAGE);
+    });
+
     it('nao altera charset nem timezone', () => {
-      const options = buildDataSourceOptions({ ...baseEnv, DATABASE_SSL: true }) as {
+      const options = buildDataSourceOptions({
+        ...baseEnv,
+        DATABASE_SSL: true,
+        DATABASE_SSL_CA: 'pem-qualquer',
+      }) as {
         charset?: string;
         timezone?: string;
       };
@@ -103,6 +183,15 @@ describe('buildDataSourceOptions', () => {
 
       expect('ssl' in options).toBe(false);
       expect(options.type).toBe('oracle');
+    });
+
+    it('a exigencia de CA do MySQL NAO vaza para o Oracle', () => {
+      // O Oracle retorna antes de `buildMysqlSsl`, entao `DATABASE_SSL=true`
+      // sem CA nao derruba a configuracao Oracle. Sem este teste, a exigencia
+      // nova poderia passar a bloquear um driver a que ela nao se aplica.
+      expect(() =>
+        buildDataSourceOptions({ ...oracleEnv, DATABASE_SSL: true, DATABASE_SSL_CA: undefined }),
+      ).not.toThrow();
     });
   });
 });

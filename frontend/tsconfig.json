@@ -18,6 +18,12 @@
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
     "noEmit": true,
+    // Permitido porque `noEmit` esta ligado: nenhum caminho `.ts` sobrevive na
+    // saida, ja que nao existe saida. Necessario para o `vite.config.ts`
+    // importar a regra de `src/api/api-url.ts` com a extensao explicita que o
+    // carregador nativo de configuracao do Vite exige. NAO e convite para usar
+    // `.ts` nos imports da aplicacao: lá a resolucao sem extensao continua.
+    "allowImportingTsExtensions": true,
     "skipLibCheck": true
   },
   "include": ["src", "vite.config.ts"]

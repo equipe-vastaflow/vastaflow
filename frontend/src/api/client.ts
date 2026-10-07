@@ -1,4 +1,11 @@
-const API_URL = (import.meta.env.VITE_API_URL ?? 'http://localhost:3000').replace(/\/+$/, '');
+import { resolveApiUrl } from './api-url';
+
+/**
+ * URL base da API. Ver `api-url.ts`: em producao `VITE_API_URL` e obrigatoria,
+ * e o build falha antes de chegar aqui (plugin em `vite.config.ts`). Esta
+ * chamada e a segunda barreira, para um build feito por outro caminho.
+ */
+const API_URL = resolveApiUrl(import.meta.env);
 
 export type RoleName = 'ADMIN' | 'GESTOR' | 'OPERADOR' | 'USUARIO';
 

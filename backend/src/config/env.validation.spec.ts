@@ -139,8 +139,16 @@ describe('validateEnv', () => {
   });
 
   describe('swagger', () => {
-    /** Producao exige TLS no MySQL; sem isto a recusa viria por outro motivo. */
-    const prodEnv = { ...baseEnv, NODE_ENV: Environment.Production, DATABASE_SSL: 'true' };
+    /**
+     * Producao com MySQL exige TLS **e** a CA; sem as duas a recusa viria por
+     * outro motivo e o teste de Swagger passaria por acidente.
+     */
+    const prodEnv = {
+      ...baseEnv,
+      NODE_ENV: Environment.Production,
+      DATABASE_SSL: 'true',
+      DATABASE_SSL_CA: 'pem-qualquer',
+    };
 
     it('producao sem a variavel: Swagger nasce DESLIGADO', () => {
       expect(validateEnv(prodEnv).SWAGGER_ENABLED).toBe(false);
@@ -195,8 +203,51 @@ describe('validateEnv', () => {
       expect(() => validateEnv(prodEnv)).toThrow(/DATABASE_SSL/);
     });
 
-    it('producao com MySQL e TLS ligado: aceito', () => {
-      expect(validateEnv({ ...prodEnv, DATABASE_SSL: 'true' }).DATABASE_SSL).toBe(true);
+    it('producao com MySQL, TLS ligado e CA informada: aceito', () => {
+      const env = validateEnv({
+        ...prodEnv,
+        DATABASE_SSL: 'true',
+        DATABASE_SSL_CA: 'pem-qualquer',
+      });
+
+      expect(env.DATABASE_SSL).toBe(true);
+      expect(env.DATABASE_SSL_CA).toBe('pem-qualquer');
+    });
+
+    it('producao com MySQL e TLS ligado SEM CA: configuracao RECUSADA', () => {
+      // Antes isto era aceito e caia no perfil embarcado 'Amazon RDS' do
+      // driver. Numa instalacao que nao e RDS, confiar nessa CA nao faz
+      // sentido - e com ela a verificacao de identidade desligada, como estava,
+      // qualquer certificado assinado pela Amazon serviria.
+      expect(() => validateEnv({ ...prodEnv, DATABASE_SSL: 'true' })).toThrow(/DATABASE_SSL_CA/);
+    });
+
+    it('a recusa por CA ausente nao expoe valor de variavel alguma', () => {
+      try {
+        validateEnv({ ...prodEnv, DATABASE_SSL: 'true', JWT_SECRET: baseEnv.JWT_SECRET });
+        throw new Error('deveria ter sido recusado');
+      } catch (erro) {
+        const mensagem = erro instanceof Error ? erro.message : String(erro);
+
+        expect(mensagem).toContain('DATABASE_SSL_CA');
+        expect(mensagem).not.toContain(baseEnv.JWT_SECRET);
+        expect(mensagem).not.toContain(baseEnv.DATABASE_PASSWORD);
+      }
+    });
+
+    it('desenvolvimento com TLS ligado nao exige CA na validacao de ambiente', () => {
+      // A exigencia e uma regra de PRODUCAO. Em desenvolvimento quem ligar TLS
+      // sem CA e recusado na montagem da configuracao (`buildMysqlSsl`), nao
+      // aqui - a mensagem continua clara, e o ambiente de desenvolvimento nao
+      // ganha uma barreira que nao precisa.
+      expect(() => validateEnv({ ...baseEnv, DATABASE_SSL: 'true' })).not.toThrow();
+    });
+
+    it('producao com CA so de espacos conta como ausente', () => {
+      // `optionalString` transforma '   ' em undefined antes da regra cruzada.
+      expect(() =>
+        validateEnv({ ...prodEnv, DATABASE_SSL: 'true', DATABASE_SSL_CA: '   ' }),
+      ).toThrow(/DATABASE_SSL_CA/);
     });
 
     it('producao com Oracle nao exige DATABASE_SSL', () => {
@@ -223,11 +274,79 @@ describe('validateEnv', () => {
       ).toBe(pem);
     });
 
-    it('nao existe variavel para desligar a verificacao do certificado', () => {
-      // Blinda a decisao: `rejectUnauthorized: false` nao e configuravel.
+    describe('identidade do servidor: o host nao pode ser um IP', () => {
+      /** Producao com MySQL, TLS e CA: so falta decidir o host. */
+      const comTls = { ...prodEnv, DATABASE_SSL: 'true', DATABASE_SSL_CA: 'pem-qualquer' };
+
+      it.each(['127.0.0.1', '10.0.0.5', '192.168.1.10', '::1', 'fe80::1'])(
+        'producao com TLS e host %j: RECUSADO',
+        (host) => {
+          // O `mysql2` so envia `servername` ao TLS quando o host NAO e um IP.
+          // Sem `servername`, a conferencia de hostname e saltada em silencio -
+          // exatamente o problema que `verifyIdentity: true` resolve. Um IP aqui
+          // devolveria o furo de forma invisivel.
+          expect(() => validateEnv({ ...comTls, DATABASE_HOST: host })).toThrow(/IP/);
+        },
+      );
+
+      it.each(['mysql', 'vastaflow-mysql', 'mysql.vastaflow.internal', 'db.exemplo.test'])(
+        'producao com TLS e host %j: aceito',
+        (host) => {
+          expect(validateEnv({ ...comTls, DATABASE_HOST: host }).DATABASE_HOST).toBe(host);
+        },
+      );
+
+      it('o host da DATABASE_URL tambem e conferido', () => {
+        // A URL tem precedencia sobre os campos separados, entao a regra precisa
+        // olhar para o mesmo lugar que o driver.
+        expect(() =>
+          validateEnv({ ...comTls, DATABASE_URL: 'mysql://u:s@10.0.0.5:3306/vastaflow' }),
+        ).toThrow(/IP/);
+        expect(() =>
+          validateEnv({ ...comTls, DATABASE_URL: 'mysql://u:s@mysql:3306/vastaflow' }),
+        ).not.toThrow();
+      });
+
+      it('IPv6 entre colchetes na URL tambem e reconhecido', () => {
+        expect(() =>
+          validateEnv({ ...comTls, DATABASE_URL: 'mysql://u:s@[::1]:3306/vastaflow' }),
+        ).toThrow(/IP/);
+      });
+
+      it('sem TLS a regra nao se aplica: IP continua valido', () => {
+        // Sem TLS nao ha identidade a conferir, e o MySQL local costuma ser
+        // alcancado por 127.0.0.1. A regra existe para proteger uma garantia,
+        // nao para proibir IP por principio.
+        expect(validateEnv({ ...baseEnv, DATABASE_HOST: '127.0.0.1' }).DATABASE_HOST).toBe(
+          '127.0.0.1',
+        );
+      });
+
+      it('fora de producao a regra nao se aplica', () => {
+        expect(() =>
+          validateEnv({ ...baseEnv, DATABASE_SSL: 'true', DATABASE_HOST: '127.0.0.1' }),
+        ).not.toThrow();
+      });
+
+      it('producao com Oracle nao e afetada', () => {
+        // Oracle nao usa a opcao `ssl` do mysql2 nem passa por esta regra.
+        expect(() =>
+          validateEnv({
+            ...prodEnv,
+            DATABASE_TYPE: DatabaseType.Oracle,
+            DATABASE_ORACLE_SERVICE_NAME: 'VASTA',
+            DATABASE_HOST: '10.0.0.5',
+          }),
+        ).not.toThrow();
+      });
+    });
+
+    it('nao existe variavel para desligar nenhuma das duas verificacoes', () => {
+      // Blinda a decisao: nem `rejectUnauthorized: false` nem
+      // `verifyIdentity: false` sao configuraveis por ambiente.
       const chaves = Object.keys(validateEnv({ ...baseEnv, DATABASE_SSL: 'true' }));
 
-      expect(chaves.filter((chave) => /REJECT|VERIFY|INSECURE/i.test(chave))).toEqual([]);
+      expect(chaves.filter((chave) => /REJECT|VERIFY|INSECURE|IDENTITY/i.test(chave))).toEqual([]);
     });
   });
 

@@ -58,9 +58,19 @@ cp .env.example .env      # Windows: Copy-Item .env.example .env
 npm run dev               # http://localhost:5173
 ```
 
-`VITE_API_URL` (padrao `http://localhost:3000`) aponta para o backend. O backend
-so aceita chamadas da origem informada em `FRONTEND_ORIGIN` (CORS); o padrao do
-`.env.example` ja e `http://localhost:5173`.
+`VITE_API_URL` aponta para o backend. O backend so aceita chamadas da origem
+informada em `FRONTEND_ORIGIN` (CORS); o padrao do `.env.example` ja e
+`http://localhost:5173`.
+
+Em **desenvolvimento**, ausente, cai em `http://localhost:3000`. Em
+**producao** ela e obrigatoria e `npm run build` **falha** sem ela - um plugin em
+`vite.config.ts` interrompe o build, para que o bundle nunca saia apontando para
+localhost em silencio. A regra fica em `src/api/api-url.ts` e vale nos dois
+momentos: build e execucao.
+
+A variavel e de **build**, nao de execucao: o Vite substitui o valor no bundle,
+logo cada ambiente exige o proprio build. E **publica** - como toda `VITE_*`, vai
+para o bundle do navegador. Nada sensivel pode ser `VITE_*`.
 
 ## Comandos
 

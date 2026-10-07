@@ -1213,18 +1213,44 @@ acomoda-la.
 
 ### TLS na conexao com o MySQL
 
-`DATABASE_SSL=true` liga TLS com verificacao do certificado do servidor.
+`DATABASE_SSL=true` liga TLS. Sao **duas** garantias distintas, e as duas
+precisam ser pedidas explicitamente ao driver:
+
+1. `rejectUnauthorized: true` valida a **cadeia** - o certificado do servidor foi
+   assinado por uma CA em que confiamos;
+2. `verifyIdentity: true` valida a **identidade** - o certificado foi emitido
+   para o host ao qual estamos conectando.
+
+**`rejectUnauthorized` sozinho nao entrega a segunda**, e por um tempo foi so o
+que havia aqui. No `mysql2` as duas opcoes sao separadas e apenas a primeira tem
+valor padrao; quando `verifyIdentity` e falsy, o driver substitui
+`checkServerIdentity` por uma funcao que devolve `undefined` sempre - isto e,
+desliga a conferencia de hostname. As proprias typings do pacote dizem: *"You
+should enable this but it is disabled by default right now for backwards
+compatibility"*. O efeito era que qualquer certificado assinado pela CA
+configurada servia para qualquer hostname.
+
+Consequencia pratica do item 2: o host informado em `DATABASE_HOST` precisa
+constar no **SAN** do certificado do servidor, e **nao pode ser um endereco IP** -
+o driver so envia `servername` ao TLS quando o host e um nome, e sem
+`servername` a conferencia seria saltada em silencio. A validacao de ambiente
+recusa o boot com IP em producao, justamente para que essa perda nao seja
+invisivel.
+
 `DATABASE_SSL_CA` recebe o **conteudo** do certificado em PEM, nao um caminho -
 evita depender do filesystem (a aplicacao nao le arquivo em nenhum outro ponto)
-e funciona direto com gerenciadores de segredo. Vazio, usa o pacote de CAs que o
-proprio `mysql2` embarca para bancos gerenciados, o que dispensa certificado no
-repositorio.
+e funciona direto com gerenciadores de segredo. O certificado nao e segredo; a
+chave privada correspondente e, e nunca passa por aqui.
 
-Em producao com MySQL, `DATABASE_SSL=true` e **obrigatorio**: a validacao de
-ambiente recusa o boot sem ele.
+Em producao com MySQL, `DATABASE_SSL=true` e **obrigatorio** e
+`DATABASE_SSL_CA` tambem: a validacao de ambiente recusa o boot sem qualquer um
+dos dois. Antes, a CA vazia caia no pacote de CAs que o `mysql2` embarca para
+bancos gerenciados da AWS - uma CA que assina os certificados de toda instancia
+RDS de todo cliente AWS. Combinada com a verificacao de identidade desligada,
+era um caminho real para intermediario ativo. O fallback foi removido.
 
-Nao existe variavel para desligar a verificacao do certificado. Cifrar sem
-verificar a identidade do servidor protege contra escuta passiva e nao contra um
+Nao existe variavel para desligar nenhuma das duas verificacoes. Cifrar sem
+verificar quem esta do outro lado protege contra escuta passiva e nao contra um
 intermediario ativo, que e o ataque que importa.
 
 Nao se aplica ao Oracle, onde o TLS e configurado na string de conexao do proprio

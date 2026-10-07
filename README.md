@@ -190,8 +190,8 @@ caracteres), `DATABASE_PASSWORD` e, para ter um usuario administrador,
 | `DATABASE_TYPE`           | `mysql`         | `mysql` \| `oracle`                                            |
 | `DATABASE_HOST/PORT/NAME/USER/PASSWORD` | -   | Conexao. Dispensadas se `DATABASE_URL` estiver preenchida     |
 | `DATABASE_SYNCHRONIZE`    | `false`         | Cria as tabelas a partir das entities. So dev; proibido em producao |
-| `DATABASE_SSL`            | `false`         | Exige TLS no MySQL. Obrigatorio em producao                   |
-| `DATABASE_SSL_CA`         | (vazio)         | CA em PEM. Vazio usa o pacote embarcado no driver             |
+| `DATABASE_SSL`            | `false`         | Exige TLS no MySQL, validando cadeia **e** identidade do servidor. Obrigatorio em producao |
+| `DATABASE_SSL_CA`         | (vazio)         | CA em PEM (o conteudo). **Obrigatoria** quando `DATABASE_SSL=true` |
 | `DOCUMENT_STORAGE_PATH`   | `./storage/documents` | Raiz do storage local de documentos                     |
 | `DOCUMENT_MAX_FILE_SIZE`  | `10485760`      | Tamanho maximo de um documento, em bytes (10 MB)              |
 | `JWT_SECRET`              | **obrigatorio** | Segredo de assinatura, >= 32 caracteres                        |
@@ -610,5 +610,7 @@ Respostas de erro 5xx nao expoem a causa: devolvem mensagem generica e um
 - [docs/arquitetura.md](docs/arquitetura.md) - camadas, modulos e modelo de dados
 - [ADR 0001](docs/adr/0001-escolha-do-orm-e-estrategia-de-banco.md) - ORM e estrategia MySQL/Oracle
 - [ADR 0002](docs/adr/0002-modulo-commonjs-vs-esm.md) - formato de modulo do backend
+- [ADR 0003](docs/adr/0003-topologia-de-producao.md) - topologia de producao (VPS unica, Docker Compose, n8n self-hosted)
+- [docs/autenticacao-servico-a-servico.md](docs/autenticacao-servico-a-servico.md) - contrato proposto para o n8n chamar a API (**nao implementado**)
 
 Documentacao em portugues. Codigo em ingles.

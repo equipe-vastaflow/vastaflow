@@ -18,14 +18,23 @@ out/
 .env.*
 !.env.example
 
-# Certificados e chaves (NFS-e, integracoes, assinaturas digitais)
+# Certificados e chaves (TLS do MySQL, NFS-e, integracoes, assinaturas digitais)
+#
+# O material TLS de producao mora FORA do repositorio (ver
+# docs/adr/0003-topologia-de-producao.md). Estes padroes existem como rede de
+# protecao para o caso de alguem gerar um certificado dentro da arvore por
+# engano - nao como lugar previsto para guarda-los.
 *.pem
 *.key
 *.pfx
 *.p12
 *.crt
 *.cer
+*.csr
+*.der
 *.jks
+# Arquivo de numero de serie que o `openssl ca` cria ao assinar.
+*.srl
 certs/
 secrets/
 
@@ -61,7 +70,16 @@ Thumbs.db
 desktop.ini
 
 # Documentos enviados em desenvolvimento (storage local)
-storage/
+#
+# ANCORADO na raiz de proposito. Sem a barra inicial, `storage/` casa com um
+# diretorio chamado `storage` em QUALQUER nivel - inclusive
+# `backend/src/modules/documents/storage/`, que e CODIGO. Os arquivos que ja
+# estao lá continuariam rastreados, mas um arquivo NOVO nesse diretorio (o
+# futuro adapter de storage remoto, por exemplo) seria ignorado em silencio
+# pelo `git add`. `DOCUMENT_STORAGE_PATH` e relativo ao diretorio de trabalho
+# do processo, que e `backend/` ao rodar a aplicacao - dai os dois caminhos.
+/storage/
+/backend/storage/
 
 # Dados locais de banco / dumps
 *.sqlite

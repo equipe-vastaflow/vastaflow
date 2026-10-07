@@ -26,34 +26,81 @@ export type DatabaseEnvironment = Pick<
 >;
 
 /**
- * Pacote de CAs que o `mysql2` embarca para os bancos gerenciados da AWS.
+ * Mensagem de recusa quando TLS esta ligado sem CA informada.
  *
- * O driver resolve este nome internamente (`lib/constants/ssl_profiles.js`) e
- * valida o certificado do servidor contra ele. Usar o pacote do driver evita
- * ter certificado no repositorio e evita um arquivo para montar no servidor.
+ * Exportada para que o teste verifique a mensagem em vez de so o lancamento, e
+ * para que a validacao de ambiente possa usar o mesmo texto. NAO menciona
+ * nenhum valor: so o nome da variavel que falta.
  */
-const MANAGED_CA_PROFILE = 'Amazon RDS';
+export const MISSING_CA_MESSAGE =
+  'DATABASE_SSL=true exige DATABASE_SSL_CA: informe o conteudo PEM da CA que assina o certificado do servidor MySQL';
 
-/** Configuracao TLS do MySQL, ou `undefined` quando TLS esta desligado. */
-type MysqlSslOptions = string | { ca: string; rejectUnauthorized: true };
+/**
+ * Configuracao TLS do MySQL, ou `undefined` quando TLS esta desligado.
+ *
+ * Objeto sempre, nunca o nome de um perfil embarcado do driver: o perfil
+ * 'Amazon RDS' que existia aqui antes confiava na CA que assina os
+ * certificados de TODA instancia RDS de TODO cliente AWS - e esta instalacao
+ * nao usa RDS. Ver a nota sobre `verifyIdentity` em `buildMysqlSsl`.
+ */
+type MysqlSslOptions = {
+  ca: string;
+  rejectUnauthorized: true;
+  verifyIdentity: true;
+};
 
 /**
  * Traduz `DATABASE_SSL`/`DATABASE_SSL_CA` na opcao `ssl` do `mysql2`.
  *
- * `rejectUnauthorized` e sempre `true`, e nao ha variavel para desliga-lo:
- * cifrar sem verificar a identidade do servidor protege contra escuta passiva
- * e nao contra um intermediario ativo.
+ * Sao DUAS garantias distintas, e as duas precisam ser pedidas explicitamente:
  *
- * Sem CA informada, cai no pacote embarcado pelo driver - o caminho previsto
- * para banco gerenciado. Com CA informada, usa exatamente aquela.
+ * 1. `rejectUnauthorized: true` valida a CADEIA - o certificado do servidor foi
+ *    assinado por uma CA em que confiamos;
+ * 2. `verifyIdentity: true` valida a IDENTIDADE - o certificado foi emitido
+ *    para o host ao qual estamos conectando.
+ *
+ * `rejectUnauthorized` sozinho NAO entrega a segunda. No `mysql2` 3.24.4 as
+ * duas opcoes sao separadas e apenas a primeira tem valor padrao
+ * (`lib/connection_config.js`, "Default rejectUnauthorized to true"). Quando
+ * `verifyIdentity` e falsy o driver substitui `checkServerIdentity` por uma
+ * funcao que devolve `undefined` sempre (`lib/base/connection.js`), isto e,
+ * desliga a conferencia de hostname. As proprias typings do pacote dizem:
+ * "You should enable this but it is disabled by default right now for
+ * backwards compatibility". Sem o item 2, qualquer certificado assinado pela
+ * CA configurada serve para qualquer hostname.
+ *
+ * O hostname conferido e o que o driver recebe em `host`, ou seja o
+ * `DATABASE_HOST` (ou o host de `DATABASE_URL`). Nenhum nome e fixado aqui: o
+ * certificado do servidor e que precisa trazer esse nome no SAN. Em producao
+ * ha uma regra de ambiente exigindo que esse host NAO seja um literal de IP,
+ * porque o `mysql2` so envia `servername` quando o host nao e IP - com IP a
+ * conferencia de identidade seria saltada em silencio.
+ *
+ * Nao existe variavel para desligar nenhuma das duas garantias.
+ *
+ * A CA e OBRIGATORIA quando TLS esta ligado. Antes, sem CA, caia-se no perfil
+ * embarcado 'Amazon RDS'; numa instalacao self-hosted isso nao chega a
+ * conectar, e num ambiente que fale com RDS seria confianca numa CA
+ * compartilhada por milhares de instancias alheias. Falhar aqui, na montagem
+ * da configuracao, e mais claro que falhar no handshake.
+ *
+ * @throws Error quando `DATABASE_SSL` esta ligado e `DATABASE_SSL_CA` falta.
  */
 function buildMysqlSsl(env: DatabaseEnvironment): MysqlSslOptions | undefined {
   if (!env.DATABASE_SSL) {
     return undefined;
   }
-  return env.DATABASE_SSL_CA
-    ? { ca: env.DATABASE_SSL_CA, rejectUnauthorized: true }
-    : MANAGED_CA_PROFILE;
+
+  // `trim` porque uma CA so com espacos e truthy: sem isto ela seria repassada
+  // ao driver e a falha apareceria no handshake, com mensagem obscura, em vez
+  // de aqui. A validacao de ambiente ja normaliza o valor, mas esta funcao
+  // tambem e chamada pelo CLI de migrations.
+  const ca = env.DATABASE_SSL_CA?.trim();
+  if (!ca) {
+    throw new Error(MISSING_CA_MESSAGE);
+  }
+
+  return { ca, rejectUnauthorized: true, verifyIdentity: true };
 }
 
 /**
@@ -68,9 +115,14 @@ function buildMysqlSsl(env: DatabaseEnvironment): MysqlSslOptions | undefined {
  *   (`docker-compose.yml`) em si ainda nao foi executado.
  * - Oracle: metadata e DDL verificados offline por testes automatizados;
  *   NUNCA executado contra uma instancia Oracle real.
- * - TLS do MySQL: a montagem da opcao `ssl` e coberta por testes de unidade;
- *   NENHUMA conexao TLS real foi estabelecida, porque nao ha servidor MySQL
- *   com TLS disponivel nesta etapa.
+ * - TLS do MySQL: a montagem da opcao `ssl` e coberta por testes de unidade, e
+ *   o repasse dela ao driver foi conferido no proprio TypeORM instalado
+ *   (`driver/mysql/MysqlDriver.js`, `createConnectionOptions`, que faz
+ *   `ssl: options.ssl` sem filtrar chaves). NENHUM handshake TLS real foi
+ *   estabelecido: nao existe, nesta etapa, servidor MySQL com certificado
+ *   proprio para conectar. Em particular, que `verifyIdentity: true` de fato
+ *   RECUSE um certificado cujo SAN nao casa com o host so sera comprovado na
+ *   fase de containerizacao, contra um MySQL real.
  */
 export function buildDataSourceOptions(env: DatabaseEnvironment): DataSourceOptions {
   const type = env.DATABASE_TYPE;

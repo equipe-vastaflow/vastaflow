@@ -1,3 +1,4 @@
+import { isIP } from 'node:net';
 import { plainToInstance, Transform } from 'class-transformer';
 import {
   IsBoolean,
@@ -201,11 +202,14 @@ export class EnvironmentVariables {
    *
    * Recebe o CONTEUDO do certificado, nao um caminho: evita depender do
    * filesystem (a aplicacao nao le arquivo em nenhum outro ponto) e funciona
-   * direto com gerenciadores de segredo.
+   * direto com gerenciadores de segredo. O certificado em si NAO e segredo -
+   * a chave privada correspondente e, e ela nunca passa por aqui.
    *
-   * Vazio com `DATABASE_SSL=true` usa o pacote de CAs que o proprio driver
-   * `mysql2` embarca para bancos gerenciados da AWS - suficiente para RDS, e
-   * sem certificado algum no repositorio.
+   * OBRIGATORIA quando `DATABASE_SSL=true`. Antes, deixar vazio fazia o driver
+   * confiar no pacote de CAs que ele embarca para a AWS; essa CA assina os
+   * certificados de toda instancia RDS de todo cliente AWS, e esta instalacao
+   * nao usa RDS. A regra cruzada recusa o boot, e `buildMysqlSsl` recusa a
+   * montagem da configuracao.
    */
   @Transform(optionalString)
   @IsOptional()
@@ -331,6 +335,37 @@ function isBlank(value: unknown): boolean {
   return value === undefined || value === null || value === '';
 }
 
+/**
+ * Host que o driver vai efetivamente receber, sem os colchetes do IPv6.
+ *
+ * `DATABASE_URL` tem precedencia sobre os campos separados (ver
+ * `buildDataSourceOptions`), entao a regra de identidade precisa olhar para o
+ * mesmo lugar que o driver. O `mysql2` extrai o host da URL com
+ * `decodeURIComponent(new URL(url).hostname)` (`lib/connection_config.js`,
+ * `parseUrl`) - o mesmo campo usado aqui, de proposito.
+ *
+ * Os colchetes PRECISAM ser removidos: para um esquema nao-especial como
+ * `mysql:`, `URL.hostname` devolve o IPv6 entre colchetes (`[::1]`), e
+ * `isIP('[::1]')` e 0 - o endereco passaria pela regra sem ser reconhecido.
+ * Um teste pegou exatamente isso.
+ *
+ * URL malformada devolve `undefined`: e problema de outra natureza e falharia
+ * na conexao com mensagem propria, nao cabe a esta regra opinar.
+ */
+function effectiveHost(env: EnvironmentVariables): string | undefined {
+  const host = env.DATABASE_URL ? parseUrlHostname(env.DATABASE_URL) : env.DATABASE_HOST;
+
+  return host?.replace(/^\[|\]$/g, '');
+}
+
+function parseUrlHostname(url: string): string | undefined {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Texto opcional: espacos ao redor sao removidos e vazio vira `undefined`. */
 function optionalString({ value }: TransformInput): unknown {
   if (typeof value !== 'string') {
@@ -376,14 +411,33 @@ function validateCrossFieldRules(env: EnvironmentVariables): string[] {
     );
   }
 
-  if (
-    env.NODE_ENV === Environment.Production &&
-    env.DATABASE_TYPE === DatabaseType.Mysql &&
-    !env.DATABASE_SSL
-  ) {
+  const mysqlEmProducao =
+    env.NODE_ENV === Environment.Production && env.DATABASE_TYPE === DatabaseType.Mysql;
+
+  if (mysqlEmProducao && !env.DATABASE_SSL) {
     problems.push(
       'DATABASE_SSL=true e obrigatorio em producao com MySQL (a conexao sairia sem TLS)',
     );
+  }
+
+  if (mysqlEmProducao && env.DATABASE_SSL && !env.DATABASE_SSL_CA) {
+    problems.push(
+      'DATABASE_SSL_CA e obrigatorio em producao com MySQL e TLS (sem a CA o certificado do servidor nao pode ser validado)',
+    );
+  }
+
+  // Com TLS ligado, o `mysql2` so confere a identidade do servidor quando o
+  // host NAO e um literal de IP: ele passa `servername` ao TLS apenas nesse
+  // caso, e sem `servername` a conferencia de hostname e saltada em silencio.
+  // Um IP aqui devolveria exatamente o problema que `verifyIdentity: true`
+  // existe para resolver, e de forma invisivel - dai ser recusado no boot.
+  if (mysqlEmProducao && env.DATABASE_SSL) {
+    const host = effectiveHost(env);
+    if (host !== undefined && isIP(host) !== 0) {
+      problems.push(
+        'o host do banco em producao com TLS nao pode ser um endereco IP: use o nome do servico (o certificado do servidor precisa trazer esse nome no SAN, e o driver so confere a identidade quando o host e um nome)',
+      );
+    }
   }
 
   if (Boolean(env.SEED_ADMIN_EMAIL) !== Boolean(env.SEED_ADMIN_PASSWORD)) {
