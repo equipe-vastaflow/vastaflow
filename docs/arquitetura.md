@@ -1237,10 +1237,28 @@ o driver so envia `servername` ao TLS quando o host e um nome, e sem
 recusa o boot com IP em producao, justamente para que essa perda nao seja
 invisivel.
 
-`DATABASE_SSL_CA` recebe o **conteudo** do certificado em PEM, nao um caminho -
-evita depender do filesystem (a aplicacao nao le arquivo em nenhum outro ponto)
-e funciona direto com gerenciadores de segredo. O certificado nao e segredo; a
-chave privada correspondente e, e nunca passa por aqui.
+A CA vem de **uma de duas** variaveis, nunca das duas:
+
+- `DATABASE_SSL_CA` - o **conteudo** PEM, inline. Funciona direto com
+  gerenciadores de segredo que entregam valor;
+- `DATABASE_SSL_CA_FILE` - o **caminho** de um arquivo montado. E a forma
+  adequada a container, porque um PEM e multilinha e valor multilinha em arquivo
+  `.env` lido pelo Compose e fragil. `*_FILE` e a convencao que as proprias
+  imagens oficiais de banco usam, e secrets de Docker e Kubernetes sao arquivos.
+
+**Exatamente uma**, e nao precedencia: com precedencia, quem configurasse as
+duas por engano nao saberia qual esta em uso, e descobriria por comportamento
+estranho em producao. A ambiguidade e recusada em qualquer ambiente, inclusive
+com TLS desligado.
+
+A leitura do arquivo fica isolada em `database/ssl-ca.ts` - a validacao de
+ambiente continua sem I/O (ela nao le o arquivo, so confere a coerencia da
+configuracao) e a montagem das opcoes delega a um modulo pequeno e testavel.
+Arquivo inexistente, ilegivel ou vazio e recusado, com o caminho na mensagem e
+**nunca** o conteudo.
+
+O certificado da CA nao e segredo; a **chave privada** dela e, e nunca passa por
+nenhuma destas variaveis nem chega ao backend.
 
 Em producao com MySQL, `DATABASE_SSL=true` e **obrigatorio** e
 `DATABASE_SSL_CA` tambem: a validacao de ambiente recusa o boot sem qualquer um

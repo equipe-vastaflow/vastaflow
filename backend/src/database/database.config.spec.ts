@@ -1,9 +1,13 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { DatabaseType } from '../config/env.validation';
 import {
   buildDataSourceOptions,
   MISSING_CA_MESSAGE,
   type DatabaseEnvironment,
 } from './database.config';
+import { AMBIGUOUS_CA_MESSAGE } from './ssl-ca';
 
 const baseEnv: DatabaseEnvironment = {
   DATABASE_TYPE: DatabaseType.Mysql,
@@ -18,6 +22,7 @@ const baseEnv: DatabaseEnvironment = {
   DATABASE_SYNCHRONIZE: false,
   DATABASE_SSL: false,
   DATABASE_SSL_CA: undefined,
+  DATABASE_SSL_CA_FILE: undefined,
 };
 
 /** Le a opcao `ssl` sem assumir que ela existe no tipo da uniao. */
@@ -55,6 +60,37 @@ describe('buildDataSourceOptions', () => {
       const ssl = sslDe({ ...baseEnv, DATABASE_SSL: true, DATABASE_SSL_CA: 'pem-qualquer' });
 
       expect(typeof ssl).toBe('object');
+    });
+
+    it('a CA tambem pode vir de um arquivo montado', () => {
+      // `DATABASE_SSL_CA_FILE`: a forma adequada a container, porque um PEM e
+      // multilinha. Ver `ssl-ca.ts` para a regra de exatamente-uma.
+      const caminho = join(
+        mkdtempSync(join(tmpdir(), 'vastaflow-cfg-ca-')),
+        'ca.pem',
+      );
+      writeFileSync(caminho, 'pem-de-arquivo', 'utf8');
+
+      try {
+        expect(sslDe({ ...baseEnv, DATABASE_SSL: true, DATABASE_SSL_CA_FILE: caminho })).toEqual({
+          ca: 'pem-de-arquivo',
+          rejectUnauthorized: true,
+          verifyIdentity: true,
+        });
+      } finally {
+        rmSync(caminho, { force: true });
+      }
+    });
+
+    it('as duas formas de CA ao mesmo tempo sao RECUSADAS', () => {
+      expect(() =>
+        buildDataSourceOptions({
+          ...baseEnv,
+          DATABASE_SSL: true,
+          DATABASE_SSL_CA: 'pem-inline',
+          DATABASE_SSL_CA_FILE: '/caminho/qualquer.pem',
+        }),
+      ).toThrow(AMBIGUOUS_CA_MESSAGE);
     });
 
     it.each(['', '   ', '\n\t '])('CA em branco (%j) conta como ausente', (ca) => {

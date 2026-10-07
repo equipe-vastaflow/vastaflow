@@ -1,0 +1,69 @@
+# ---------------------------------------------------------------------------
+# O que NAO entra no build context da imagem do backend.
+#
+# ATENCAO a semantica: aqui NAO e gitignore. O Docker casa os padroes contra o
+# caminho INTEIRO (`filepath.Match` do Go), sem a regra "casa em qualquer
+# nivel" do Git. Logo `storage` abaixo atinge apenas uma entrada na raiz do
+# contexto, e NAO `src/modules/documents/storage/`, que e codigo.
+#
+# O padrao perigoso aqui seria `**/storage`. Nao use.
+#
+# Isto nao e teoria: o `.gitignore` tinha `storage/` sem ancora e dois arquivos
+# de teste da fundacao de documentos ficaram fora de todos os commits da Fase B.
+# `src/build-context.spec.ts` guarda as duas semanticas contra esse erro.
+# ---------------------------------------------------------------------------
+
+# Dependencias: reinstaladas na imagem com `npm ci` a partir do lockfile.
+# Copiar as do host traria binario nativo compilado para Windows.
+node_modules
+
+# Artefatos de build: a imagem compila do zero.
+dist
+*.tsbuildinfo
+
+# Cobertura e cache de ferramentas
+coverage
+.nyc_output
+.eslintcache
+
+# Segredos e ambiente. `.env.example` fica, porque e documentacao.
+.env
+.env.*
+!.env.example
+
+# Material TLS e chaves privadas. Nenhum entra na imagem: a CA de producao e
+# MONTADA em runtime (DATABASE_SSL_CA_FILE), nunca embutida.
+*.pem
+*.key
+*.pfx
+*.p12
+*.crt
+*.cer
+*.csr
+*.der
+*.jks
+*.srl
+certs
+secrets
+tls
+
+# Documentos enviados em desenvolvimento. Ancorado na raiz do contexto, e sem
+# `**`, justamente para nao alcancar o codigo em documents/storage/.
+storage
+
+# Logs e dumps
+logs
+*.log
+dumps
+
+# Git e editores
+.git
+.gitignore
+.gitattributes
+.vscode
+.idea
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+desktop.ini

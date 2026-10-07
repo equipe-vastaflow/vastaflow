@@ -216,6 +216,22 @@ export class EnvironmentVariables {
   @IsString()
   DATABASE_SSL_CA?: string;
 
+  /**
+   * Caminho de um arquivo PEM montado, alternativa a `DATABASE_SSL_CA`.
+   *
+   * Existe porque um PEM e multilinha, e valor multilinha em arquivo `.env`
+   * lido pelo Docker Compose e fragil. Montar o arquivo somente-leitura no
+   * container e a forma adequada, e `*_FILE` e a convencao que as proprias
+   * imagens oficiais de banco usam.
+   *
+   * EXATAMENTE UMA das duas quando TLS esta ligado - nao ha precedencia. Ver
+   * `database/ssl-ca.ts`.
+   */
+  @Transform(optionalString)
+  @IsOptional()
+  @IsString()
+  DATABASE_SSL_CA_FILE?: string;
+
   // ---------------------------------------------------------------------
   // Autenticacao
   // ---------------------------------------------------------------------
@@ -420,9 +436,19 @@ function validateCrossFieldRules(env: EnvironmentVariables): string[] {
     );
   }
 
-  if (mysqlEmProducao && env.DATABASE_SSL && !env.DATABASE_SSL_CA) {
+  // Ambiguidade e recusada em QUALQUER ambiente: nao ha precedencia entre as
+  // duas formas, e quem configurasse as duas por engano nao saberia qual esta
+  // em uso. Independe de `DATABASE_SSL`, porque a confusao na configuracao
+  // existe mesmo com TLS desligado.
+  if (env.DATABASE_SSL_CA && env.DATABASE_SSL_CA_FILE) {
     problems.push(
-      'DATABASE_SSL_CA e obrigatorio em producao com MySQL e TLS (sem a CA o certificado do servidor nao pode ser validado)',
+      'informe DATABASE_SSL_CA ou DATABASE_SSL_CA_FILE, nunca as duas (nao ha precedencia)',
+    );
+  }
+
+  if (mysqlEmProducao && env.DATABASE_SSL && !env.DATABASE_SSL_CA && !env.DATABASE_SSL_CA_FILE) {
+    problems.push(
+      'em producao com MySQL e TLS, informe DATABASE_SSL_CA (conteudo PEM) ou DATABASE_SSL_CA_FILE (arquivo montado): sem a CA o certificado do servidor nao pode ser validado',
     );
   }
 

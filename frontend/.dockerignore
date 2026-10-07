@@ -1,0 +1,37 @@
+# ---------------------------------------------------------------------------
+# O que NAO entra no build context da imagem do frontend.
+#
+# Semantica do Docker: padroes casam contra o caminho INTEIRO, sem a regra
+# "casa em qualquer nivel" do Git. Ver backend/.dockerignore para o historico
+# de por que isso importa.
+# ---------------------------------------------------------------------------
+
+# Dependencias: reinstaladas na imagem com `npm ci`.
+node_modules
+
+# Build: a imagem compila do zero. Copiar o dist do host arriscaria publicar um
+# bundle gerado com outro VITE_API_URL.
+dist
+
+# Cobertura e cache
+coverage
+.eslintcache
+.vite
+
+# Ambiente. `.env.example` fica, porque e documentacao.
+# Nenhuma variavel VITE_* vem de arquivo na imagem: VITE_API_URL entra como
+# build arg (ver Dockerfile).
+.env
+.env.*
+!.env.example
+
+# Git e editores
+.git
+.gitignore
+.vscode
+.idea
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+desktop.ini

@@ -2,6 +2,7 @@ import type { DataSourceOptions } from 'typeorm';
 import { DatabaseType, type EnvironmentVariables } from '../config/env.validation';
 import { ENTITIES } from './entities';
 import { MIGRATIONS } from './migrations';
+import { resolveSslCa } from './ssl-ca';
 
 const DEFAULT_PORTS: Record<DatabaseType, number> = {
   [DatabaseType.Mysql]: 3306,
@@ -23,17 +24,13 @@ export type DatabaseEnvironment = Pick<
   | 'DATABASE_SYNCHRONIZE'
   | 'DATABASE_SSL'
   | 'DATABASE_SSL_CA'
+  | 'DATABASE_SSL_CA_FILE'
 >;
 
-/**
- * Mensagem de recusa quando TLS esta ligado sem CA informada.
- *
- * Exportada para que o teste verifique a mensagem em vez de so o lancamento, e
- * para que a validacao de ambiente possa usar o mesmo texto. NAO menciona
- * nenhum valor: so o nome da variavel que falta.
- */
-export const MISSING_CA_MESSAGE =
-  'DATABASE_SSL=true exige DATABASE_SSL_CA: informe o conteudo PEM da CA que assina o certificado do servidor MySQL';
+// A resolucao da CA (conteudo inline ou arquivo montado) e as mensagens de
+// recusa moram em `ssl-ca.ts`, isoladas: e o unico ponto desta camada que toca
+// o filesystem.
+export { MISSING_CA_MESSAGE } from './ssl-ca';
 
 /**
  * Configuracao TLS do MySQL, ou `undefined` quando TLS esta desligado.
@@ -78,27 +75,23 @@ type MysqlSslOptions = {
  *
  * Nao existe variavel para desligar nenhuma das duas garantias.
  *
- * A CA e OBRIGATORIA quando TLS esta ligado. Antes, sem CA, caia-se no perfil
- * embarcado 'Amazon RDS'; numa instalacao self-hosted isso nao chega a
- * conectar, e num ambiente que fale com RDS seria confianca numa CA
- * compartilhada por milhares de instancias alheias. Falhar aqui, na montagem
- * da configuracao, e mais claro que falhar no handshake.
+ * A CA e OBRIGATORIA quando TLS esta ligado, e vem de `DATABASE_SSL_CA`
+ * (conteudo) ou `DATABASE_SSL_CA_FILE` (arquivo montado) - exatamente uma das
+ * duas, ver `ssl-ca.ts`. Antes, sem CA, caia-se no perfil embarcado
+ * 'Amazon RDS'; numa instalacao self-hosted isso nao chega a conectar, e num
+ * ambiente que fale com RDS seria confianca numa CA compartilhada por milhares
+ * de instancias alheias. Falhar aqui, na montagem da configuracao, e mais claro
+ * que falhar no handshake.
  *
- * @throws Error quando `DATABASE_SSL` esta ligado e `DATABASE_SSL_CA` falta.
+ * @throws Error quando `DATABASE_SSL` esta ligado e a CA falta, esta ambigua ou
+ *   o arquivo nao serve.
  */
 function buildMysqlSsl(env: DatabaseEnvironment): MysqlSslOptions | undefined {
   if (!env.DATABASE_SSL) {
     return undefined;
   }
 
-  // `trim` porque uma CA so com espacos e truthy: sem isto ela seria repassada
-  // ao driver e a falha apareceria no handshake, com mensagem obscura, em vez
-  // de aqui. A validacao de ambiente ja normaliza o valor, mas esta funcao
-  // tambem e chamada pelo CLI de migrations.
-  const ca = env.DATABASE_SSL_CA?.trim();
-  if (!ca) {
-    throw new Error(MISSING_CA_MESSAGE);
-  }
+  const ca = resolveSslCa({ inline: env.DATABASE_SSL_CA, file: env.DATABASE_SSL_CA_FILE });
 
   return { ca, rejectUnauthorized: true, verifyIdentity: true };
 }

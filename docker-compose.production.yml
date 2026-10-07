@@ -1,0 +1,268 @@
+# ===========================================================================
+# VastaFlow - nucleo web containerizado (production-like)
+# ---------------------------------------------------------------------------
+# ATENCAO: NAO VALIDADO. Este arquivo nunca foi executado. A maquina de
+# desenvolvimento nao tem runtime de container. Ver docs/containerizacao.md
+# para o que foi provado e o que nao foi.
+# ---------------------------------------------------------------------------
+#
+# ESCOPO: so o nucleo. n8n e PostgreSQL entram na Fase 3.
+#
+#   cliente -> nginx:80 -> estatico (SPA)
+#                       -> /api/ -> backend:3000 -> (TLS) -> mysql:3306
+#
+# Ordem de inicializacao:
+#   mysql (healthy) -> migrate (exit 0) -> backend (healthy) -> nginx
+#
+# USO (quando houver Docker):
+#   1. ./scripts/gerar-tls-dev.sh            gera CA e certificado locais
+#   2. cp .env.example .env  e preencha      NUNCA com segredo de producao
+#   3. docker compose -f docker-compose.production.yml build \
+#        --build-arg VITE_API_URL=/api
+#   4. docker compose -f docker-compose.production.yml up -d
+# ===========================================================================
+
+name: vastaflow
+
+# --------------------------------------------------------------------------
+# Rotacao de log, aplicada a todos os servicos.
+# Sem isto o driver json-file cresce sem limite e enche o disco da VPS. Os
+# valores dao ~30 MB por servico, suficiente para investigar um incidente
+# recente sem virar problema de espaco.
+# --------------------------------------------------------------------------
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: '10m'
+    max-file: '3'
+
+services:
+  # ------------------------------------------------------------------------
+  # Banco transacional. NAO publica porta: so existe na rede `app-data`.
+  # ------------------------------------------------------------------------
+  mysql:
+    # Fixado em 8.4.9 - a MESMA versao contra a qual o TLS foi provado
+    # localmente (ver docs/containerizacao.md).
+    image: mysql:8.4.9
+    restart: unless-stopped
+    logging: *logging
+    networks:
+      - app-data
+    # Deliberadamente SEM `ports:`. Expor 3306 no host anularia o isolamento,
+    # e o Docker escreve direto no iptables - uma porta publicada passa por
+    # cima do firewall do sistema.
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      # TLS com a NOSSA CA. Os caminhos apontam para o bind mount read-only
+      # abaixo. Os certificados que o MySQL auto-gera no datadir sao ignorados:
+      # o CN deles e `MySQL_Server_<versao>_Auto_Generated_Server_Certificate`,
+      # que nunca casaria com o hostname - comprovado localmente.
+      - --ssl-ca=/etc/mysql/tls/ca.pem
+      - --ssl-cert=/etc/mysql/tls/server-cert.pem
+      - --ssl-key=/etc/mysql/tls/server-key.pem
+      # Recusa conexao em texto puro. E o que transforma "TLS disponivel" em
+      # "TLS obrigatorio".
+      - --require-secure-transport=ON
+      # Conservador para validacao local. Proposta para a KVM 4 em
+      # docs/containerizacao.md - nao aplicar aqui.
+      - --innodb-buffer-pool-size=256M
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DATABASE_ROOT_PASSWORD:?defina DATABASE_ROOT_PASSWORD no .env}
+      MYSQL_DATABASE: ${DATABASE_NAME:?defina DATABASE_NAME no .env}
+      MYSQL_USER: ${DATABASE_USER:?defina DATABASE_USER no .env}
+      MYSQL_PASSWORD: ${DATABASE_PASSWORD:?defina DATABASE_PASSWORD no .env}
+      # Lido pelo mysqladmin do healthcheck, para a senha nao aparecer na
+      # linha de comando (e, logo, em `ps` dentro do container).
+      MYSQL_PWD: ${DATABASE_ROOT_PASSWORD}
+    volumes:
+      - mysql-data:/var/lib/mysql
+      # Material TLS, somente leitura. A chave privada do servidor entra aqui e
+      # em NENHUM outro lugar - o backend nunca a recebe.
+      - ./infra/tls/mysql:/etc/mysql/tls:ro
+    healthcheck:
+      # Pelo socket Unix, nao por TCP: conexao por socket e considerada segura
+      # pelo MySQL, entao `require_secure_transport=ON` nao a recusa.
+      test: ['CMD', 'mysqladmin', 'ping', '--protocol=socket', '-uroot']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1g
+        reservations:
+          memory: 512m
+
+  # ------------------------------------------------------------------------
+  # Migrations, one-shot. Reutiliza a imagem do backend: mesmo `dist`, mesmas
+  # dependencias, zero divergencia entre o que migra e o que roda.
+  # ------------------------------------------------------------------------
+  migrate:
+    build:
+      context: ./backend
+    # NUNCA reinicia: migration que falha nao deve entrar em laco. O `backend`
+    # depende de `service_completed_successfully`, entao falha aqui impede o
+    # boot em vez de virar crash-loop.
+    restart: 'no'
+    logging: *logging
+    networks:
+      - app-data
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment: &backend-env
+      NODE_ENV: production
+      DATABASE_TYPE: mysql
+      # NOME, nunca IP: com IP o driver nao envia `servername` e a validacao de
+      # identidade do certificado seria saltada em silencio. A validacao de
+      # ambiente recusa IP aqui, de proposito. Este nome tem de constar no SAN
+      # do certificado do servidor.
+      DATABASE_HOST: mysql
+      DATABASE_PORT: '3306'
+      DATABASE_NAME: ${DATABASE_NAME}
+      DATABASE_USER: ${DATABASE_USER}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD}
+      DATABASE_SSL: 'true'
+      # A CA vem de ARQUIVO MONTADO, nao de conteudo inline: um PEM e
+      # multilinha e valor multilinha em arquivo .env lido pelo Compose e
+      # fragil. `*_FILE` e a convencao das proprias imagens oficiais de banco.
+      DATABASE_SSL_CA_FILE: /etc/vastaflow/tls/ca.pem
+      DATABASE_SYNCHRONIZE: 'false'
+      SWAGGER_ENABLED: 'false'
+      JWT_SECRET: ${JWT_SECRET:?defina JWT_SECRET no .env}
+      DOCUMENT_STORAGE_PATH: /app/storage/documents
+      TELEGRAM_POLLING_ENABLED: 'false'
+    volumes:
+      # SOMENTE a CA, somente leitura. Nem a chave da CA, nem a chave do
+      # servidor chegam ao backend. O anchor fica no ITEM, nao na lista: na
+      # lista, reusa-lo no `backend` produziria uma lista aninhada, que o
+      # Compose recusa.
+      - &ca-mount ./infra/tls/backend:/etc/vastaflow/tls:ro
+    # `typeorm` e dependencia de RUNTIME, entao sobrevive ao `npm ci --omit=dev`
+    # e o CLI existe na imagem final. NAO e `npm run migration:run` (faz
+    # `nest build`, que vem de devDependency) e NAO e `npx` (pode tentar buscar
+    # o pacote na rede).
+    command:
+      - node
+      - node_modules/typeorm/cli.js
+      - '-d'
+      - dist/database/data-source.js
+      - 'migration:run'
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512m
+
+  # ------------------------------------------------------------------------
+  # API. NAO publica porta: so e alcancavel pelo Nginx.
+  # ------------------------------------------------------------------------
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    logging: *logging
+    networks:
+      - edge
+      - app-data
+    depends_on:
+      mysql:
+        condition: service_healthy
+      migrate:
+        # O backend NAO inicia se a migration nao terminou com codigo 0. E a
+        # primeira das duas barreiras; a segunda e `PendingMigrationsCheck`,
+        # que derruba o boot se ainda houver pendencia.
+        condition: service_completed_successfully
+    environment:
+      <<: *backend-env
+      PORT: '3000'
+      APP_NAME: vasta-flow
+      # Vazio: frontend e API ficam na MESMA origem (Nginx serve os dois), logo
+      # o navegador nao faz requisicao cross-origin. Em producao com
+      # subdominios separados, isto passa a ser https://app.<dominio>.
+      FRONTEND_ORIGIN: ''
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
+      SEED_ADMIN_NAME: ${SEED_ADMIN_NAME:-Administrador}
+    volumes:
+      - *ca-mount
+      # Bytes dos documentos. Volume NOMEADO, nao bind mount de codigo.
+      - documents:/app/storage/documents
+    healthcheck:
+      # A imagem node:slim nao tem curl nem wget - usa o proprio Node, que tem
+      # `fetch` global desde a versao 18. Instalar curl so para o healthcheck
+      # aumentaria a imagem e a superficie sem necessidade.
+      test:
+        - CMD
+        - node
+        - '-e'
+        - "fetch('http://127.0.0.1:3000/health/readiness').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          # Folgado por causa do upload: o multer bufferiza o arquivo INTEIRO na
+          # memoria antes de ir ao storage. Com DOCUMENT_MAX_FILE_SIZE em 10 MB
+          # o risco e pequeno; se subir, este limite e a rede de protecao.
+          memory: 768m
+        reservations:
+          memory: 256m
+
+  # ------------------------------------------------------------------------
+  # Nginx: unico ingress. Serve o SPA (embutido na imagem) e faz proxy da API.
+  # Nao ha servico `frontend` separado - o build e multi-stage e o `dist`
+  # termina aqui, o que torna o deploy do frontend atomico.
+  # ------------------------------------------------------------------------
+  nginx:
+    build:
+      context: ./frontend
+      args:
+        # `/api` porque a API e servida pelo mesmo host, sob esse prefixo.
+        # Obrigatoria: o build da imagem falha sem ela.
+        VITE_API_URL: ${VITE_API_URL:-/api}
+    restart: unless-stopped
+    logging: *logging
+    networks:
+      - edge
+    ports:
+      # As UNICAS portas publicadas. HTTPS fica para a fase de deploy, com
+      # dominio e certificado reais.
+      - '${HTTP_PORT:-8080}:80'
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      # A imagem nginx:alpine nao tem curl, mas tem o wget do busybox.
+      test: ['CMD', 'wget', '-q', '-O', '-', 'http://127.0.0.1/nginx-health']
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128m
+
+networks:
+  # Borda: quem fala HTTP. O MySQL NAO esta aqui.
+  edge:
+    driver: bridge
+  # Dados: backend/migrate <-> mysql. O Nginx NAO esta aqui.
+  app-data:
+    driver: bridge
+    # Sem acesso a internet: este segmento so precisa falar com o banco.
+    internal: true
+
+volumes:
+  mysql-data:
+    name: vastaflow-mysql-data
+  documents:
+    name: vastaflow-documents

@@ -191,7 +191,8 @@ caracteres), `DATABASE_PASSWORD` e, para ter um usuario administrador,
 | `DATABASE_HOST/PORT/NAME/USER/PASSWORD` | -   | Conexao. Dispensadas se `DATABASE_URL` estiver preenchida     |
 | `DATABASE_SYNCHRONIZE`    | `false`         | Cria as tabelas a partir das entities. So dev; proibido em producao |
 | `DATABASE_SSL`            | `false`         | Exige TLS no MySQL, validando cadeia **e** identidade do servidor. Obrigatorio em producao |
-| `DATABASE_SSL_CA`         | (vazio)         | CA em PEM (o conteudo). **Obrigatoria** quando `DATABASE_SSL=true` |
+| `DATABASE_SSL_CA`         | (vazio)         | CA em PEM (o conteudo, inline)                                 |
+| `DATABASE_SSL_CA_FILE`    | (vazio)         | CA em PEM (caminho de arquivo montado). **Exatamente uma das duas** quando `DATABASE_SSL=true` |
 | `DOCUMENT_STORAGE_PATH`   | `./storage/documents` | Raiz do storage local de documentos                     |
 | `DOCUMENT_MAX_FILE_SIZE`  | `10485760`      | Tamanho maximo de um documento, em bytes (10 MB)              |
 | `JWT_SECRET`              | **obrigatorio** | Segredo de assinatura, >= 32 caracteres                        |

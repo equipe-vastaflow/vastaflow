@@ -37,6 +37,10 @@ out/
 *.srl
 certs/
 secrets/
+# Material TLS gerado por scripts/gerar-tls-dev.sh. Ancorado na raiz: o nome
+# `tls` e generico e um padrao solto poderia alcancar codigo futuro, como
+# `storage/` alcancou (ver abaixo).
+/infra/tls/
 
 # Logs
 logs/

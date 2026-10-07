@@ -243,6 +243,86 @@ describe('validateEnv', () => {
       expect(() => validateEnv({ ...baseEnv, DATABASE_SSL: 'true' })).not.toThrow();
     });
 
+    describe('origem da CA: conteudo ou arquivo, exatamente uma', () => {
+      it('producao com DATABASE_SSL_CA_FILE em vez do conteudo: aceito', () => {
+        // A forma adequada a container: um PEM e multilinha, e valor multilinha
+        // em arquivo `.env` lido pelo Compose e fragil.
+        const env = validateEnv({
+          ...prodEnv,
+          DATABASE_SSL: 'true',
+          DATABASE_SSL_CA_FILE: '/etc/vastaflow/tls/ca.pem',
+        });
+
+        expect(env.DATABASE_SSL_CA_FILE).toBe('/etc/vastaflow/tls/ca.pem');
+        expect(env.DATABASE_SSL_CA).toBeUndefined();
+      });
+
+      it('as DUAS informadas: configuracao RECUSADA', () => {
+        expect(() =>
+          validateEnv({
+            ...prodEnv,
+            DATABASE_SSL: 'true',
+            DATABASE_SSL_CA: 'pem-qualquer',
+            DATABASE_SSL_CA_FILE: '/etc/vastaflow/tls/ca.pem',
+          }),
+        ).toThrow(/nunca as duas/);
+      });
+
+      it('a ambiguidade e recusada mesmo FORA de producao', () => {
+        // A confusao na configuracao existe independente do ambiente, e
+        // descobri-la em desenvolvimento e melhor que em producao.
+        expect(() =>
+          validateEnv({
+            ...baseEnv,
+            DATABASE_SSL_CA: 'pem-qualquer',
+            DATABASE_SSL_CA_FILE: '/etc/vastaflow/tls/ca.pem',
+          }),
+        ).toThrow(/nunca as duas/);
+      });
+
+      it('a ambiguidade e recusada mesmo com TLS desligado', () => {
+        expect(() =>
+          validateEnv({
+            ...baseEnv,
+            DATABASE_SSL: 'false',
+            DATABASE_SSL_CA: 'pem-qualquer',
+            DATABASE_SSL_CA_FILE: '/etc/vastaflow/tls/ca.pem',
+          }),
+        ).toThrow(/nunca as duas/);
+      });
+
+      it('producao com TLS e NENHUMA das duas: RECUSADO, citando as duas', () => {
+        try {
+          validateEnv({ ...prodEnv, DATABASE_SSL: 'true' });
+          throw new Error('deveria ter sido recusado');
+        } catch (erro) {
+          const mensagem = erro instanceof Error ? erro.message : String(erro);
+
+          expect(mensagem).toContain('DATABASE_SSL_CA');
+          expect(mensagem).toContain('DATABASE_SSL_CA_FILE');
+        }
+      });
+
+      it('caminho em branco conta como ausente', () => {
+        expect(() =>
+          validateEnv({ ...prodEnv, DATABASE_SSL: 'true', DATABASE_SSL_CA_FILE: '   ' }),
+        ).toThrow(/DATABASE_SSL_CA/);
+      });
+
+      it('a validacao de ambiente NAO le o arquivo', () => {
+        // Caminho inexistente passa aqui de proposito: esta camada so verifica a
+        // coerencia da configuracao, sem I/O. Quem le - e recusa - e
+        // `resolveSslCa`, na montagem das opcoes.
+        expect(() =>
+          validateEnv({
+            ...prodEnv,
+            DATABASE_SSL: 'true',
+            DATABASE_SSL_CA_FILE: '/caminho/que/nao/existe/ca.pem',
+          }),
+        ).not.toThrow();
+      });
+    });
+
     it('producao com CA so de espacos conta como ausente', () => {
       // `optionalString` transforma '   ' em undefined antes da regra cruzada.
       expect(() =>
