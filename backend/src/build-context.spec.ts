@@ -17,7 +17,9 @@ import { join, posix, resolve } from 'node:path';
  * importa aqui: no Docker os padroes sao casados contra o caminho INTEIRO
  * (`filepath.Match` do Go), nao em cada nivel. Logo `storage` no
  * `.dockerignore` casaria apenas com uma entrada na raiz do contexto, e o
- * padrao perigoso la e `**​/storage`. Este teste cobre as duas semanticas.
+ * padrao perigoso la e um globstar seguido de `storage`. Este teste cobre as
+ * duas semanticas, e o caso do globstar esta coberto explicitamente no ultimo
+ * `it` deste arquivo.
  */
 
 /** Raiz do projeto backend (este arquivo esta em `src/`). */
