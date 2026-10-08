@@ -9,13 +9,21 @@
 # executar e o que continua pendente.
 # ---------------------------------------------------------------------------
 #
-# ESCOPO: so o nucleo. n8n e PostgreSQL entram na Fase 3.
+# ESCOPO: nucleo web + n8n (Fase 3).
 #
 #   cliente -> nginx:80 -> estatico (SPA)
 #                       -> /api/ -> backend:3000 -> (TLS) -> mysql:3306
 #
+#   n8n -> backend:3000        (rede `automation`, credencial de SERVICO)
+#   n8n -> n8n-postgres:5432   (rede `n8n-internal`, interna)
+#   editor do n8n: SOMENTE em 127.0.0.1 do host
+#
+# O n8n NAO tem rota ao MySQL: nao esta na rede `app-data`. O PostgreSQL e
+# so do n8n e nao esta em nenhuma rede do nucleo.
+#
 # Ordem de inicializacao:
 #   mysql (healthy) -> migrate (exit 0) -> backend (healthy) -> nginx
+#   n8n-postgres (healthy) -> n8n
 #
 # USO (quando houver Docker):
 #   1. ./scripts/gerar-tls-dev.sh            gera CA e certificado locais
@@ -191,6 +199,8 @@ services:
     networks:
       - edge
       - app-data
+      # Onde o n8n encontra o backend (`http://backend:3000`).
+      - automation
     depends_on:
       mysql:
         condition: service_healthy
@@ -210,8 +220,18 @@ services:
       SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-}
       SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
       SEED_ADMIN_NAME: ${SEED_ADMIN_NAME:-Administrador}
+      # Credenciais de SERVICO (n8n -> backend): arquivo de HASHES, nunca o
+      # token. So o backend recebe esta variavel (por isso nao esta no anchor
+      # compartilhado com `migrate`). Ver docs/autenticacao-servico-a-servico.md.
+      SERVICE_CREDENTIALS_FILE: /etc/vastaflow/service-auth/credentials.json
     volumes:
       - *ca-mount
+      # DIRETORIO, nao arquivo, e somente leitura. Diretorio porque o CLI
+      # substitui o arquivo por `rename` (troca de inode) e um bind mount de
+      # ARQUIVO continuaria apontando para o inode antigo, sem enxergar a
+      # revogacao. Somente leitura porque o backend so le: ele nao tem como
+      # criar nem alterar credenciais de servico.
+      - ./infra/service-auth:/etc/vastaflow/service-auth:ro
       # Bytes dos documentos. Volume NOMEADO, nao bind mount de codigo.
       - documents:/app/storage/documents
     healthcheck:
@@ -274,6 +294,142 @@ services:
           cpus: '0.5'
           memory: 128m
 
+  # ------------------------------------------------------------------------
+  # PostgreSQL DO n8n. Nada do VastaFlow mora aqui (o negocio fica no MySQL).
+  # NAO publica porta e so existe na rede interna `n8n-internal`.
+  # ------------------------------------------------------------------------
+  n8n-postgres:
+    # Fixado. O diretorio de dados do Postgres 18+ mudou (PGDATA passou a ser
+    # /var/lib/postgresql/18/docker): o volume monta em /var/lib/postgresql, o
+    # que tambem evita o volume anonimo que a imagem criaria.
+    image: postgres:18.6-alpine3.24
+    restart: unless-stopped
+    logging: *logging
+    networks:
+      - n8n-internal
+    environment:
+      POSTGRES_DB: ${N8N_DB_NAME:-n8n}
+      POSTGRES_USER: ${N8N_DB_USER:-n8n}
+      POSTGRES_PASSWORD: ${N8N_DB_PASSWORD:?defina N8N_DB_PASSWORD no .env}
+    volumes:
+      - n8n-postgres-data:/var/lib/postgresql
+    # `cap_drop: ALL` NAO e aplicado aqui: o entrypoint da imagem precisa de
+    # CHOWN/SETUID/SETGID/FOWNER para preparar o diretorio e baixar o
+    # privilegio. `no-new-privileges` nao atrapalha isso.
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      # Autentica como o usuario do n8n, por TCP, e executa uma query.
+      #
+      # `pg_isready` NAO serve: ele so diz que o servidor aceita conexao e sai
+      # com 0 mesmo com credencial errada. TCP em vez de socket pela mesma razao
+      # do MySQL: o servidor TEMPORARIO da inicializacao so atende por socket.
+      #
+      # Conecta pelo IP do PROPRIO container (`hostname -i`) e NAO por
+      # 127.0.0.1: a imagem deixa o loopback em `trust` no pg_hba.conf, entao
+      # por 127.0.0.1 QUALQUER senha passa - verificado: senha errada retornou
+      # `1`. So conexoes nao-loopback caem na regra `scram-sha-256`.
+      #
+      # A senha vai por PGPASSWORD so neste comando; `$$` e o escape do Compose.
+      test:
+        - CMD-SHELL
+        - PGPASSWORD="$$POSTGRES_PASSWORD" psql -h "$$(hostname -i | cut -d' ' -f1)" -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -tAc 'SELECT 1' | grep -qx 1
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 384m
+        reservations:
+          memory: 128m
+
+  # ------------------------------------------------------------------------
+  # n8n (orquestrador). NAO tem acesso ao MySQL, NAO monta o socket do Docker
+  # e NAO e privilegiado. Chama o backend com a credencial de SERVICO.
+  # ------------------------------------------------------------------------
+  n8n:
+    # Imagem oficial, versao fixada (nunca `latest`).
+    image: docker.n8n.io/n8nio/n8n:2.43.1
+    restart: unless-stopped
+    logging: *logging
+    networks:
+      # `n8n-internal`: o PostgreSQL. `automation`: o backend e a unica rota de
+      # saida (nao e `internal` porque o editor precisa ser publicado em
+      # loopback; o n8n precisara de saida quando houver canais).
+      - n8n-internal
+      - automation
+    depends_on:
+      n8n-postgres:
+        condition: service_healthy
+    ports:
+      # SOMENTE loopback. Nunca 0.0.0.0: o editor tem login, mas e uma
+      # superficie administrativa que nao deve ficar na rede. Acesso remoto, se
+      # um dia for preciso, e por tunel SSH.
+      - '127.0.0.1:${N8N_EDITOR_PORT:-5678}:5678'
+    environment:
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: n8n-postgres
+      DB_POSTGRESDB_PORT: '5432'
+      DB_POSTGRESDB_DATABASE: ${N8N_DB_NAME:-n8n}
+      DB_POSTGRESDB_USER: ${N8N_DB_USER:-n8n}
+      DB_POSTGRESDB_PASSWORD: ${N8N_DB_PASSWORD}
+      # Chave que cifra as credenciais guardadas no banco. EXPLICITA: se for
+      # gerada sozinha, ela mora so no volume do n8n, e perder o volume perde
+      # tudo que o banco guarda. Backup separado, FORA da VPS.
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?defina N8N_ENCRYPTION_KEY no .env}
+      GENERIC_TIMEZONE: ${GENERIC_TIMEZONE:-America/Sao_Paulo}
+      TZ: ${GENERIC_TIMEZONE:-America/Sao_Paulo}
+      N8N_HOST: 127.0.0.1
+      N8N_PORT: '5678'
+      N8N_PROTOCOL: http
+      N8N_EDITOR_BASE_URL: http://127.0.0.1:${N8N_EDITOR_PORT:-5678}
+      # Cookie `Secure` ligado por padrao. Em http://127.0.0.1 o navegador o
+      # aceita (loopback e contexto seguro); na VPS o editor so sera acessado
+      # por HTTPS ou tunel.
+      N8N_SECURE_COOKIE: ${N8N_SECURE_COOKIE:-true}
+      # Workflow nao le variaveis de ambiente do processo (onde estao a chave e
+      # a senha do banco).
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: 'true'
+      N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: 'true'
+      # Sem telemetria, sem checagem de versao, sem modelos externos.
+      N8N_DIAGNOSTICS_ENABLED: 'false'
+      N8N_VERSION_NOTIFICATIONS_ENABLED: 'false'
+      N8N_TEMPLATES_ENABLED: 'false'
+      N8N_PERSONALIZATION_ENABLED: 'false'
+      # Nodes que executam comando ou mexem em arquivo no proprio container.
+      NODES_EXCLUDE: '["n8n-nodes-base.executeCommand","n8n-nodes-base.readWriteFile","n8n-nodes-base.localFileTrigger"]'
+      # Historico de execucao e dado: poda para nao crescer sem limite (14 dias).
+      EXECUTIONS_DATA_PRUNE: 'true'
+      EXECUTIONS_DATA_MAX_AGE: '336'
+    volumes:
+      - n8n-state:/home/node/.n8n
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      # `/healthz/readiness` so responde 200 com o banco conectado e as
+      # migrations aplicadas (`/healthz` responde 200 mesmo sem banco). A
+      # imagem tem o wget do busybox.
+      test: ['CMD', 'wget', '-q', '-O', '-', 'http://127.0.0.1:5678/healthz/readiness']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      # O boot a frio levou ~4-5 min no Docker Desktop (VM de 4 CPU / 3,8 GB):
+      # o n8n 2.x carrega centenas de nos e roda ~300 migrations na primeira
+      # vez. Com 40 s ele aparecia `unhealthy` durante um boot normal.
+      start_period: 360s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 768m
+        reservations:
+          memory: 256m
+
 networks:
   # Borda: quem fala HTTP. O MySQL NAO esta aqui.
   edge:
@@ -283,9 +439,24 @@ networks:
     driver: bridge
     # Sem acesso a internet: este segmento so precisa falar com o banco.
     internal: true
+  # n8n <-> backend. O MySQL NAO esta aqui (o n8n nao o alcanca) e o Nginx
+  # tambem nao. Nao e `internal`: um container so em redes internas nao tem
+  # como publicar porta, e o editor do n8n precisa de 127.0.0.1:5678.
+  automation:
+    driver: bridge
+  # n8n <-> seu PostgreSQL. Sem saida e sem nenhum outro servico.
+  n8n-internal:
+    driver: bridge
+    internal: true
 
 volumes:
   mysql-data:
     name: vastaflow-mysql-data
   documents:
     name: vastaflow-documents
+  # Estado do n8n (/home/node/.n8n) e dados do PostgreSQL dele. Nao apagar:
+  # contem workflows e credenciais cifradas.
+  n8n-state:
+    name: vastaflow-n8n-state
+  n8n-postgres-data:
+    name: vastaflow-n8n-postgres-data

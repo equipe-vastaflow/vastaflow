@@ -4,6 +4,8 @@ import { APP_GUARD } from '@nestjs/core';
 import { JwtModule } from '@nestjs/jwt';
 import type { EnvironmentVariables } from '../../config/env.validation';
 import { AuditModule } from '../audit/audit.module';
+import { ServiceAuthGuard } from '../service-auth/service-auth.guard';
+import { ServiceAuthModule } from '../service-auth/service-auth.module';
 import { UsersModule } from '../users/users.module';
 import { parseDurationToSeconds } from './auth.config';
 import { AuthController } from './auth.controller';
@@ -16,6 +18,7 @@ import { RolesGuard } from './guards/roles.guard';
   imports: [
     UsersModule,
     AuditModule,
+    ServiceAuthModule,
     JwtModule.registerAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService<EnvironmentVariables, true>) => ({
@@ -30,7 +33,14 @@ import { RolesGuard } from './guards/roles.guard';
   controllers: [AuthController],
   providers: [
     AuthService,
-    // Guards globais. A ordem importa: autentica -> perfil -> permissao.
+    // Guards globais. A ordem importa: servico -> autentica -> perfil -> permissao.
+    //
+    // O guard de SERVICO vem primeiro e so age em rotas `@ServiceRoute`; em toda
+    // outra rota devolve `true` sem olhar a requisicao. O `JwtAuthGuard` que vem
+    // depois, numa rota de servico, apenas confirma que ele autenticou - entao
+    // trocar esta ordem ou remover o guard de servico faz as rotas de servico
+    // darem 401, nunca ficarem abertas.
+    { provide: APP_GUARD, useClass: ServiceAuthGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },

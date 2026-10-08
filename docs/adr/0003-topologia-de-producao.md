@@ -228,3 +228,13 @@ as correcoes que a execucao forcou em `docs/containerizacao.md`.
 - o IP externo real do cliente na auditoria (no Docker Desktop a conexao do host
   passa por NAT e chega como o gateway da bridge);
 - o backup externo e a restauracao.
+
+## Atualizacao - Fase 3 (2026-10-08)
+
+n8n 2.43.1 e seu PostgreSQL 18.6 entraram no Compose, e a autenticacao
+servico-a-servico foi implementada e validada **localmente** (ver
+`docs/containerizacao.md` e `docs/autenticacao-servico-a-servico.md`). As
+invariantes acima foram verificadas por execucao: o n8n nao resolve nem alcanca o
+MySQL, o editor so escuta em `127.0.0.1`, e nao existe usuario "N8N" na tabela de
+usuarios. Continuam **nao validados**: a VPS Linux, o HTTPS publico e os tres
+subdominios. Nenhum workflow de negocio nem canal foi criado.

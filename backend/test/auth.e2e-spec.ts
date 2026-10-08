@@ -523,6 +523,7 @@ describe('Auth, usuarios e RBAC (e2e)', () => {
           '/notifications/{id}',
           '/notifications/{id}/read',
           '/profile',
+          '/service/identity',
           '/settings',
           '/settings/{key}',
           '/users',

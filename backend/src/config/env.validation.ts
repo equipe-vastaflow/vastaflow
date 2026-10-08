@@ -331,6 +331,28 @@ export class EnvironmentVariables {
   })
   DOCUMENT_MAX_FILE_SIZE: number = DEFAULT_DOCUMENT_MAX_FILE_SIZE;
 
+  // ---------------------------------------------------------------------
+  // Autenticacao servico-a-servico (n8n)
+  // ---------------------------------------------------------------------
+
+  /**
+   * Caminho do arquivo de credenciais de servico (HASHES SHA-256, nunca o
+   * token). Ver `modules/service-auth/`.
+   *
+   * Opcional, e AUSENTE significa recurso desligado: toda rota de servico
+   * responde 401 e a aplicacao sobe normalmente. Por isso nao ha regra de
+   * producao exigindo a variavel - quem nao usa o n8n nao precisa dela.
+   *
+   * Recebe um CAMINHO e nao o conteudo, ao contrario de `DATABASE_SSL_CA`, de
+   * proposito: o arquivo precisa mudar SEM reiniciar o container (e assim que
+   * uma credencial e revogada ou rotacionada), e variavel de ambiente so muda
+   * reiniciando. O conteudo e relido a cada segundo.
+   */
+  @Transform(optionalString)
+  @IsOptional()
+  @IsString()
+  SERVICE_CREDENTIALS_FILE?: string;
+
   @Transform(optionalString)
   @IsOptional()
   @IsString()

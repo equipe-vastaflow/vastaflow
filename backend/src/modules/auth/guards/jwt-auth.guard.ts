@@ -6,6 +6,10 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
+import {
+  SERVICE_ROUTE_KEY,
+  SERVICE_UNAUTHORIZED_MESSAGE,
+} from '../../service-auth/service-auth.constants';
 import { UsersService } from '../../users/users.service';
 import type { AuthenticatedRequest, JwtPayload } from '../auth.types';
 import { toAuthenticatedUser } from '../authenticated-user';
@@ -37,6 +41,26 @@ export class JwtAuthGuard implements CanActivate {
     }
 
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
+
+    // Rota EXCLUSIVA de servico: quem autentica e o `ServiceAuthGuard`, que roda
+    // ANTES deste. Aqui so se CONFIRMA que ele autenticou (fail-closed): se o
+    // guard de servico nao estivesse registrado, a rota daria 401, e nao ficaria
+    // aberta. A rota nao e `@Public()`.
+    //
+    // Este e o unico ponto em que este guard conhece servicos. O fluxo humano
+    // abaixo nao muda: um `X-Service-Token` em rota de pessoa e ignorado, e a
+    // requisicao continua exigindo `Authorization: Bearer`.
+    const isServiceRoute = this.reflector.getAllAndOverride<boolean | undefined>(
+      SERVICE_ROUTE_KEY,
+      [context.getHandler(), context.getClass()],
+    );
+    if (isServiceRoute) {
+      if (request.servicePrincipal) {
+        return true;
+      }
+      throw new UnauthorizedException(SERVICE_UNAUTHORIZED_MESSAGE);
+    }
+
     const token = extractBearerToken(request.headers.authorization);
     if (!token) {
       throw new UnauthorizedException('Token de acesso ausente');

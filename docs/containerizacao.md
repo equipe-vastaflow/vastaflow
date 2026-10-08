@@ -127,6 +127,103 @@ quando "parece certo".**
   (`Declarao...`) e o nome correto em `filename*=UTF-8''...`. Comportamento
   anterior a esta fase.
 
+## Fase 3 - n8n + PostgreSQL + autenticacao de servico
+
+Validado em Docker Desktop (Engine 29.8.2 / Compose v5.5.1; VM de 4 CPU e
+3,8 GB; host Windows de 8 GB) em 2026-10-08. **Nao validado:** VPS Linux, HTTPS
+publico, carga, proprietario de volume/bind mount em Linux.
+
+### Servicos, redes e volumes
+
+| Servico | Imagem (fixa) | Porta | Rede(s) | Volume | Limite |
+| --- | --- | --- | --- | --- | --- |
+| `n8n-postgres` | `postgres:18.6-alpine3.24` | nenhuma | `n8n-internal` | `n8n-postgres-data` -> `/var/lib/postgresql` | 0,5 CPU / 384 MB |
+| `n8n` | `docker.n8n.io/n8nio/n8n:2.43.1` | `127.0.0.1:${N8N_EDITOR_PORT:-5678}` | `n8n-internal`, `automation` | `n8n-state` -> `/home/node/.n8n` | 1 CPU / 768 MB |
+
+Redes: `automation` (n8n + backend), `n8n-internal` (**internal**: n8n +
+PostgreSQL). O MySQL continua so em `app-data`. O backend entrou em
+`automation` e ganhou o diretorio `infra/service-auth` (somente leitura) e
+`SERVICE_CREDENTIALS_FILE`. Limites somados: 3.072 MB (+512 MB do `migrate` so no
+boot) na VM de 3,8 GB.
+
+Endurecimento do n8n: `cap_drop: ALL`, `no-new-privileges`, usuario `node`,
+sem `docker.sock`, sem `privileged`, sem acesso ao MySQL,
+`N8N_BLOCK_ENV_ACCESS_IN_NODE`, `N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS`,
+telemetria/versao/templates desligados, nos de executar comando/arquivo
+excluidos, poda de execucoes (14 dias), `N8N_ENCRYPTION_KEY` explicita.
+PostgreSQL: `no-new-privileges` (sem `cap_drop`: o entrypoint precisa de
+CHOWN/SETUID).
+
+### O que foi provado (executado)
+
+| # | Prova | Resultado |
+| --- | --- | --- |
+| 1 | PostgreSQL inicializa; n8n usa-o (157 tabelas, 300 migrations) | PASS |
+| 2 | Healthcheck do Postgres **autentica** (controle negativo com senha errada: exit 1) | PASS |
+| 3 | n8n `healthy` via `/healthz/readiness` | PASS |
+| 4 | Editor carrega no Chrome real, senha errada recusada, certa aceita, cookie `Secure`+`HttpOnly` | PASS |
+| 5 | Editor so em `127.0.0.1` (`docker compose ps`, `netstat`); nada em `0.0.0.0` | PASS |
+| 6 | n8n resolve `backend` e `n8n-postgres`; **nao** resolve `mysql`; TCP ao IP do MySQL expira (com controle positivo: backend->mysql conecta) | PASS |
+| 7 | Sem `docker.sock`, sem `privileged`; redes `n8n-internal`/`app-data` `internal=true` | PASS |
+| 8 | Credencial do n8n **cifrada** no banco (`Salted__`); token e chave em 0 ocorrencias nos logs e no dump | PASS |
+| 9 | Persistencia: `up --force-recreate` (sem `-v`): dono, workflows e credencial sobrevivem e a credencial **decifra** (chamada ao backend 200); nenhum volume anonimo criado | PASS |
+| 10 | Chave de criptografia errada: n8n **recusa subir** (`Mismatching encryption keys`) | PASS |
+| 11 | n8n -> backend: A token valido 200; B ausente 401; C invalido 401; D revogado 401; E JWT humano na rota de servico 401; F token de servico em 7 rotas humanas 401 | PASS |
+| 12 | Revogacao sem reiniciar: recusa 0,54 s apos o CLI; rotacao com janela de duas credenciais | PASS |
+| 13 | Nginx bloqueia `/api/service*` (10 variantes) e `/api/health` + SPA seguem OK | PASS |
+| 14 | Fluxo humano no Chrome real, CSP estrita: 10 telas, export XLSX, 0 violacoes | PASS |
+| 15 | MySQL real: nenhum usuario n8n/servico, 1 usuario; auditoria sem rastro de servico | PASS |
+
+### Defeitos que so a execucao revelou (corrigidos)
+
+1. **Healthcheck do PostgreSQL nao validava a senha.** A imagem deixa
+   `127.0.0.1` em `trust` no `pg_hba.conf`; por loopback qualquer senha passa
+   (senha errada devolveu `1`, exit 0). Corrigido: o check conecta pelo IP do
+   proprio container (`hostname -i`), que cai na regra `scram-sha-256`.
+2. **Bloqueio do Nginx contornavel por caixa.** `location ^~ /api/service`
+   deixou passar `/api/Service/identity` (200): o Express ignora caixa, o
+   `location` nao. Corrigido com regex `~*`; as 10 variantes dao 404.
+3. **`start_period` do n8n (40 s) curto demais:** o boot a frio levou ~4-5 min
+   (centenas de nos + ~300 migrations) e o container aparecia `unhealthy`.
+   Subiu para 360 s. Reinicio com estado existente levou ~45-50 s.
+4. **`docker compose up` desistiu cedo** (`mysql ... unhealthy`) logo apos o
+   build, com o host saturado; os dois bancos ficaram saudaveis minutos depois.
+   Nao e defeito de configuracao, e consequencia de recurso (abaixo). Reexecutar
+   `up -d` concluiu.
+5. Artefatos **de teste** (nao do produto): Git Bash converte `/api` em
+   `C:/Program Files/Git/api` em `--build-arg` e em query strings (use
+   `MSYS_NO_PATHCONV=1`); o cookie `Secure` do n8n nao e reenviado por clientes
+   HTTP que respeitam o atributo.
+
+### Recursos (Docker Desktop, 3,8 GB)
+
+Ocioso: n8n ~370 MiB, MySQL ~494 MiB, backend ~92 MiB, PostgreSQL ~38 MiB, nginx
+~6 MiB (~1 GiB no total). Pico do n8n medido durante reinicio: **468 MiB de 768**.
+`OOMKilled=false` e `RestartCount=0` em todos os containers atuais. Memoria livre
+do **host Windows** ficou em ~740 MB de 8 GB durante a validacao: o gargalo e o
+host, e explica os boots lentos. O pico no boot **a frio** nao foi amostrado
+(so confirmado que nao houve OOM). Os limites nao foram alterados.
+
+### Nao validado / limitacoes
+
+- Linux/VPS: propriedade e modo de `infra/service-auth` e dos volumes; o
+  bind mount "imediato" do Linux nao foi medido.
+- n8n -> backend e HTTP puro na rede Docker (sem TLS).
+- Sem rate limit na rota de servico (nao passa pelo Nginx).
+- Backup/restore do volume do n8n e do PostgreSQL **nao foram exercitados**;
+  so a persistencia a `--force-recreate`.
+- Segundo `docker compose up` apos a reinicializacao da VM do Docker nao foi
+  testado.
+- Os workflows criados foram **descartaveis** e nao devem ir para producao.
+
+### Backup (o que precisa existir)
+
+1. `N8N_ENCRYPTION_KEY`: copia **fora da VPS**, separada dos demais backups.
+   Sem ela o backup do banco nao recupera as credenciais.
+2. Banco do n8n: `pg_dump` (nao copiar o volume com o banco ligado).
+3. Volume `n8n-state` (`/home/node/.n8n`, contem o arquivo `config` com a chave).
+4. `infra/service-auth/credentials.json` (recriavel, so hashes).
+
 ## Reproduzir
 
 Pre-requisitos: Docker Engine + Compose, `openssl`.

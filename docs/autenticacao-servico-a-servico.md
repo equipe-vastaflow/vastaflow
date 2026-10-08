@@ -1,237 +1,177 @@
 # Autenticacao servico-a-servico (n8n -> NestJS)
 
-> **Estado: CONTRATO PROPOSTO. Nada disto esta implementado.**
+> **Estado: IMPLEMENTADO e validado localmente em Docker Desktop (Fase 3,
+> 2026-10-08).** Nao validado: VPS Linux, HTTPS publico, carga real, e qualquer
+> uso por workflow de negocio (nao existe nenhum - ver secao 11).
 >
-> Nao existe guard, nao existe variavel de ambiente, nao existe credencial,
-> nao existe migration. Este documento e o contrato a ser revisado antes da
-> implementacao, que pertence a fase do n8n.
->
-> Decisao arquitetural de origem:
-> [`adr/0003-topologia-de-producao.md`](adr/0003-topologia-de-producao.md).
+> Decisao de origem: [`adr/0003-topologia-de-producao.md`](adr/0003-topologia-de-producao.md).
 
-## 1. O problema
-
-Na topologia decidida, o n8n orquestra os canais e chama a API do VastaFlow:
+## 1. O que existe
 
 ```
-pessoa -> WhatsApp/Telegram -> n8n -> NestJS -> MySQL
+n8n --(rede `automation`, HTTP)--> backend:3000   X-Service-Token: vfs_...
 ```
 
-O n8n precisa se autenticar nessa chamada. Hoje existe **um** mecanismo de
-autenticacao: JWT de usuario, emitido no login, verificado pelo guard global a
-cada requisicao - que relê perfil, permissoes e status do banco toda vez.
+Uma unica rota de servico, **tecnica**: `GET /service/identity`. Devolve quem
+esta chamando (`authenticatedAs: "service"`, `principal`, `credentialId`,
+`scopes`). Nao le nem altera dado de negocio, nao executa comando e nao aceita
+nem devolve identificador de usuario. **Nao e uma API de comandos** e nao ha
+planos de transforma-la em uma.
 
-Esse mecanismo **nao serve** para um sistema. Usa-lo exigiria dar ao n8n a senha
-de um funcionario ou guardar um JWT de pessoa indefinidamente, e as duas coisas
-estao descartadas.
+Na borda publica ela nao existe: o Nginx responde 404 para `/api/service*`
+(qualquer caixa, com `%XX`, `//`, `/./`). O n8n chega direto ao backend pela
+rede interna.
 
-## 2. A distincao que organiza tudo: service principal != business actor
+## 2. SERVICE PRINCIPAL != BUSINESS ACTOR
 
-Uma mesma requisicao carrega **duas identidades**, e elas respondem a perguntas
-diferentes:
-
-| | Pergunta que responde | Exemplo no fluxo | Sujeito de |
+| | Pergunta | Exemplo | Sujeito de |
 | --- | --- | --- | --- |
-| **Service principal** | *Qual sistema* esta chamando? | o n8n | **autenticacao** |
-| **Business actor** | *Qual pessoa* originou? | o usuario VastaFlow vinculado ao numero de WhatsApp | **acao de negocio** |
+| **Service principal** | *Qual sistema* chama? | o n8n | **autenticacao** (existe) |
+| **Business actor** | *Qual pessoa* originou? | usuario vinculado ao numero de WhatsApp | **acao de negocio** (NAO existe ainda) |
 
-Por que isso importa na pratica: se as duas forem confundidas, a trilha de
-auditoria passa a registrar o n8n como autor de lancamentos que uma pessoa fez.
-Quem lancou uma despesa pelo WhatsApp foi a pessoa; o n8n foi o transporte.
-Perder essa distincao esvazia a auditoria exatamente nos fluxos de maior
-consequencia.
+Combinacoes: pessoa no React (so ator); pessoa via WhatsApp/Telegram (**ator =
+a pessoa**, servico como contexto); tarefa agendada (servico, **sem** ator - e
+correto registrar a ausencia); nenhum dos dois (nao existe).
 
-### Combinacoes possiveis
+**Nao foi criado usuario "N8N"** na tabela `users` (verificado no MySQL real: 1
+usuario, o administrador). `criado_por_id`, `documents`, financeiro e
+`audit_logs` nao foram alterados. O servico **nao e uma pessoa** e nunca
+aparece como autor.
 
-| Service principal | Business actor | Quando | O que a auditoria registra |
-| --- | --- | --- | --- |
-| ausente | presente | pessoa usando o React | a pessoa |
-| presente | presente | pessoa usando WhatsApp/Telegram via n8n | **a pessoa**, com o servico como contexto |
-| presente | ausente | sincronizacao agendada, alerta, error workflow | nenhum autor humano - e correto registrar a ausencia, nao inventar um |
-| ausente | ausente | - | nao existe |
+## 3. Credencial
 
-A terceira linha e a que mostra por que nao basta "um usuario para o n8n": nem
-toda acao do n8n tem pessoa por tras, e forcar uma seria registrar algo falso.
-
-### Consequencia para a implementacao
-
-A autenticacao e a representacao do autor sao **problemas separados** e devem ser
-resolvidos separadamente:
-
-- **Autenticar o servico** e o escopo deste contrato.
-- **Resolver e registrar o business actor** continua sendo responsabilidade do
-  NestJS, a partir de `external_identity_links`. O n8n **nunca** decide quem e o
-  usuario, e **nunca** envia um identificador de usuario no corpo da requisicao -
-  a regra permanente do projeto contra aceitar `usuarioId` do cliente vale
-  integralmente aqui, e com mais razao.
-
-### Nota sobre a representacao do autor
-
-Uma proposta anterior sugeria materializar o service principal como uma linha
-comum na tabela de usuarios. **Foi rejeitada**, e o motivo e o acima: resolveria
-o preenchimento das colunas de autoria ao custo de fazer o n8n parecer uma
-pessoa na auditoria.
-
-Como representar o autor nos registros quando houver service principal - e
-especialmente quando **nao** houver business actor - fica como **decisao aberta**
-(secao 9). O que este contrato fixa e que a resposta **nao** e "tratar o n8n
-como usuario humano".
-
-## 3. Mecanismo escolhido
-
-**Token de servico dedicado, em cabecalho proprio.**
-
-```
-POST /... HTTP/1.1
-X-Service-Token: <token de alta entropia>
-```
-
-### Por que cabecalho proprio e nao `Authorization: Bearer`
-
-Os dois esquemas ficam visivelmente distintos, em caminhos de codigo distintos.
-Com `Bearer` compartilhado, um erro de ordenacao de guards poderia fazer um token
-de servico percorrer o caminho do JWT, ou o contrario - a classe de bug mais
-caro possivel num mecanismo de autenticacao.
-
-### Alternativas consideradas
-
-| | Alternativa | Por que nao agora |
-| --- | --- | --- |
-| A | `Authorization: Bearer` estatico | Colide com o esquema JWT (acima) |
-| C | HMAC com timestamp e nonce | Protege contra replay, mas exige relogio sincronizado e armazenamento de nonce. Para uma chamada entre containers numa rede Docker privada, onde o token nao atravessa a internet, o ganho nao paga a complexidade. **E o caminho de upgrade** se o n8n sair do host |
-| D | Client credentials / OAuth2 | Infraestrutura de autorizacao inteira para **um** consumidor. Construir quando houver varios |
-| E | mTLS entre n8n e NestJS | Reintroduz gestao de certificados num caminho que ja esta em rede privada |
-
-A escolha e deliberadamente a mais simples que atende o requisito, com o caminho
-de evolucao identificado.
-
-## 4. Requisitos do token
-
-| Requisito | Decisao |
+| Propriedade | Implementacao |
 | --- | --- |
-| Entropia | >= 256 bits, de gerador criptografico |
-| Formato | opaco. Nao carrega claims, nao e JWT, nao e decodificavel |
-| Comparacao | **tempo constante**, sobre digests de tamanho fixo. Nunca `===` sobre as strings |
-| Armazenamento no servidor | variavel de ambiente, nunca no repositorio, nunca no banco em texto puro |
-| Armazenamento no n8n | credencial do cofre do n8n, nunca dentro do workflow |
-| Exposicao ao frontend | **jamais**. Nao e `VITE_*`, nao vai para o navegador |
-| Em log | nunca. A higienizacao de metadados de auditoria ja remove chaves que casam com `token`; o guard nao deve registrar o valor em nenhuma circunstancia |
-| Em mensagem de erro | nunca. A resposta nao diz se o cabecalho faltou, se o formato estava errado ou se o valor nao casou |
+| Formato | `vfs_` + base64url de 32 bytes aleatorios (256 bits, `crypto.randomBytes`) |
+| Cabecalho | `X-Service-Token` (proprio; `Authorization: Bearer` e recusado nas rotas de servico) |
+| No servidor | arquivo de **hashes SHA-256** (`credentials.json`); o token nunca e gravado |
+| Comparacao | `timingSafeEqual` sobre digests de tamanho fixo, percorrendo **todos** os registros |
+| No n8n | credencial do cofre (Header Auth), **cifrada** no PostgreSQL |
+| Em log / resposta | nunca (testado em unidade, e2e e nos logs dos containers) |
+| Mensagem de erro | uma so: `Credencial de servico invalida` (ausente, malformada, desconhecida, revogada, expirada, arquivo indisponivel) |
 
-### Rotacao
+O motivo real da recusa vai **so para o log do servidor** (`motivo=revoked`
+etc., com metodo, caminho sem query e o endereco do **socket** - nao
+`X-Forwarded-For`).
 
-O guard aceita **mais de um** token valido durante uma janela de rotacao. O
-procedimento: adicionar o novo, atualizar a credencial no n8n, confirmar que o
-trafego usa o novo, remover o antigo. Sem janela de indisponibilidade.
+## 4. Guards e autorizacao
 
-### Revogacao
+Ordem global (`AuthModule`): `ServiceAuthGuard` -> `JwtAuthGuard` ->
+`RolesGuard` -> `PermissionsGuard`.
 
-Precisa ser **imediata e sem redeploy**. O mecanismo exato depende da decisao
-aberta da secao 9; o requisito e que exista uma forma de cortar o acesso do
-servico em segundos, operando no servidor, sem publicar codigo novo.
+- Rota sem `@ServiceRoute`: `ServiceAuthGuard` devolve `true` sem olhar nada;
+  o fluxo humano e **identico** ao anterior (o spec antigo do `JwtAuthGuard`
+  passa sem nenhuma alteracao).
+- Rota com `@ServiceRoute(escopo...)`: autentica o token, confere os escopos
+  (falta -> 403) e anexa `request.servicePrincipal`. O `JwtAuthGuard`, nesta
+  rota, **so confirma** que a identidade foi anexada; sem ela, 401
+  (**fail-closed**: se o guard de servico sumisse da lista, a rota negaria, nao
+  abriria).
+- Um JWT de pessoa **nao** autentica rota de servico, e o token de servico
+  **nao** autentica rota de pessoa (a rota nem o considera: devolve
+  `Token de acesso ausente`).
+- Nada de `@Public()`; um token valido **nao** contorna os guards de pessoa.
 
-## 5. Comportamento do guard
+Escopos vivem no codigo (`service-principals.ts`). O principal `n8n` tem
+**somente** `service:identity`. Nao tem `users:*`, `finance:*`, `documents:*`
+nem perfil administrativo, e nao reaproveita nenhum usuario humano.
 
+Um teste e2e de **classificacao** falha se surgir rota publica nova (hoje:
+`GET /health`, `GET /health/readiness`, `POST /auth/login`, `POST
+/auth/register`) ou rota de servico nova (hoje: so `GET /service/identity`).
+
+## 5. Operacao: criar, rotacionar, revogar
+
+A administracao e um CLI que ja vai na imagem do backend. Nao exige banco,
+painel nem reinicio. O diretorio `infra/service-auth/` e do operador (fora do
+Git) e o backend o monta **somente leitura**.
+
+```bash
+mkdir -p infra/service-auth
+CLI="docker run --rm -v $PWD/infra/service-auth:/data --entrypoint node \
+     <imagem-do-backend> dist/modules/service-auth/service-credential.cli.js"
+
+# criar (o token sai UMA vez no stdout; avisos no stderr)
+$CLI create --file /data/credentials.json --id n8n-2026-10 --principal n8n \
+     [--expires-in-days 90]  > token.txt
+$CLI list   --file /data/credentials.json
+$CLI revoke --file /data/credentials.json --id n8n-2026-10
 ```
-requisicao chega
-  |
-  +-- tem X-Service-Token?
-  |     NAO -> segue o fluxo humano existente (guard de JWT), INTACTO
-  |     SIM -> continua abaixo
-  |
-  +-- comparacao em tempo constante contra o(s) token(s) valido(s)
-  |     nao casa -> 401 com mensagem GENERICA
-  |
-  +-- o service principal esta ativo?
-  |     nao -> 401 com a MESMA mensagem generica
-  |
-  +-- anexa a identidade de servico a requisicao
-  |
-  +-- autorizacao: so os endpoints explicitamente permitidos
-        nao permitido -> 403
-```
 
-Pontos que nao sao negociaveis:
+**Rotacao (sem indisponibilidade):** (1) `create` uma segunda credencial - as
+duas ficam ativas; (2) colocar o novo token na credencial do n8n; (3) confirmar
+que o trafego usa a nova (`credentialId` na resposta / log); (4) `revoke` a
+antiga; (5) apagar `token.txt`.
 
-1. **O fluxo humano nao muda.** Requisicao sem o cabecalho percorre exatamente o
-   caminho de hoje. O guard de servico e um ramo novo, nao uma alteracao do
-   existente.
-2. **Mensagem de erro unica.** "Nao existe", "inativo" e "token errado" devolvem
-   a mesma resposta - o mesmo criterio que o guard de JWT ja aplica para nao
-   revelar o estado de uma conta.
-3. **Nenhuma rota publica nova.** A API continua negando por padrao.
+**Revogacao - latencia real.** O backend relê o arquivo no maximo a cada
+**1 s** (TTL do store). Nao ha reinicio de container. **Medido** no bind mount
+do Docker Desktop: token recusado **0,54 s** depois do fim do CLI (uma
+execucao; o limite de projeto e ~1 s + propagacao do mount). Isso e "em
+segundos", nao instantaneo. Em Linux nativo a propagacao do bind mount e
+imediata, mas **nao foi medida**.
 
-## 6. Endpoints autorizados
+**Fail-closed:** arquivo ausente, ilegivel, JSON invalido ou com campo
+desconhecido (`statuss`) **nega todo acesso de servico** (e loga o motivo); ao
+consertar o arquivo, volta sozinho. Sem `SERVICE_CREDENTIALS_FILE` o recurso
+fica desligado (tudo 401) e a aplicacao sobe normalmente.
 
-**Lista branca, nunca a API inteira.** O service principal recebe apenas o que
-os workflows realmente usam, e nada que lhe de acesso total.
+**Linux (VPS):** o CLI grava o arquivo com modo 0644 (so hashes). O diretorio
+precisa ser legivel pelo uid do container (1000). Nao foi validado em Linux.
 
-O conjunto exato sera definido com os primeiros workflows. O criterio: um
-endpoint entra na lista quando existe um workflow que precisa dele, nao antes.
+**Backup:** o arquivo e pequeno e recriavel (basta emitir nova credencial e
+atualizar o n8n). Nao ha segredo utilizavel nele.
 
-Permissoes de administracao - criar usuario, mudar perfil, alterar configuracao -
-**nao** entram na lista. Um token vazado nao pode escalar para administracao do
-sistema.
+## 6. Contrato futuro: propagar o ATOR DE NEGOCIO (NAO implementado)
 
-## 7. Auditoria
+Quando um workflow executar acao em nome de uma pessoa:
 
-Toda acao originada em chamada de servico precisa ser rastreavel, e o registro
-tem de distinguir as duas identidades da secao 2:
+1. O n8n envia o **identificador do canal** (ex.: id do chat/numero), **nunca**
+   um id de usuario VastaFlow, e **nunca** como autoridade.
+2. O NestJS resolve a pessoa por `external_identity_links` (ja existe) e
+   aplica **as permissoes dessa pessoa**, nao as do servico.
+3. Sem vinculo ativo -> recusa; o servico nao "vira" ninguem.
+4. A auditoria registra a acao do dominio, com a pessoa como autor e o servico
+   como contexto; sem pessoa, registra a **ausencia**.
+5. `usuarioId`/`criado_por_id` vindos do corpo da requisicao continuam
+   proibidos. Um id enviado pelo n8n **nao** e confiado.
+6. Exigira escopos novos e especificos (nunca o escopo `service:identity`
+   ampliado), e decisao sobre a coluna de ator na auditoria (migration).
 
-- **qual servico** chamou;
-- **qual pessoa** originou, quando houver;
-- a ausencia de pessoa, quando for o caso - explicitamente, nao por omissao.
+Nada disso foi construido nesta fase.
 
-Dois requisitos de forma:
+## 7. Auditoria e logs
 
-- O vocabulario de acoes da auditoria **nao** e ampliado pelo mecanismo de
-  autenticacao. Um comando de negocio executado via n8n registra a acao do
-  dominio, nao uma acao "n8n".
-- O valor do token **nunca** aparece em nenhum campo.
-
-Como exatamente representar isso no registro e parte da decisao aberta da
-secao 9.
+- A rota tecnica **nao grava** em `audit_logs` (verificado: nenhum registro
+  cita servico/n8n/token). O vocabulario de acoes nao foi ampliado.
+- O log do servidor registra recusas e mudancas de estado do arquivo (`ativas=
+  [n8n/<id>] revogadas=N`), **sem hashes e sem tokens**.
 
 ## 8. Protecoes de infraestrutura
 
-| Protecao | Onde | Por que |
+| Protecao | Onde | Estado |
 | --- | --- | --- |
-| Rate limiting | Nginx | Mesmo criterio da Fase A: limite de taxa e responsabilidade do proxy reverso, nao da aplicacao |
-| TLS | Nginx | O token nunca viaja em texto puro |
-| Rede privada | Docker | Na topologia prevista, n8n e NestJS conversam na rede interna; o token nao atravessa a internet |
-| Replay | aceito como risco residual | Mitigado por TLS + rede privada. HMAC com nonce e o upgrade se o cenario mudar |
-| Idempotencia | **MySQL**, nao n8n | Operacoes financeiras e fiscais exigem chave unica no banco. O n8n nao tem transacao nem constraint, e enfileira execucoes - a garantia precisa estar onde ha constraint |
+| Rota nao publica | Nginx `/api/service*` -> 404 | validado (10 variantes) |
+| Rede | n8n e backend em `automation`; o MySQL fora | validado |
+| TLS entre n8n e backend | **nao existe** (HTTP na rede Docker interna) | risco aceito localmente |
+| Replay | aceito como risco residual; HMAC+nonce e o upgrade | nao implementado |
+| Rate limit da rota | nao ha (o n8n nao passa pelo Nginx) | pendente |
 
-## 9. Decisoes abertas
+## 9. Decisoes (antes "abertas")
 
-Estas precisam ser resolvidas **antes** da implementacao, e nao serao decididas
-sozinhas:
+1. **Representacao do autor:** nao decidida para escrita de negocio (secao 6);
+   a rota tecnica nao grava autoria.
+2. **Lista de endpoints autorizados:** escopos no **codigo**, por principal.
+3. **Revogacao:** arquivo de hashes relido a cada 1 s (secao 5).
+4. **Mais de um principal:** o desenho comporta (enum + mapa), hoje so `n8n`.
 
-1. **Como representar o autor nos registros quando houver service principal.**
-   Materializar o service principal como usuario esta descartado. As opcoes em
-   aberto envolvem distinguir tipo de ator no registro de auditoria e tratar as
-   colunas de autoria dos registros de negocio - inclusive o caso sem pessoa
-   alguma por tras. Algumas opcoes exigem migration, outras nao; a escolha e de
-   modelagem, nao de conveniencia.
-2. **Onde reside a lista de endpoints autorizados** - configuracao, codigo, ou
-   permissoes dedicadas.
-3. **Qual o mecanismo de revogacao imediata**, coerente com a decisao 1.
-4. **Se havera mais de um service principal** no horizonte previsivel. Com um
-   so, este contrato basta; com varios, o caminho e client credentials.
+## 10. Fora de escopo
 
-## 10. Fora de escopo deste contrato
+Autenticacao humana (inalterada); `external_identity_links` (inalterado);
+`financial_entries`, `documents`, `audit_logs` (inalterados); workflows de
+negocio, WhatsApp, Telegram via n8n, Plantae, NFS-e (nao implementados).
 
-- Autenticacao do usuario humano: inalterada.
-- Resolucao de identidade externa (`external_identity_links`): existe e nao
-  muda.
-- Qualquer alteracao em `financial_entries`, `documents` ou na tabela de
-  auditoria: depende da decisao 1 e nao esta autorizada.
-- Workflows do n8n.
+## 11. Workflows
 
-## 11. Pre-requisitos para implementar
-
-1. As quatro decisoes abertas da secao 9, resolvidas.
-2. O n8n em execucao, com cofre de credenciais disponivel.
-3. TLS valido no Nginx.
-4. Pelo menos um workflow concreto, para que a lista branca de endpoints seja
-   derivada de necessidade real e nao de suposicao.
+Os unicos workflows criados foram **descartaveis, de validacao**, em ambiente
+de teste (um Webhook local que chama `/service/identity`). Nenhum workflow de
+negocio existe e nenhum canal foi configurado.

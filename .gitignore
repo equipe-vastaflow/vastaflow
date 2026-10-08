@@ -42,6 +42,11 @@ secrets/
 # `storage/` alcancou (ver abaixo).
 /infra/tls/
 
+# Arquivo de credenciais de SERVICO (hashes SHA-256 das credenciais do n8n).
+# Nao e segredo utilizavel - o token nunca e gravado -, mas e estado de
+# operacao de cada ambiente, nao codigo. Ancorado na raiz pelo mesmo motivo.
+/infra/service-auth/
+
 # Logs
 logs/
 *.log
