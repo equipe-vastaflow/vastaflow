@@ -1,9 +1,12 @@
 # ===========================================================================
 # VastaFlow - nucleo web containerizado (production-like)
 # ---------------------------------------------------------------------------
-# ATENCAO: NAO VALIDADO. Este arquivo nunca foi executado. A maquina de
-# desenvolvimento nao tem runtime de container. Ver docs/containerizacao.md
-# para o que foi provado e o que nao foi.
+# VALIDADO em Docker Desktop (Engine 29.8.2 / Compose v5.5.1) em 2026-10-08:
+# ordem de inicializacao, TLS com verificacao de identidade, isolamento de
+# redes, persistencia dos dois volumes, healthchecks e limites. NAO validado: a
+# VPS Linux, o HTTPS publico e o IP externo real do cliente. Ver
+# docs/containerizacao.md para o que foi provado, o que foi corrigido ao
+# executar e o que continua pendente.
 # ---------------------------------------------------------------------------
 #
 # ESCOPO: so o nucleo. n8n e PostgreSQL entram na Fase 3.
@@ -72,18 +75,38 @@ services:
       MYSQL_DATABASE: ${DATABASE_NAME:?defina DATABASE_NAME no .env}
       MYSQL_USER: ${DATABASE_USER:?defina DATABASE_USER no .env}
       MYSQL_PASSWORD: ${DATABASE_PASSWORD:?defina DATABASE_PASSWORD no .env}
-      # Lido pelo mysqladmin do healthcheck, para a senha nao aparecer na
-      # linha de comando (e, logo, em `ps` dentro do container).
-      MYSQL_PWD: ${DATABASE_ROOT_PASSWORD}
+      # NAO definir MYSQL_PWD aqui. A primeira versao definia, para o healthcheck
+      # nao expor a senha na linha de comando, e isso QUEBROU A INICIALIZACAO: o
+      # cliente `mysql` do entrypoint le MYSQL_PWD antes de a senha de root
+      # existir, recebe `Access denied`, o entrypoint aborta, e o container
+      # reinicia. Na segunda subida o diretorio de dados ja existe, a
+      # configuracao e pulada - e o container ficava `healthy` com root SEM
+      # senha e SEM o banco e o usuario da aplicacao. Descoberto so ao executar.
     volumes:
       - mysql-data:/var/lib/mysql
       # Material TLS, somente leitura. A chave privada do servidor entra aqui e
       # em NENHUM outro lugar - o backend nunca a recebe.
       - ./infra/tls/mysql:/etc/mysql/tls:ro
     healthcheck:
-      # Pelo socket Unix, nao por TCP: conexao por socket e considerada segura
-      # pelo MySQL, entao `require_secure_transport=ON` nao a recusa.
-      test: ['CMD', 'mysqladmin', 'ping', '--protocol=socket', '-uroot']
+      # Autentica como o USUARIO DA APLICACAO, por TCP, e executa uma query.
+      #
+      # Nao pode ser `mysqladmin ping`: ele sai com codigo 0 mesmo quando a
+      # autenticacao falha ("mysqld is alive" - o servidor responde, ainda que
+      # recuse a senha). Verificado: `ping` com senha errada imprimiu
+      # `Access denied` e saiu com 0. Um healthcheck assim aprovaria um banco
+      # sem usuario, sem senha ou sem o schema.
+      #
+      # TCP (-h127.0.0.1), nao socket: o entrypoint da imagem sobe um servidor
+      # TEMPORARIO para a inicializacao, com --skip-networking, que so atende por
+      # socket. Um check por socket ficaria `healthy` durante essa fase, antes do
+      # servidor real - com TLS - existir, e o `migrate` tentaria conectar cedo.
+      #
+      # A senha vai por MYSQL_PWD SO neste comando (atribuicao inline do shell),
+      # nao no ambiente do container, e `$$` e o escape do Compose para o `$`
+      # chegar ao shell. Assim nao aparece em `ps` nem na linha de comando.
+      test:
+        - CMD-SHELL
+        - MYSQL_PWD="$$MYSQL_PASSWORD" mysql -h127.0.0.1 -u"$$MYSQL_USER" "$$MYSQL_DATABASE" -e 'SELECT 1' >/dev/null
       interval: 10s
       timeout: 5s
       retries: 10

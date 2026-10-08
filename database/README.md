@@ -15,7 +15,7 @@ A decisao de ORM e as limitacoes de portabilidade entre os dois bancos estao em
 | Migration inicial | Gerada **contra MySQL 8.4 real** | Gerada pelo TypeORM **sem banco** (ver abaixo) |
 | Migration executada em banco real | **Sim**: run, revert, run | **Nao** |
 | Aplicacao rodando contra o banco | **Sim**: seed, login, RBAC, auditoria | **Nao** |
-| `docker-compose.yml` | **Nunca executado** (sem Docker na maquina) | Nao ha container Oracle |
+| `docker-compose.yml` (desenvolvimento) | **Nunca executado**. O `docker-compose.production.yml` foi validado em 2026-10-08 (ver `docs/containerizacao.md`) | Nao ha container Oracle |
 
 ### Como o MySQL foi validado
 
@@ -133,7 +133,9 @@ credenciais ou senhas. Scripts de seed devem usar apenas dados ficticios.
 
 ## Docker
 
-O `docker-compose.yml` na raiz sobe **apenas MySQL** e nunca foi executado.
+O `docker-compose.yml` na raiz sobe **apenas MySQL** (desenvolvimento) e nunca foi
+executado. O `docker-compose.production.yml` (nucleo web com MySQL em TLS) foi
+executado e validado em Docker Desktop - ver `docs/containerizacao.md`.
 
 **Oracle nao foi containerizado.** As imagens oficiais exigem autenticacao no
 `container-registry.oracle.com` e aceite de licenca; imagens comunitarias

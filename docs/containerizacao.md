@@ -1,132 +1,198 @@
 # Containerizacao - estado da validacao
 
-> **Leia isto antes de confiar em qualquer arquivo de infraestrutura deste
-> repositorio.**
+> Ultima validacao: **2026-10-08**, em Docker Desktop (Engine **29.8.2**,
+> Compose **v5.5.1**) sobre Windows. A VM do Docker tinha 4 CPUs e ~3,8 GB.
 >
-> Data: 2026-10-07. Fase 2, parcial.
+> Este documento registra **somente o que foi executado e observado**. O que
+> nao foi, esta na secao "Nao validado".
 
-A maquina onde o projeto e desenvolvido **nao tem runtime de container**.
-Verificado: `docker` e `docker compose` ausentes no PATH do Bash e do
-PowerShell; nenhum diretorio de instalacao do Docker Desktop; nenhum servico
-Windows registrado; `podman` e `nerdctl` ausentes; WSL presente mas sem
-distribuicao instalada.
+## Resumo
 
-Consequencia direta: **os arquivos de Docker e Nginx deste repositorio nunca
-foram construidos nem executados.** Eles foram escritos a partir de evidencia
-do codigo e da documentacao oficial, mas nao tem prova de execucao.
+O nucleo web (Nginx + SPA, backend NestJS, MySQL com TLS, migration one-shot)
+sobe, fica saudavel e funciona de ponta a ponta. A validacao encontrou **sete
+defeitos** que nenhuma leitura de codigo mostraria; todos estao corrigidos e a
+lista esta abaixo, porque o que eles tem em comum e o aviso mais util deste
+documento: **arquivo de infraestrutura que nunca rodou nao esta pronto, mesmo
+quando "parece certo".**
 
-## O que ESTA validado
+## O que foi provado
 
-Tudo nesta secao foi exercitado de verdade, contra um **MySQL 8.4.9 real**
-rodando localmente (sem Docker, usando os binarios oficiais que o projeto ja
-utilizava para validar migrations).
+| Propriedade | Evidencia |
+| ----------- | --------- |
+| Backend constroi; modulos nativos funcionam na imagem | `bcrypt` gerou e comparou hash real; `oracledb` carregou em thin mode; Node 24.15.0, Debian glibc 2.36, processo como `node` (uid 1000) |
+| Imagem sem segredos nem devDependencies do projeto | busca por `*.pem`/`*.key`/`.env*` no filesystem: vazia; `docker history`/`Config.Env` sem ARG/ENV sensivel; `@nestjs/cli`, `jest`, `eslint`, `ts-jest`, `prettier` ausentes |
+| `VITE_API_URL` ausente derruba o build **cedo** | `docker build` sem `--build-arg`: falha no passo 2/8, exit 1, **antes do `npm ci`**, nenhuma imagem criada |
+| Com `VITE_API_URL=/api` o build passa | exit 0; o `RUN nginx -t` do proprio build aceita a configuracao |
+| Ordem `mysql healthy -> migrate -> exit 0 -> backend -> nginx` | eventos do daemon com timestamp: mysql healthy 98,4 s; migrate start 100,0 s e `die exit=0` 104,0 s; backend start 105,4 s; nginx start so depois do backend healthy |
+| **Migrations aplicadas com TLS verificado dentro do Docker** | as 8 migrations (`InitialSchema` ... `Documents`) com `DATABASE_HOST=mysql`, `DATABASE_SSL_CA_FILE` montado, contra servidor com `require_secure_transport=ON` |
+| **TLS visto pelo lado do servidor** | `sys.session_ssl_status` mostra o usuario `vastaflow` vindo do IP do backend em `TLSv1.3` / `TLS_AES_256_GCM_SHA384` |
+| **Identidade do servidor e verificada** | certificado assinado pela **mesma CA confiavel** com SAN `wrong-mysql-name`, backend conectando em `mysql`: `ERR_TLS_CERT_ALTNAME_INVALID` / `HANDSHAKE_SSL_ERROR`, com **zero** falhas de cadeia, tanto no `migrate` quanto no backend |
+| Certificado correto restaurado, tudo volta | fingerprint identico ao do backup; backend healthy; MySQL volta a ver TLSv1.3 |
+| Falha de migration impede o backend | `migrate` com senha errada (falha real, antes de tocar o banco): `ER_ACCESS_DENIED_ERROR`, exit 1; `StartedAt` do backend identico ao anterior e status `exited`; `COUNT(*)` de `migrations` continua 8 |
+| `PendingMigrationsCheck` segue como segunda barreira | backend contra banco vazio, sem `migrate`: `Banco de dados desatualizado: 8 migration(s) pendente(s)`, exit 1 |
+| Migration e idempotente | segunda execucao: `No migrations are pending`, exit 0 |
+| MySQL nao publicado; backend nao publicado | `docker inspect`: portas publicadas de mysql e backend = nenhuma; `:3000` e `:3306` nao escutam no host; `curl :3000` -> `000`; `connect :3306` -> recusada |
+| Isolamento de rede | MySQL so em `app-data` (`internal=true`); Nginx so em `edge`; backend nas duas |
+| Persistencia do MySQL | `--force-recreate` do container (container e id mudaram, volume o mesmo, **sem** `Initializing database` no log): os 2 lancamentos de teste continuam na API; o backend reconectou sozinho |
+| Persistencia de documentos | PDF de 204.834 bytes: sha256 `f88ca51e...34c6` antes e depois de recriar o backend, **identico** |
+| Nginx reaproveita o backend recriado em outro IP | backend movido de `172.19.0.4` para `172.19.0.5` com o Nginx **sem reiniciar** (mesmo `StartedAt`): 3 de 3 requisicoes `200` |
+| Frontend, SPA fallback, cache | `/` e rotas do cliente (`/finance/relatorios`...) devolvem o `index.html`; assets com `immutable`; `index.html` com `no-cache` |
+| Cabecalhos | `nosniff`, `Referrer-Policy`, `X-Frame-Options`, `Permissions-Policy`, CSP em `/`, nos assets e nas respostas de erro; **sem HSTS** (decisao: HTTP local); `Server: nginx` sem versao |
+| **CSP contra o frontend real, em Chrome 154** | login pela UI + 10 telas por navegacao direta + export de XLSX: **0 violacoes**, 0 erros de console, 0 respostas de API >= 400. Com **controle positivo** (um estilo inline injetado e bloqueado pelo header de producao), o que prova que a politica estava ativa |
+| Autenticacao e financeiro | login 200; `/auth/me` ADMIN com 14 permissoes; sem token 401; criar lancamentos 201; summary fecha (1500,50 - 300,25 = 1200,25) |
+| Export XLSX (pelo Nginx e pelo botao no Chrome) | `200`, MIME de XLSX, `attachment`, `Transfer-Encoding: chunked`, ZIP valido, 3 linhas, **0** elementos `<f>` |
+| Upload/download | 201; nome acentuado preservado; nenhum caminho fisico na resposta; `.exe` -> 400 |
+| Protecoes de producao vistas de fora | `/api/docs` 404; `/api/auth/register` 404; `/api/commands/execute` 401 sem token e 404 para ADMIN; `/api/health/readiness` 403 (Nginx); `/api/health` 200 |
+| Rate limit do login | 10 tentativas rapidas: 4 chegam ao backend (401), 6 recebem 429 do Nginx |
+| Rate limit da API | 600 requisicoes a ~1262 req/s: 69 passaram, 531 receberam 429; recuperacao imediata |
+| Camadas de tamanho concordam | 9 MB -> 201; 10,5 MB -> 413 do **backend** (JSON); 13 MB -> 413 do **Nginx** (HTML); JSON de 200 kB -> 413 do backend; login com 20 kB -> 413 |
+| IP do cliente na auditoria | `X-Forwarded-For: 6.6.6.6, 8.8.8.8` e `X-Real-IP: 7.7.7.7` forjados: a auditoria gravou `172.19.0.1`, **igual** ao `remote_addr` do access log do Nginx; nenhum IP forjado prevaleceu |
+| Limites de recurso, logs e restart | aplicados e lidos de `HostConfig`: mysql 1,0 CPU/1 GB, backend 1,0/768 MB, nginx 0,5/128 MB; `json-file` 10m x 3 nos 4 containers; `unless-stopped` (e `no` no migrate). Uso medido: mysql 447 MiB, backend 105 MiB, nginx 5,8 MiB |
+| Separacao do material TLS | backend enxerga **so** `ca.pem`, mount somente leitura; nenhuma chave privada em qualquer lugar do filesystem do backend; chave da CA fora dos dois containers |
 
-| Propriedade | Como foi provado |
-| ----------- | ---------------- |
-| Handshake TLS real entre a aplicacao e o MySQL | `TLSv1.3` / `TLS_AES_256_GCM_SHA384`, com `require_secure_transport=ON` no servidor e query real executada |
-| A cadeia do certificado e validada | CA propria; o servidor so e aceito quando assinado por ela |
-| **A identidade do servidor e validada** | Certificado assinado pela **mesma CA confiavel**, mas com SAN `wrong-mysql-name`, conectando em `localhost`: **conexao RECUSADA** com `HANDSHAKE_SSL_ERROR` - `Hostname/IP does not match certificate's altnames` |
-| O problema corrigido na Fase 1 era real | O **mesmo** servidor de SAN errado foi **ACEITO** quando `verifyIdentity` foi removido do objeto `ssl`. Com ele, recusado. Lado a lado, no mesmo servidor |
-| Restauracao apos o teste negativo | Certificado correto recolocado; conexao volta a funcionar |
-| CA ausente e recusada | Recusa na montagem da configuracao, pelo codigo de producao |
-| `DATABASE_SSL=false` em producao e recusado | Pela validacao de ambiente (boot) **e** pelo servidor (`ER_SECURE_TRANSPORT_REQUIRED`) |
-| Host IP em producao com TLS e recusado | Pela validacao de ambiente, porque com IP o driver nao envia `servername` e a conferencia de hostname seria saltada em silencio |
-| `DATABASE_SSL_CA_FILE` funciona | Handshake completo com a CA vinda de arquivo, nao de conteudo inline |
-| Arquivo de CA inexistente e recusado | Mensagem nomeia o caminho, nunca o conteudo |
-| As duas formas de CA ao mesmo tempo sao recusadas | Sem precedencia, por decisao - configuracao ambigua nao sobe |
-| `scripts/gerar-tls-dev.sh` | Executado; gera CA e certificado com SAN correto, cadeia confere, e o material gerado foi usado no handshake acima |
-| Separacao do material TLS | O backend recebe **somente** `ca.pem`. Chave da CA e chave do servidor ficam fora dele |
-| O codigo exercitado e o de producao | Os testes importam `buildDataSourceOptions` do `dist/` compilado - a mesma funcao que o `DatabaseModule` e o CLI de migrations usam. Nenhuma opcao `ssl` foi montada a mao |
+## Defeitos que so a execucao revelou (todos corrigidos)
 
-Um achado de passagem, que confirma em pratica uma decisao da Fase 1: o
-certificado que o MySQL **auto-gera** no datadir tem CN
-`MySQL_Server_8.4.9_Auto_Generated_Server_Certificate` - nao o hostname. Ele
-jamais passaria na conferencia de identidade, o que e exatamente a razao de a
-estrategia de "reusar a CA auto-gerada do container" ter sido rejeitada.
+1. **`limit_req_zone` fora de contexto: o Nginx recusava a configuracao
+   inteira.** O arquivo de cabecalhos misturava a diretiva de zona (so existe em
+   `http`) e era incluido dentro de `server`. Pego por `nginx -t`. Correcao:
+   zonas em `conf.d/00-rate-limit.conf`, cabecalhos em `snippets/`, e `RUN
+   nginx -t` no Dockerfile.
+2. **`MYSQL_PWD` no ambiente quebrava a inicializacao, e o healthcheck aprovava
+   o resultado.** O cliente `mysql` do entrypoint le a variavel antes de a senha
+   de root existir, recebe `Access denied`, o entrypoint aborta e o container
+   reinicia; na segunda subida o diretorio de dados ja existe e a configuracao e
+   pulada. Resultado: container `healthy` com **root sem senha e sem o banco e o
+   usuario da aplicacao**. `mysqladmin ping` sai com **exit 0 mesmo com
+   `Access denied`** (verificado). Correcao: removido `MYSQL_PWD`; healthcheck
+   agora autentica **como o usuario da aplicacao, por TCP, e executa uma
+   query** (TCP tambem exclui o servidor temporario do entrypoint, que sobe com
+   `--skip-networking`). Verificado: senha errada -> exit 1.
+3. **`DATABASE_SSL_CA_FILE` nao era repassada pelo `DatabaseModule`**: o backend
+   entrava em laco de reinicio enquanto o `migrate` (que recebe o `env`
+   inteiro) funcionava. Os testes unitarios nao pegavam (chamam
+   `buildDataSourceOptions` direto) e os e2e trocam esse modulo por SQLite. O
+   compilador tambem nao, porque as chaves sao opcionais no tipo. Correcao:
+   tipo `Exhaustive<>` que torna a omissao de qualquer chave um erro de
+   compilacao (`TS2741`), testado removendo uma chave opcional e uma
+   obrigatoria.
+4. **Nginx ficava com o IP antigo do backend: 502 em toda requisicao apos um
+   recreate.** Reproduzido movendo o backend de `.4` para `.5`. Recriar o
+   backend e exatamente o que um deploy faz. Correcao: `resolver 127.0.0.11` e
+   upstream em variavel, com `rewrite` explicito dos prefixos.
+5. **`Cache-Control` duplicado nos assets** (`expires` + `add_header`).
+   Corrigido para um unico cabecalho.
+6. **`'unsafe-inline'` em `style-src` nao era necessario.** O arquivo afirmava
+   que sim, por suposicao: o React no cliente aplica estilo pelo CSSOM, que a CSP
+   nao bloqueia. Medido em Chrome real com controle positivo; removido.
+7. **Chave do servidor `0600` do seu usuario nao e legivel pelo uid 999 do
+   MySQL numa VPS Linux** (o Windows esconde isso: o bind mount mostra tudo
+   `0777`). Demonstrado com permissoes reais num volume nomeado: `root:root 0600`
+   -> `Permission denied` para o uid 999; `chown 999:999` + `0600` -> o MySQL le
+   e o uid 1000 (backend) nao. O script agora imprime o `chown` necessario.
 
-## O que NAO esta validado
+## Nao validado
 
-Nada aqui tem prova de execucao. Nao confie sem construir e rodar.
+- **VPS Linux nativa.** Permissoes reais de bind mount (defeito 7), kernel,
+  rede. Todos os testes foram em Docker Desktop.
+- **HTTPS publico.** Sem dominio, DNS nem certificado. `HSTS` fica ausente de
+  proposito; entra junto com o certificado real. O webhook da Meta rejeita
+  certificado autoassinado.
+- **IP externo real do cliente.** No Docker Desktop a conexao do host passa por
+  NAT e chega como o gateway da bridge (`172.19.0.1`). O teste prova a
+  **integridade da cadeia** (o forjado nao prevalece e a auditoria bate com o
+  Nginx), nao o IP de um cliente remoto.
+- **Streaming do proxy medido.** `proxy_buffering off` esta aplicado e o export
+  chega com `Transfer-Encoding: chunked`, mas com payloads de ~6 KB nao ha como
+  distinguir buffering ligado de desligado pelo tempo ate o primeiro byte.
+- **CSP fora do Chrome e fora das 10 rotas.** Firefox e Safari nao foram
+  testados; dialogos, estados de erro e o upload pela interface nao foram
+  exercitados no navegador.
+- **Servidor MySQL com a chave `0600` de dono 999** (o fix do defeito 7 foi
+  demonstrado com `cat`, nao subindo o MySQL com ela).
+- Backup externo e restauracao; n8n; WhatsApp; Plantae; NFS-e.
 
-| Arquivo | Estado |
-| ------- | ------ |
-| `backend/Dockerfile` | **NAO CONSTRUIDO** |
-| `frontend/Dockerfile` | **NAO CONSTRUIDO** |
-| `frontend/nginx/vastaflow.conf` | **NAO EXECUTADO** |
-| `frontend/nginx/seguranca.conf` | **NAO EXECUTADO** |
-| `docker-compose.production.yml` | **NAO EXECUTADO**. Apenas a sintaxe YAML e a estrutura foram conferidas |
+## Observacoes que nao bloqueiam
 
-E, por consequencia, nao estao provados:
+- A imagem do backend tem **585 MB** (base 325 MB + `node_modules` 211 MB).
+  `typescript` e `sql.js` estao nela por dependencias transitivas
+  (`typeorm -> ts-node -> typescript`), nao por devDependency do projeto.
+  Enxugar fica para depois.
+- `X-Content-Type-Options: nosniff` aparece duplicado no download de documento
+  (backend e Nginx), com valor identico. Inofensivo.
+- A mensagem do `PendingMigrationsCheck` manda rodar `npm run migration:run`,
+  que **nao existe na imagem de producao** (faz `nest build`, devDependency). No
+  container o comando e o do servico `migrate`. A mensagem nao foi alterada
+  porque o check deve permanecer intacto.
+- `Content-Disposition` envia o nome ASCII sem os caracteres acentuados
+  (`Declarao...`) e o nome correto em `filename*=UTF-8''...`. Comportamento
+  anterior a esta fase.
 
-- build das imagens, e em particular se `bcrypt` e `oracledb` carregam na imagem
-  `bookworm-slim` (a escolha por glibc tem base no conteudo dos pacotes
-  instalados, mas nao foi exercitada);
-- isolamento de rede e nao-publicacao das portas em execucao;
-- a ordenacao `mysql healthy -> migrate -> backend` pelo `depends_on`;
-- o comportamento quando a migration falha;
-- os healthchecks (em especial o do backend, que usa o `fetch` do proprio Node,
-  e o do MySQL por socket Unix);
-- persistencia dos volumes entre recriacoes de container;
-- qualquer comportamento do Nginx: fallback do SPA, cabecalhos, CSP contra o
-  frontend real, rate limit, `client_max_body_size`, `proxy_buffering off` nas
-  rotas de streaming;
-- o IP real do cliente chegando a auditoria atraves do proxy;
-- o TLS com o hostname `mysql` (o teste usou `localhost`, porque sem Docker
-  aquele nome nao resolve - a propriedade provada e a mesma, o nome e que muda);
-- qualquer smoke test passando pelo Nginx.
+## Reproduzir
 
-### HTTPS publico
-
-**PENDENTE PARA A FASE DE DEPLOY.** Nao ha dominio, DNS nem certificado
-publico, e nao foi usado Let's Encrypt. O TLS crucial desta etapa e o interno
-(aplicacao -> MySQL), e esse esta provado. `HSTS` esta deliberadamente ausente
-da configuracao do Nginx: em HTTP local ele e pior que inutil, porque o
-navegador passaria a recusar HTTP para o host e guardaria isso. Entra junto com
-o certificado real.
-
-## Como validar quando houver Docker
+Pre-requisitos: Docker Engine + Compose, `openssl`.
 
 ```bash
-# 1. material TLS local (CA + certificado com SAN = nome do servico)
-./scripts/gerar-tls-dev.sh mysql
+# 1. Material TLS local, com SAN = nome do servico no Compose
+./scripts/gerar-tls-dev.sh mysql        # grava em infra/tls/ (gitignored)
 
-# 2. ambiente - NUNCA com segredo de producao
-cp .env.example .env     # preencher DATABASE_*, JWT_SECRET, SEED_ADMIN_*
+# 2. Ambiente - SEGREDOS DE TESTE, fora do repositorio
+#    Preencher: DATABASE_ROOT_PASSWORD, DATABASE_NAME, DATABASE_USER,
+#    DATABASE_PASSWORD, JWT_SECRET, SEED_ADMIN_EMAIL/PASSWORD, VITE_API_URL=/api
 
-# 3. build
-docker compose -f docker-compose.production.yml build
+# 3. Projeto isolado, para nao colidir com nada existente
+DC="docker compose -p vastaflow-val --env-file /caminho/fora/do/repo/val.env \
+    -f docker-compose.production.yml"
 
-# 4. subir
-docker compose -f docker-compose.production.yml up -d
+$DC config -q                  # valida o Compose
+$DC up -d --build              # build + start, na ordem correta
+$DC ps
 
-# 5. conferir o que a Fase 2 exige
-docker compose -f docker-compose.production.yml ps          # portas publicadas
-docker network inspect vastaflow_app-data                   # mysql isolado
-docker compose -f docker-compose.production.yml logs migrate # exit 0
+# Nunca use `down -v` para "limpar": apaga os dados. `down` sem -v preserva.
+$DC down
 ```
 
-O `DATABASE_HOST` do compose e `mysql`, e o certificado precisa trazer esse nome
-no SAN - e por isso que o script recebe o hostname como argumento. Divergencia
-entre os dois faz a conexao ser recusada, e a mensagem diz exatamente isso.
+O Compose publica `${HTTP_PORT:-8080}:80` em **todas** as interfaces, o que e o
+desejado na VPS. Para validar localmente sem expor a porta na rede, prenda-a ao
+loopback com um segundo arquivo (`-f override.yml`) usando `ports: !override`.
 
-## Limites conhecidos do ambiente local vs KVM 4
+### Provas que valem repetir
 
-Os limites de recurso no `docker-compose.production.yml` sao para **validacao
-local**, nao para a VPS. Proposta para a Hostinger KVM 4 (4 vCPU, 16 GB),
-a aplicar na fase de deploy:
+```bash
+# Ordem real de inicializacao
+docker events --since "$(date +%s)" --filter type=container \
+  --filter label=com.docker.compose.project=vastaflow-val
 
-| Servico | Local (atual) | Proposta KVM 4 |
-| ------- | ------------- | -------------- |
-| mysql | 1,0 CPU / 1 GB · `innodb_buffer_pool_size=256M` | 2,0 CPU / 3 GB · buffer pool 1-2 GB |
+# TLS visto pelo MySQL
+mysql -uroot -e "SELECT t.PROCESSLIST_USER, s.ssl_version, s.ssl_cipher
+  FROM sys.session_ssl_status s JOIN performance_schema.threads t
+  ON t.THREAD_ID = s.thread_id WHERE t.PROCESSLIST_USER = 'vastaflow'"
+
+# Teste negativo de identidade: gerar um certificado de SAN errado assinado
+# pela MESMA CA, trocar em infra/tls/mysql, reiniciar o mysql e rodar
+#   $DC run --rm migrate
+# Esperado: ERR_TLS_CERT_ALTNAME_INVALID. DEPOIS restaurar o certificado correto.
+```
+
+## Na VPS (Linux)
+
+```bash
+sudo chown 999:999 infra/tls/mysql/server-key.pem
+sudo chmod 600     infra/tls/mysql/server-key.pem
+```
+
+Sem isso o MySQL nao le a chave e nao sobe. A chave da CA (`ca-private/`) **nao
+deve ficar na VPS**: gere o material em outra maquina e copie so
+`mysql/` e `backend/`.
+
+## Limites de recurso: validacao local x proposta KVM 4
+
+| Servico | Local (aplicado) | Proposta KVM 4 (4 vCPU, 16 GB) |
+| ------- | ---------------- | ------------------------------ |
+| mysql | 1,0 CPU / 1 GB · buffer pool 256M | 2,0 CPU / 3 GB · buffer pool 1-2 GB |
 | backend | 1,0 CPU / 768 MB | 1,0-1,5 CPU / 1 GB |
 | nginx | 0,5 CPU / 128 MB | 0,5 CPU / 256 MB |
 | migrate | 0,5 CPU / 512 MB | igual (one-shot) |
 
 O backend tem limite folgado por causa do upload: o `multer` bufferiza o arquivo
-inteiro na memoria antes de entregar ao storage. Com `DOCUMENT_MAX_FILE_SIZE` em
-10 MB o risco e pequeno; se esse valor subir, o limite do container e a rede de
-protecao.
-
-Rotacao de log: `json-file` com `max-size=10m` e `max-file=3` em todos os
-servicos, ou seja ~30 MB por servico. Sem isso o log cresce sem limite e enche o
-disco da VPS.
+inteiro na memoria antes de entregar ao storage. Rotacao de log: `json-file`,
+`max-size=10m`, `max-file=3`, ~30 MB por servico.

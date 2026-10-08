@@ -1,9 +1,10 @@
 # ===========================================================================
 # VastaFlow - backend (NestJS)
 # ---------------------------------------------------------------------------
-# ATENCAO: NAO VALIDADO. Esta imagem nunca foi construida. A maquina de
-# desenvolvimento nao tem runtime de container (ver docs/containerizacao.md).
-# Revisar e construir antes de confiar.
+# VALIDADO em Docker Desktop (Engine 29.8.2) em 2026-10-08: construida e
+# executada com o Compose. `bcrypt` (hash e compare reais) e `oracledb` (thin
+# mode) carregam nesta base; o processo roda como `node` (uid 1000). NAO
+# validado: a base Linux nativa da VPS (ver docs/containerizacao.md).
 # ---------------------------------------------------------------------------
 #
 # Por que bookworm-slim e NAO Alpine: `bcrypt` e `oracledb` so distribuem

@@ -227,9 +227,11 @@ As credenciais vem do `.env` da raiz (`DATABASE_ROOT_PASSWORD`, `DATABASE_NAME`,
 `DATABASE_USER`, `DATABASE_PASSWORD`). O container so aceita conexoes de
 `127.0.0.1`.
 
-> O `docker-compose.yml` **ainda nao foi executado**: a maquina onde o projeto
-> foi montado nao tem Docker. O MySQL em si foi validado (veja abaixo), mas por
-> outro meio.
+> Este `docker-compose.yml` (desenvolvimento, so o MySQL) **ainda nao foi
+> executado**. O MySQL em si foi validado (veja abaixo), por outro meio. Quem
+> JA foi executado e validado em Docker Desktop, em 2026-10-08, e o
+> `docker-compose.production.yml` do nucleo web (Nginx + backend + MySQL com TLS
+> + migration one-shot): ver [docs/containerizacao.md](docs/containerizacao.md).
 
 ### Migrations
 

@@ -104,18 +104,19 @@ function buildMysqlSsl(env: DatabaseEnvironment): MysqlSslOptions | undefined {
  *
  * Estado de validacao (nao afirmar mais do que isto):
  * - MySQL: migrations executadas e revertidas contra um MySQL 8.4 real, e a
- *   aplicacao subiu contra ele com login funcionando. O ambiente Docker
- *   (`docker-compose.yml`) em si ainda nao foi executado.
+ *   aplicacao subiu contra ele com login funcionando.
  * - Oracle: metadata e DDL verificados offline por testes automatizados;
  *   NUNCA executado contra uma instancia Oracle real.
- * - TLS do MySQL: a montagem da opcao `ssl` e coberta por testes de unidade, e
- *   o repasse dela ao driver foi conferido no proprio TypeORM instalado
- *   (`driver/mysql/MysqlDriver.js`, `createConnectionOptions`, que faz
- *   `ssl: options.ssl` sem filtrar chaves). NENHUM handshake TLS real foi
- *   estabelecido: nao existe, nesta etapa, servidor MySQL com certificado
- *   proprio para conectar. Em particular, que `verifyIdentity: true` de fato
- *   RECUSE um certificado cujo SAN nao casa com o host so sera comprovado na
- *   fase de containerizacao, contra um MySQL real.
+ * - TLS do MySQL: COMPROVADO com handshake real, nao so por teste de unidade.
+ *   Contra um MySQL 8.4.9 com `require_secure_transport=ON`, tanto fora de
+ *   container quanto dentro do Docker (host `mysql`, CA por arquivo montado):
+ *   TLSv1.3 estabelecido; certificado assinado pela CA confiavel mas com SAN
+ *   errado foi RECUSADO (`ERR_TLS_CERT_ALTNAME_INVALID`, sem nenhuma falha de
+ *   cadeia); e o mesmo servidor foi ACEITO quando `verifyIdentity` foi removido
+ *   - o que prova que a opcao e o que faz a diferenca. O repasse ao driver
+ *   tambem foi conferido no proprio TypeORM instalado
+ *   (`driver/mysql/MysqlDriver.js`, `ssl: options.ssl` sem filtrar chaves).
+ *   Ver docs/containerizacao.md. NAO validado: servidor MySQL nativo numa VPS.
  */
 export function buildDataSourceOptions(env: DatabaseEnvironment): DataSourceOptions {
   const type = env.DATABASE_TYPE;

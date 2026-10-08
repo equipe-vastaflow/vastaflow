@@ -211,8 +211,20 @@ Outras consequencias aceitas:
 
 ## Pendencia
 
-Nenhum handshake TLS real entre a aplicacao e um MySQL com certificado proprio
-foi estabelecido ate esta data. A montagem da configuracao esta coberta por
-testes de unidade e o repasse ao driver foi conferido no proprio TypeORM
-instalado, mas a validacao de ponta a ponta - inclusive a recusa de um
-certificado cujo SAN nao casa com o host - pertence a fase de containerizacao.
+**Validado em 2026-10-08** (Docker Desktop, Engine 29.8.2): o handshake TLS real
+entre a aplicacao e o MySQL 8.4.9, com `require_secure_transport=ON`, usando o
+hostname `mysql` e a CA por arquivo montado; a recusa de um certificado assinado
+pela CA confiavel mas com SAN errado (`ERR_TLS_CERT_ALTNAME_INVALID`, sem falha
+de cadeia); e a aceitacao desse mesmo servidor quando `verifyIdentity` e
+removido, o que prova que a opcao e o que faz a diferenca. Detalhes, comandos e
+as correcoes que a execucao forcou em `docs/containerizacao.md`.
+
+**Ainda NAO validado**, e continua sendo condicao do deploy:
+
+- a VPS Linux (kernel, permissoes reais de bind mount - a chave do servidor
+  precisa de `chown 999:999`, o que o Windows esconde);
+- o HTTPS publico (dominio, DNS e certificado reais; o webhook da Meta rejeita
+  certificado autoassinado);
+- o IP externo real do cliente na auditoria (no Docker Desktop a conexao do host
+  passa por NAT e chega como o gateway da bridge);
+- o backup externo e a restauracao.

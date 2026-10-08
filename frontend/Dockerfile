@@ -1,8 +1,9 @@
 # ===========================================================================
 # VastaFlow - frontend (React/Vite) servido por Nginx
 # ---------------------------------------------------------------------------
-# ATENCAO: NAO VALIDADO. Esta imagem nunca foi construida. Ver
-# docs/containerizacao.md.
+# VALIDADO em Docker Desktop em 2026-10-08: sem VITE_API_URL o build FALHA no
+# passo 2 (antes do `npm ci`, sem criar imagem); com ela o build passa e o
+# `nginx -t` do proprio build aceita a configuracao. Ver docs/containerizacao.md.
 # ---------------------------------------------------------------------------
 #
 # O resultado final NAO tem Node: o React e compilado no stage de build e so os
@@ -59,6 +60,18 @@ FROM nginx:1.30.5-alpine
 RUN rm -f /etc/nginx/conf.d/default.conf
 
 COPY --from=build /app/dist /usr/share/nginx/html
-COPY nginx/ /etc/nginx/conf.d/
+
+# Dois diretorios, por contexto do Nginx: `conf.d/*.conf` e carregado no `http`
+# (zonas de rate limit e o server block); `snippets/` NAO e carregado sozinho e
+# so entra por `include` explicito, dentro de `server` e de `location`.
+COPY nginx/conf.d/   /etc/nginx/conf.d/
+COPY nginx/snippets/ /etc/nginx/snippets/
+
+# Falha o BUILD se o Nginx nao aceitar a configuracao; sem isto um erro de
+# sintaxe so apareceria quando o container tentasse subir (foi assim que o
+# `limit_req_zone` fora de contexto foi pego - so ao executar `nginx -t`).
+# Funciona sem rede de servicos porque o upstream e uma VARIAVEL resolvida em
+# tempo de requisicao: o Nginx nao precisa resolver `backend` para validar.
+RUN nginx -t
 
 EXPOSE 80

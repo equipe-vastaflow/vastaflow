@@ -108,3 +108,17 @@ echo "  nenhum      : $(ls "$TLS/ca-private" | tr '\n' ' ')  <- chave da CA, for
 echo
 echo "ATENCAO: material de desenvolvimento. Validade do servidor: 825 dias."
 echo "Certificado expirado = indisponibilidade total, porque a verificacao e obrigatoria."
+
+echo
+echo "=== EM LINUX (a VPS): um passo que este script nao consegue fazer sozinho ==="
+echo "O bind mount PRESERVA dono e modo. A chave do servidor sai com o SEU usuario"
+echo "e modo 0600, e o MySQL do container roda como uid 999: sem o chown abaixo ele"
+echo "recebe 'Permission denied' ao ler a chave e nao sobe. Rode, com privilegio:"
+echo
+echo "    sudo chown 999:999 \"$TLS/mysql/server-key.pem\""
+echo "    sudo chmod 600     \"$TLS/mysql/server-key.pem\""
+echo
+echo "Resultado esperado: so o uid 999 (MySQL) le a chave; o backend (uid 1000) NAO le."
+echo "Comprovado num volume com permissoes reais: root:root 0600 -> uid 999 recusado;"
+echo "999:999 0600 -> uid 999 le, uid 1000 recusado. No Windows/Docker Desktop o"
+echo "bind mount ignora o modo (tudo aparece 0777), entao o problema fica invisivel la."
