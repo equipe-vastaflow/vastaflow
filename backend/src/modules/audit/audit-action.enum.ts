@@ -57,6 +57,19 @@ export enum AuditAction {
    */
   DocumentCreated = 'DOCUMENT_CREATED',
   DocumentDownloaded = 'DOCUMENT_DOWNLOADED',
+
+  /**
+   * Consulta a API externa do Plantae por um ADMIN. `usuarioId` e quem
+   * consultou. Consulta de dados da cliente e auditada porque sai do Plantae e
+   * passa pelo VastaFlow, e "quem consultou o que, e quando" e a pergunta que a
+   * trilha deve responder.
+   *
+   * Os metadados levam so: `endpoint`, `resultado` (`ok`/`erro`), `paginas`,
+   * `quantidade`, o PERIODO (`de`/`ate`, quando houver) e, na falha, o `codigo`
+   * interno. NUNCA entram filtros de pessoa (`busca`, ids de pessoa), o
+   * conteudo devolvido, valores financeiros, CPF/CNPJ nem o token.
+   */
+  PlantaeQueried = 'PLANTAE_QUERIED',
 }
 
 /** Modulo do sistema onde a acao ocorreu. */
@@ -66,4 +79,5 @@ export enum AuditModuleName {
   Finance = 'FINANCE',
   Settings = 'SETTINGS',
   Documents = 'DOCUMENTS',
+  Plantae = 'PLANTAE',
 }

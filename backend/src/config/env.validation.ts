@@ -15,6 +15,10 @@ import {
   MinLength,
   validateSync,
 } from 'class-validator';
+import {
+  isPlausibleToken,
+  parsePlantaeBaseUrl,
+} from '../modules/integrations/plantae/plantae-settings';
 
 /**
  * Valor bruto recebido do ambiente.
@@ -367,6 +371,46 @@ export class EnvironmentVariables {
   @Transform(({ value }: TransformInput): boolean => value === 'true' || value === true)
   @IsBoolean({ message: "TELEGRAM_POLLING_ENABLED deve ser 'true' ou 'false'" })
   TELEGRAM_POLLING_ENABLED: boolean = false;
+
+  /**
+   * Integracao com a API externa do Plantae (somente leitura). Desligada por
+   * padrao: sem `PLANTAE_ENABLED=true` nada e chamado e as demais variaveis sao
+   * ignoradas em runtime. Ver `modules/integrations/plantae/`.
+   */
+  @Transform(({ value }: TransformInput): boolean => value === 'true' || value === true)
+  @IsBoolean({ message: "PLANTAE_ENABLED deve ser 'true' ou 'false'" })
+  PLANTAE_ENABLED: boolean = false;
+
+  /**
+   * URL base da API. SO aceita o host de HOMOLOGACAO conhecido (`rc.plantae.agr.br`),
+   * em HTTPS, no caminho `/api/v1/external`. Uma URL de producao so entra depois da
+   * liberacao oficial da Plantae, por mudanca de codigo - ver `plantae.constants.ts`.
+   * Se informada, e validada SEMPRE (mesmo com a integracao desligada): um valor
+   * errado e erro de configuracao, nao algo a descobrir na primeira consulta.
+   */
+  @Transform(optionalString)
+  @IsOptional()
+  @IsString()
+  PLANTAE_BASE_URL?: string;
+
+  /**
+   * Chave de integracao da Plantae (Bearer). Segredo: fora do Git, so no backend,
+   * nunca em frontend, n8n ou log. Ausente = `NOT_CONFIGURED`, sem derrubar nada.
+   */
+  @Transform(optionalString)
+  @IsOptional()
+  @IsString()
+  PLANTAE_API_TOKEN?: string;
+
+  /** Timeout de UMA requisicao ao Plantae, em ms (1000 a 60000; padrao 15000). */
+  @Transform(({ value }: TransformInput): number | undefined =>
+    isBlank(value) ? undefined : Number(value),
+  )
+  @IsOptional()
+  @IsInt({ message: 'PLANTAE_TIMEOUT_MS deve ser um numero inteiro' })
+  @Min(1000)
+  @Max(60000)
+  PLANTAE_TIMEOUT_MS?: number;
 }
 
 function isBlank(value: unknown): boolean {
@@ -490,6 +534,19 @@ function validateCrossFieldRules(env: EnvironmentVariables): string[] {
 
   if (Boolean(env.SEED_ADMIN_EMAIL) !== Boolean(env.SEED_ADMIN_PASSWORD)) {
     problems.push('SEED_ADMIN_EMAIL e SEED_ADMIN_PASSWORD devem ser informados juntos');
+  }
+
+  // A mensagem NUNCA repete o valor: a URL pode ter credencial e o token e segredo.
+  if (env.PLANTAE_BASE_URL) {
+    const base = parsePlantaeBaseUrl(env.PLANTAE_BASE_URL);
+    if (!base.ok) {
+      problems.push(`PLANTAE_BASE_URL invalida: ${base.problem}`);
+    }
+  }
+  if (env.PLANTAE_API_TOKEN && !isPlausibleToken(env.PLANTAE_API_TOKEN)) {
+    problems.push(
+      'PLANTAE_API_TOKEN invalido: use de 8 a 512 caracteres ASCII imprimiveis, sem espacos',
+    );
   }
 
   return problems;

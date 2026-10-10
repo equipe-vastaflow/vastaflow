@@ -224,6 +224,53 @@ host, e explica os boots lentos. O pico no boot **a frio** nao foi amostrado
 3. Volume `n8n-state` (`/home/node/.n8n`, contem o arquivo `config` com a chave).
 4. `infra/service-auth/credentials.json` (recriavel, so hashes).
 
+## Fase 4 - Plantae no Docker (somente com a integracao DESLIGADA ou sem token)
+
+Validado em Docker Desktop em 2026-10-10. **Nesta validacao em Docker nenhuma chamada
+ao Plantae foi feita**: a rede, o TLS de saida e o DNS **a partir do container** nao
+foram exercitados. A validacao REAL contra a homologacao foi feita depois, a partir do
+computador do desenvolvedor, e esta em `docs/integracao-plantae.md` (secao 7.1).
+
+| # | Prova | Resultado |
+| --- | --- | --- |
+| 1 | Imagem do backend compila e contem o modulo (16 arquivos `.js`, nenhum `.spec`) | PASS |
+| 2 | Stack inteira `healthy` com o Plantae no padrao (desligado); `migrate` sai com 0 | PASS |
+| 3 | Plantae desligado, pelo caminho real (Nginx -> backend): `status` = `DISABLED`; consulta = 424 `PLANTAE_DISABLED`; sem login = 401; filtro invalido = 400 | PASS |
+| 4 | Habilitado **sem token**: o backend sobe `healthy`, `status` = `NOT_CONFIGURED`, consulta = 424 `PLANTAE_NOT_CONFIGURED` | PASS |
+| 5 | URL base invalida (com usuario/senha embutidos) e token invalido: o **boot e recusado** (exit 1) e a mensagem **nao repete** o valor | PASS |
+| 6 | Nenhuma conexao TCP de saida do backend na porta 443 (so a 3306, MySQL); os logs da integracao mostram falha `disabled` em 0 ms | PASS |
+| 7 | Auditoria `PLANTAE_QUERIED` gravada no **MySQL real** (valores cabem nas colunas `varchar(30)`; sem migration) | PASS |
+| 8 | Privacidade de log: `?busca=<valor>` **nao** aparece no log do Nginx nem no do backend (com a linha de log presente como controle positivo) | PASS |
+| 9 | Service auth do n8n continua: do container do n8n, token valido = 200 `service:identity`; invalido = 401; o **mesmo token valido em `/integrations/plantae/*` = 401** | PASS |
+| 10 | `/api/service/*` continua 404 pelo Nginx | PASS |
+| 11 | MySQL: `require_secure_transport=1` e a conexao do backend em TLSv1.3 / `TLS_AES_256_GCM_SHA384` | PASS |
+| 12 | PostgreSQL e n8n `healthy`; portas: so `127.0.0.1:8080` e `127.0.0.1:5678` publicadas, nenhum `0.0.0.0` | PASS |
+| 13 | Fluxo humano no Chrome real, CSP estrita: telas, export XLSX, 0 violacoes, 0 respostas `/api` >= 400 | PASS |
+
+### Defeitos que so a execucao revelou (corrigidos)
+
+1. **Nome de tipo colidindo com decorador.** No controller declarei `type Query = ...`
+   com o mesmo nome do decorador `@Query()` importado; o TypeScript emitiu a FUNCAO do
+   decorador como metadado do parametro e o `ValidationPipe` global a tratou como
+   classe: **400 em toda rota**. Renomeado para `RawQuery`; um teste de arquitetura
+   agora exige que o metadado de cada `@Query` seja `Object`.
+2. **Query string em log.** O `AllExceptionsFilter` (preexistente) e o log de acesso
+   do Nginx gravavam a URL com `?busca=` - que pode ser CPF/CNPJ. O filtro agora loga
+   so o caminho (a resposta ao chamador nao mudou) e o Nginx usa o formato
+   `vastaflow_privacy` (`01-log-format.conf`). Vale para todas as rotas, nao so o Plantae.
+3. **`Retry-After: -5` / `1.5`** eram lidos por `Date.parse` como datas e gerariam uma
+   pausa de ~31 anos. So se aceita segundos inteiros ou o formato fixo de data HTTP,
+   e qualquer pausa e limitada a 24 h.
+4. **Bloqueio do `links.next`** e coberto por teste: um destino fora do host/caminho
+   do Plantae e `invalid-response`, nunca seguido.
+
+### Nao validado
+
+- Egress HTTPS **do container** do backend ate `rc.plantae.agr.br` (DNS e cadeia de
+  certificados com os CAs da imagem). Nenhuma chamada foi feita a partir do Docker.
+- O que ainda nao foi exercitado na API real: `docs/integracao-plantae.md`, secoes 6 e 7.2.
+- Linux/VPS.
+
 ## Reproduzir
 
 Pre-requisitos: Docker Engine + Compose, `openssl`.

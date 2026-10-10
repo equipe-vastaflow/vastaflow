@@ -73,7 +73,10 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
   private log(exception: unknown, status: number, request: Request, incidentId?: string): void {
     const prefix = incidentId ? `[${incidentId}] ` : '';
-    const context = `${prefix}${request.method} ${request.url} -> ${status}`;
+    // `request.path` e SO o caminho. A query string fica de fora do log: ela pode
+    // trazer dado pessoal (ex.: `?busca=<CPF/CNPJ>` nas consultas ao Plantae) e o
+    // log nao e lugar para isso. A RESPOSTA ao proprio chamador segue com `request.url`.
+    const context = `${prefix}${request.method} ${request.path} -> ${status}`;
 
     if (status >= SERVER_ERROR_THRESHOLD) {
       this.logger.error(context, exception instanceof Error ? exception.stack : String(exception));

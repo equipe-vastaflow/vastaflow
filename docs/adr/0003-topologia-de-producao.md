@@ -238,3 +238,12 @@ invariantes acima foram verificadas por execucao: o n8n nao resolve nem alcanca 
 MySQL, o editor so escuta em `127.0.0.1`, e nao existe usuario "N8N" na tabela de
 usuarios. Continuam **nao validados**: a VPS Linux, o HTTPS publico e os tres
 subdominios. Nenhum workflow de negocio nem canal foi criado.
+
+## Atualizacao - Fase 4 (Plantae)
+
+A integracao com a API externa do Plantae (somente leitura, somente homologacao)
+vive **no NestJS**, como previsto: o token fica no backend e **nunca** no n8n. O n8n
+continua com o escopo minimo (`service:identity`) e nao alcanca estas consultas; o
+acesso dele a dados financeiros dependera de uma fase propria, com resolucao do
+usuario de origem. Ver `docs/integracao-plantae.md`. O ambiente de producao do
+Plantae **nao** esta configurado nem previsto no codigo.

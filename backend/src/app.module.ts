@@ -12,6 +12,7 @@ import { ExternalIdentitiesModule } from './modules/external-identities/external
 import { FinanceModule } from './modules/finance/finance.module';
 import { HealthModule } from './modules/health/health.module';
 import { IntegrationsModule } from './modules/integrations/integrations.module';
+import { PlantaeModule } from './modules/integrations/plantae/plantae.module';
 import { TelegramModule } from './modules/integrations/telegram/telegram.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { PermissionsModule } from './modules/permissions/permissions.module';
@@ -73,6 +74,10 @@ import { UsersModule } from './modules/users/users.module';
     // Canal Telegram: adapter do Command Engine. Sem rota HTTP; o recebimento
     // por polling e opt-in (TELEGRAM_POLLING_ENABLED) e exige o token.
     TelegramModule,
+
+    // Plantae (API externa, SOMENTE leitura, so homologacao): consultas GET para
+    // ADMIN humano. Desligado por padrao (PLANTAE_ENABLED). Nao grava nada.
+    PlantaeModule,
   ],
 })
 export class AppModule {}

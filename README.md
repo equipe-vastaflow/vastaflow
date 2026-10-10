@@ -615,6 +615,7 @@ Respostas de erro 5xx nao expoem a causa: devolvem mensagem generica e um
 - [ADR 0002](docs/adr/0002-modulo-commonjs-vs-esm.md) - formato de modulo do backend
 - [ADR 0003](docs/adr/0003-topologia-de-producao.md) - topologia de producao (VPS unica, Docker Compose, n8n self-hosted)
 - [docs/autenticacao-servico-a-servico.md](docs/autenticacao-servico-a-servico.md) - autenticacao do n8n na API: credencial de servico, rotacao e revogacao (implementada e validada localmente na Fase 3; **sem workflows de negocio**)
+- [docs/integracao-plantae.md](docs/integracao-plantae.md) - consulta ao Plantae (API externa, **somente leitura**, **somente homologacao**): contrato, decisoes, seguranca e procedimento de homologacao (Fase 4; testada com mocks e **parcialmente validada em homologacao real**: linhas do extrato, NF-e e organizacao da cliente ainda pendentes)
 - [docs/containerizacao.md](docs/containerizacao.md) - o que foi validado em Docker, incluindo n8n + PostgreSQL (Fase 3)
 
 Documentacao em portugues. Codigo em ingles.

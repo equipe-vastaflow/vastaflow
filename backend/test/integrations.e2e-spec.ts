@@ -37,8 +37,10 @@ describe('Integracoes (e2e)', () => {
   });
 
   it('a aplicacao sobe so com as integracoes reais - nenhuma falsa', () => {
-    // O Telegram e a unica integracao real ate aqui (`TelegramModule`).
+    // As integracoes reais: Plantae (`PlantaeModule`, Fase 4) e Telegram
+    // (`TelegramModule`), em ordem de id. Nenhuma de teste entra aqui.
     expect(registry.all()).toEqual([
+      { id: 'plantae', name: 'Plantae', category: IntegrationCategory.Other },
       { id: 'telegram', name: 'Telegram', category: IntegrationCategory.Messaging },
     ]);
   });
@@ -78,7 +80,7 @@ describe('Integracoes (e2e)', () => {
 
     registry.register(exemplo);
 
-    expect(registry.all().map(({ id }) => id)).toEqual(['exemplo-e2e', 'telegram']);
+    expect(registry.all().map(({ id }) => id)).toEqual(['exemplo-e2e', 'plantae', 'telegram']);
     await expect(registry.healthCheck('exemplo-e2e')).resolves.toMatchObject({
       status: IntegrationStatus.Ready,
       // O `detail` do provider ('respondendo') nao sai: a mensagem e do registro.
