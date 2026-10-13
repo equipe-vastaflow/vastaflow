@@ -460,4 +460,143 @@ describe('validateEnv', () => {
       expect(() => validateEnv({ ...baseEnv, TELEGRAM_POLLING_ENABLED: 'true' })).not.toThrow();
     });
   });
+  describe('Telegram + n8n (Fase 5)', () => {
+    const CHAVE = 'k'.repeat(40);
+    const URL_N8N = 'http://n8n:5678/webhook/vastaflow-telegram';
+
+    it('padrao: modo direto, sem URL, sem chave, comandos de chat do Plantae desligados', () => {
+      const env = validateEnv(baseEnv);
+
+      expect(env.TELEGRAM_DELIVERY_MODE).toBe('direct');
+      expect(env.TELEGRAM_N8N_WEBHOOK_URL).toBeUndefined();
+      expect(env.TELEGRAM_INGEST_SIGNING_KEY).toBeUndefined();
+      expect(env.PLANTAE_CHAT_COMMANDS_ENABLED).toBe(false);
+    });
+
+    it('modo n8n completo e aceito', () => {
+      const env = validateEnv({
+        ...baseEnv,
+        TELEGRAM_DELIVERY_MODE: 'n8n',
+        TELEGRAM_N8N_WEBHOOK_URL: URL_N8N,
+        TELEGRAM_INGEST_SIGNING_KEY: CHAVE,
+      });
+
+      expect(env.TELEGRAM_DELIVERY_MODE).toBe('n8n');
+    });
+
+    it('a chave sozinha (modo direto) e aceita: a entrada de servico pode estar pronta antes do relay', () => {
+      expect(() => validateEnv({ ...baseEnv, TELEGRAM_INGEST_SIGNING_KEY: CHAVE })).not.toThrow();
+    });
+
+    it.each(['webhook', 'N8N', 'both', 'true'])('modo invalido (%s) e recusado', (modo) => {
+      expect(() => validateEnv({ ...baseEnv, TELEGRAM_DELIVERY_MODE: modo })).toThrow(
+        /TELEGRAM_DELIVERY_MODE/,
+      );
+    });
+
+    it('modo n8n sem URL: recusado', () => {
+      expect(() =>
+        validateEnv({
+          ...baseEnv,
+          TELEGRAM_DELIVERY_MODE: 'n8n',
+          TELEGRAM_INGEST_SIGNING_KEY: CHAVE,
+        }),
+      ).toThrow(/TELEGRAM_N8N_WEBHOOK_URL/);
+    });
+
+    it('modo n8n sem chave: recusado', () => {
+      expect(() =>
+        validateEnv({
+          ...baseEnv,
+          TELEGRAM_DELIVERY_MODE: 'n8n',
+          TELEGRAM_N8N_WEBHOOK_URL: URL_N8N,
+        }),
+      ).toThrow(/TELEGRAM_INGEST_SIGNING_KEY/);
+    });
+
+    it('chave curta e recusada em qualquer modo, e o valor nunca aparece na mensagem', () => {
+      let mensagem = '';
+      try {
+        validateEnv({ ...baseEnv, TELEGRAM_INGEST_SIGNING_KEY: 'curta-demais-SEGREDO' });
+      } catch (error) {
+        mensagem = (error as Error).message;
+      }
+
+      expect(mensagem).toMatch(/TELEGRAM_INGEST_SIGNING_KEY/);
+      expect(mensagem).not.toContain('SEGREDO');
+    });
+
+    it.each([
+      'http://exemplo.com/webhook/x',
+      'http://u:SEGREDO@n8n:5678/webhook/x',
+      'http://n8n:5678/rest/login',
+      'nao-e-url',
+    ])('URL do webhook invalida (%s) e recusada sem repetir o valor', (url) => {
+      let mensagem = '';
+      try {
+        validateEnv({ ...baseEnv, TELEGRAM_N8N_WEBHOOK_URL: url });
+      } catch (error) {
+        mensagem = (error as Error).message;
+      }
+
+      expect(mensagem).toMatch(/TELEGRAM_N8N_WEBHOOK_URL/);
+      expect(mensagem).not.toContain('SEGREDO');
+      expect(mensagem).not.toContain('exemplo.com');
+    });
+
+    it('PLANTAE_CHAT_COMMANDS_ENABLED so liga com true explicito', () => {
+      expect(
+        validateEnv({ ...baseEnv, PLANTAE_CHAT_COMMANDS_ENABLED: 'true' })
+          .PLANTAE_CHAT_COMMANDS_ENABLED,
+      ).toBe(true);
+      for (const valor of ['false', '', '1', 'sim']) {
+        expect(
+          validateEnv({ ...baseEnv, PLANTAE_CHAT_COMMANDS_ENABLED: valor })
+            .PLANTAE_CHAT_COMMANDS_ENABLED,
+        ).toBe(false);
+      }
+    });
+  });
+  describe('Telegram: servidor de teste e limite por usuario (Fase 5.1)', () => {
+    it('padroes: Bot API oficial e 10 mensagens por minuto', () => {
+      const env = validateEnv(baseEnv);
+
+      expect(env.TELEGRAM_API_BASE_URL).toBeUndefined();
+      expect(env.TELEGRAM_USER_RATE_LIMIT_PER_MINUTE).toBe(10);
+    });
+
+    it('aceita so servidores de teste (lista fechada)', () => {
+      expect(() =>
+        validateEnv({ ...baseEnv, TELEGRAM_API_BASE_URL: 'http://telegram-fake:8081' }),
+      ).not.toThrow();
+      for (const url of [
+        'http://evil.example',
+        'https://api.telegram.org',
+        'http://u:SEGREDO@telegram-fake',
+      ]) {
+        let mensagem = '';
+        try {
+          validateEnv({ ...baseEnv, TELEGRAM_API_BASE_URL: url });
+        } catch (error) {
+          mensagem = (error as Error).message;
+        }
+        expect(mensagem).toMatch(/TELEGRAM_API_BASE_URL/);
+        expect(mensagem).not.toContain('SEGREDO');
+        expect(mensagem).not.toContain('evil.example');
+      }
+    });
+
+    it.each(['0', '121', '-1', 'abc', '1.5'])('limite invalido (%s) e recusado', (valor) => {
+      expect(() => validateEnv({ ...baseEnv, TELEGRAM_USER_RATE_LIMIT_PER_MINUTE: valor })).toThrow(
+        /TELEGRAM_USER_RATE_LIMIT_PER_MINUTE/,
+      );
+    });
+
+    it('limite valido e convertido para numero', () => {
+      expect(
+        validateEnv({ ...baseEnv, TELEGRAM_USER_RATE_LIMIT_PER_MINUTE: '30' })
+          .TELEGRAM_USER_RATE_LIMIT_PER_MINUTE,
+      ).toBe(30);
+    });
+  });
 });

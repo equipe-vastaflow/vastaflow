@@ -107,6 +107,39 @@ describe('toIncomingMessage', () => {
       expect(toIncomingMessage(update())?.conversationId).toBe('4242');
     });
   });
+
+  /**
+   * Fase 5: mensagem encaminhada nao e digitada por quem a enviou ao bot - nunca vira
+   * comando (nem `/vincular`), em nenhum modo de entrega.
+   */
+  describe('mensagem encaminhada ou enviada via outro bot: nunca vira comando', () => {
+    it.each([
+      ['forward_origin (formato atual)', { forward_origin: { type: 'user', date: 1 } }],
+      ['forward_from (legado)', { forward_from: { id: 7, is_bot: false } }],
+      ['forward_from_chat', { forward_from_chat: { id: -100, type: 'channel' } }],
+      ['forward_from_message_id', { forward_from_message_id: 3 }],
+      ['forward_signature', { forward_signature: 'x' }],
+      ['forward_sender_name', { forward_sender_name: 'Oculto' }],
+      ['forward_date', { forward_date: 1_790_000_000 }],
+      ['encaminhamento automatico', { is_automatic_forward: true }],
+      ['via outro bot', { via_bot: { id: 8, is_bot: true } }],
+    ])('%s: fora do fluxo, mesmo que o texto seja um comando valido', (_caso, marcador) => {
+      expect(toIncomingMessage(update({ text: '/contas_pagar', ...marcador }))).toBeNull();
+      expect(
+        toIncomingMessage(update({ text: '/vincular ABCD-EFGH-IJKL', ...marcador })),
+      ).toBeNull();
+    });
+
+    it('controle positivo: a mesma mensagem, sem o marcador, e aceita', () => {
+      expect(toIncomingMessage(update({ text: '/contas_pagar' }))?.text).toBe('/contas_pagar');
+    });
+
+    it('mensagem que RESPONDE a outra (reply) nao e encaminhada: segue aceita', () => {
+      expect(
+        toIncomingMessage(update({ text: '/ajuda', reply_to_message: { message_id: 1 } }))?.text,
+      ).toBe('/ajuda');
+    });
+  });
 });
 
 describe('readUpdateId', () => {

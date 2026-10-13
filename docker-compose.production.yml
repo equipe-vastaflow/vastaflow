@@ -233,6 +233,24 @@ services:
       PLANTAE_BASE_URL: ${PLANTAE_BASE_URL:-}
       PLANTAE_API_TOKEN: ${PLANTAE_API_TOKEN:-}
       PLANTAE_TIMEOUT_MS: ${PLANTAE_TIMEOUT_MS:-}
+      # Telegram + n8n (Fase 5). TUDO desligado por padrao: sem token e sem
+      # POLLING_ENABLED=true nenhuma mensagem e lida. So o backend recebe estas
+      # variaveis - NUNCA o n8n: o token do bot e a chave de assinatura ficam aqui.
+      # O n8n so conhece o X-Service-Token (credencial dele, nao esta aqui).
+      #   TELEGRAM_DELIVERY_MODE  direct (padrao) | n8n
+      #   TELEGRAM_N8N_WEBHOOK_URL / TELEGRAM_INGEST_SIGNING_KEY: obrigatorias no modo n8n
+      #   PLANTAE_CHAT_COMMANDS_ENABLED: libera /contas_pagar (opt-in proprio)
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_POLLING_ENABLED: ${TELEGRAM_POLLING_ENABLED:-false}
+      TELEGRAM_DELIVERY_MODE: ${TELEGRAM_DELIVERY_MODE:-direct}
+      TELEGRAM_N8N_WEBHOOK_URL: ${TELEGRAM_N8N_WEBHOOK_URL:-}
+      TELEGRAM_INGEST_SIGNING_KEY: ${TELEGRAM_INGEST_SIGNING_KEY:-}
+      PLANTAE_CHAT_COMMANDS_ENABLED: ${PLANTAE_CHAT_COMMANDS_ENABLED:-false}
+      # Limite por remetente (mensagens/minuto) e SERVIDOR DE TESTE da Bot API. O segundo
+      # fica VAZIO em producao: so aceita os hosts telegram-fake/localhost/127.0.0.1 e
+      # existe para backend/test/fake-telegram (ver docs/telegram-n8n.md).
+      TELEGRAM_USER_RATE_LIMIT_PER_MINUTE: ${TELEGRAM_USER_RATE_LIMIT_PER_MINUTE:-}
+      TELEGRAM_API_BASE_URL: ${TELEGRAM_API_BASE_URL:-}
     volumes:
       - *ca-mount
       # DIRETORIO, nao arquivo, e somente leitura. Diretorio porque o CLI
@@ -413,6 +431,16 @@ services:
       # Historico de execucao e dado: poda para nao crescer sem limite (14 dias).
       EXECUTIONS_DATA_PRUNE: 'true'
       EXECUTIONS_DATA_MAX_AGE: '336'
+      # Mensagens do Telegram (e as respostas, que podem ter dado financeiro)
+      # passam por este n8n. NAO guardar o conteudo das execucoes: nem as
+      # bem-sucedidas, nem as com erro. O workflow tambem declara isto. Para
+      # depurar, mude TEMPORARIAMENTE e limpe o historico depois.
+      EXECUTIONS_DATA_SAVE_ON_SUCCESS: none
+      EXECUTIONS_DATA_SAVE_ON_ERROR: none
+      EXECUTIONS_DATA_SAVE_ON_PROGRESS: 'false'
+      EXECUTIONS_DATA_SAVE_MANUAL_EXECUTIONS: 'false'
+      # Uma mensagem de chat e minuscula: corpo maximo de 1 MiB no webhook.
+      N8N_PAYLOAD_SIZE_MAX: '1'
     volumes:
       - n8n-state:/home/node/.n8n
     security_opt:

@@ -5,6 +5,11 @@
 > uso por workflow de negocio (nao existe nenhum - ver secao 11).
 >
 > Decisao de origem: [`adr/0003-topologia-de-producao.md`](adr/0003-topologia-de-producao.md).
+>
+> **Fase 5 (2026-10-13):** surgiu o segundo principal, `n8n-telegram` (escopo
+> `service:telegram:ingest`), e a segunda rota de servico, `POST /service/telegram/ingest`. A secao
+> 6 (ator de negocio) passou a valer **so para esse fluxo** - ver
+> [`telegram-n8n.md`](telegram-n8n.md) e o [ADR 0004](adr/0004-telegram-n8n-envelope-assinado.md).
 
 ## 1. O que existe
 
@@ -12,7 +17,9 @@
 n8n --(rede `automation`, HTTP)--> backend:3000   X-Service-Token: vfs_...
 ```
 
-Uma unica rota de servico, **tecnica**: `GET /service/identity`. Devolve quem
+Duas rotas de servico: a **tecnica** `GET /service/identity` (principal `n8n`) e, desde a Fase 5,
+`POST /service/telegram/ingest` (principal `n8n-telegram`; **nao** e tecnica - executa comandos em nome
+da pessoa vinculada, exigindo um envelope assinado). Sobre a rota tecnica: Devolve quem
 esta chamando (`authenticatedAs: "service"`, `principal`, `credentialId`,
 `scopes`). Nao le nem altera dado de negocio, nao executa comando e nao aceita
 nem devolve identificador de usuario. **Nao e uma API de comandos** e nao ha
@@ -121,7 +128,13 @@ precisa ser legivel pelo uid do container (1000). Nao foi validado em Linux.
 **Backup:** o arquivo e pequeno e recriavel (basta emitir nova credencial e
 atualizar o n8n). Nao ha segredo utilizavel nele.
 
-## 6. Contrato futuro: propagar o ATOR DE NEGOCIO (NAO implementado)
+## 6. Contrato: propagar o ATOR DE NEGOCIO (implementado so para o Telegram, Fase 5)
+
+> **Fase 5:** os itens 1-5 abaixo estao implementados em `POST /service/telegram/ingest` (o n8n envia o
+> id do remetente NO TELEGRAM dentro de um envelope **assinado pelo backend**; o backend resolve a pessoa
+> e aplica o RBAC dela; o servico nunca e o ator). Na auditoria nao houve migration: `usuarioId` e a
+> pessoa e o principal/credencial vao em `metadados` (`CHANNEL_MESSAGE`). Outras rotas de servico ainda
+> **nao** propagam ator.
 
 Quando um workflow executar acao em nome de uma pessoa:
 
@@ -162,16 +175,18 @@ Nada disso foi construido nesta fase.
    a rota tecnica nao grava autoria.
 2. **Lista de endpoints autorizados:** escopos no **codigo**, por principal.
 3. **Revogacao:** arquivo de hashes relido a cada 1 s (secao 5).
-4. **Mais de um principal:** o desenho comporta (enum + mapa), hoje so `n8n`.
+4. **Mais de um principal:** o desenho comporta (enum + mapa). Hoje: `n8n` (identidade) e `n8n-telegram`
+   (ingestao do Telegram), com escopos disjuntos.
 
 ## 10. Fora de escopo
 
 Autenticacao humana (inalterada); `external_identity_links` (inalterado);
 `financial_entries`, `documents`, `audit_logs` (inalterados); workflows de
-negocio, WhatsApp, Telegram via n8n, Plantae, NFS-e (nao implementados).
+negocio, WhatsApp, Plantae pelo n8n, NFS-e (nao implementados). O Telegram via n8n passou a existir na
+Fase 5 ([`telegram-n8n.md`](telegram-n8n.md)).
 
 ## 11. Workflows
 
-Os unicos workflows criados foram **descartaveis, de validacao**, em ambiente
-de teste (um Webhook local que chama `/service/identity`). Nenhum workflow de
-negocio existe e nenhum canal foi configurado.
+Na Fase 3 so existiram workflows **descartaveis, de validacao**. Na Fase 5 existe **um** workflow
+versionado, `integrations/telegram/n8n/vastaflow-telegram-ingest.workflow.json` (entrada do Telegram):
+sem segredo e **inativo por padrao**. Nenhum canal real foi configurado.

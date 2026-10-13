@@ -1,7 +1,8 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { AuthenticatedUser } from '../../auth/auth.types';
 import { CommandRouter } from '../../commands/command-router.service';
-import { CommandChannel } from '../../commands/command.types';
+import { parseCommand } from '../../commands/command-parser';
+import { CommandChannel, CommandOutcome } from '../../commands/command.types';
 import {
   CHANNEL_IDENTITY_RESOLVER,
   type ChannelIdentityResolver,
@@ -30,6 +31,46 @@ export enum TelegramUpdateOutcome {
   LinkRejected = 'LINK_REJECTED',
   /** A resposta nao pode ser enviada ao Telegram. */
   ReplyFailed = 'REPLY_FAILED',
+  /** Modo `n8n`: o envelope foi avaliado pelo backend e a resposta enviada. */
+  Relayed = 'RELAYED',
+  /** Modo `n8n`: o n8n/backend nao respondeu direito; foi enviado o aviso padrao. */
+  RelayFailed = 'RELAY_FAILED',
+  /** Modo `n8n`: o backend ja tinha processado este update; nada foi reenviado. */
+  Duplicate = 'DUPLICATE',
+}
+
+/**
+ * O que `processMessage` decidiu - SEM enviar nada. Usado por quem recebe a mensagem
+ * por outro caminho (ver `telegram-ingest`) e nao por `getUpdates`.
+ */
+export interface ProcessedMessage {
+  /** Nunca `Ignored` nem `ReplyFailed`: esses dois so existem no envio. */
+  readonly outcome:
+    | TelegramUpdateOutcome.Unlinked
+    | TelegramUpdateOutcome.Executed
+    | TelegramUpdateOutcome.LinkConfirmed
+    | TelegramUpdateOutcome.LinkRejected;
+  /** Texto para o usuario, ja no limite do Telegram. */
+  readonly reply: string;
+  /** Usuario interno resolvido, ou `null` (nao vinculado / vinculo recusado). */
+  readonly userId: string | null;
+  /** Desfecho do Command Engine, quando um comando chegou a ser avaliado. */
+  readonly commandOutcome: CommandOutcome | null;
+  /**
+   * Nome do comando - SO quando e um comando REGISTRADO (nunca texto livre nem
+   * argumentos). Seguro para auditoria.
+   */
+  readonly command: string | null;
+}
+
+/** Opcoes de `processMessage`. */
+export interface ProcessMessageOptions {
+  /**
+   * Aceita `/vincular <codigo>` (padrao: sim). O ingest passa `false`: o codigo de
+   * vinculo e uma prova de posse e nunca deve trafegar pelo n8n; quem o trata e
+   * o proprio transporte.
+   */
+  readonly allowLinking?: boolean;
 }
 
 /**
@@ -74,36 +115,10 @@ export class TelegramAdapter {
       return TelegramUpdateOutcome.Ignored;
     }
 
-    let text: string;
-    let outcome: TelegramUpdateOutcome;
-
-    const confirmation = await this.confirm(message);
-    const user =
-      confirmation === LinkConfirmationOutcome.NotAttempted ? await this.resolve(message) : null;
-
-    if (confirmation !== LinkConfirmationOutcome.NotAttempted) {
-      text = linkConfirmationReply(confirmation);
-      outcome =
-        confirmation === LinkConfirmationOutcome.Confirmed
-          ? TelegramUpdateOutcome.LinkConfirmed
-          : TelegramUpdateOutcome.LinkRejected;
-    } else if (user === null) {
-      text = TELEGRAM_UNLINKED_REPLY;
-      outcome = TelegramUpdateOutcome.Unlinked;
-    } else {
-      // `execute` nunca lanca: todo desfecho vira `CommandResult`.
-      const result = await this.router.execute({
-        user,
-        conversationId: message.conversationId,
-        channel: CommandChannel.Telegram,
-        text: message.text,
-      });
-      text = toTelegramText(result);
-      outcome = TelegramUpdateOutcome.Executed;
-    }
+    const { reply, outcome } = await this.processMessage(message);
 
     try {
-      await this.client.sendMessage(message.conversationId, text);
+      await this.client.sendMessage(message.conversationId, reply);
     } catch (error) {
       this.logger.warn(`Telegram: resposta nao enviada (${describeFailure(error)})`);
       return TelegramUpdateOutcome.ReplyFailed;
@@ -112,6 +127,63 @@ export class TelegramAdapter {
     // Sem texto da mensagem, sem id do remetente e sem a resposta: so o desfecho.
     this.logger.debug(`Telegram: mensagem processada (${outcome})`);
     return outcome;
+  }
+
+  /**
+   * Decide o que responder a uma mensagem JA reduzida a `IncomingMessage` - sem
+   * enviar. E o mesmo caminho do `handleUpdate`, extraido para ser reutilizado:
+   * confirmar vinculo -> resolver a identidade -> Command Engine.
+   *
+   * Nunca lanca: falha do confirmador vira recusa e falha do resolvedor vira "nao
+   * vinculado". A identidade vem SOMENTE de `message.sender`.
+   */
+  async processMessage(
+    message: IncomingMessage,
+    options: ProcessMessageOptions = {},
+  ): Promise<ProcessedMessage> {
+    const confirmation =
+      options.allowLinking === false
+        ? LinkConfirmationOutcome.NotAttempted
+        : await this.confirm(message);
+
+    if (confirmation !== LinkConfirmationOutcome.NotAttempted) {
+      return {
+        outcome:
+          confirmation === LinkConfirmationOutcome.Confirmed
+            ? TelegramUpdateOutcome.LinkConfirmed
+            : TelegramUpdateOutcome.LinkRejected,
+        reply: linkConfirmationReply(confirmation),
+        userId: null,
+        commandOutcome: null,
+        command: null,
+      };
+    }
+
+    const user = await this.resolve(message);
+    if (user === null) {
+      return {
+        outcome: TelegramUpdateOutcome.Unlinked,
+        reply: TELEGRAM_UNLINKED_REPLY,
+        userId: null,
+        commandOutcome: null,
+        command: null,
+      };
+    }
+
+    // `execute` nunca lanca: todo desfecho vira `CommandResult`.
+    const result = await this.router.execute({
+      user,
+      conversationId: message.conversationId,
+      channel: CommandChannel.Telegram,
+      text: message.text,
+    });
+    return {
+      outcome: TelegramUpdateOutcome.Executed,
+      reply: toTelegramText(result),
+      userId: user.id,
+      commandOutcome: result.outcome,
+      command: registeredCommandName(message.text, result.outcome),
+    };
   }
 
   /** Falha do confirmador conta como recusa - nunca como vinculo criado. */
@@ -145,4 +217,21 @@ export function describeFailure(error: unknown): string {
     return error.message;
   }
   return error instanceof Error ? error.name : typeof error;
+}
+
+/**
+ * Nome do comando para auditoria: so quando o comando EXISTE e foi avaliado. Texto
+ * livre, comando desconhecido ou malformado nunca viram nome - podem conter
+ * qualquer coisa que o usuario digitou.
+ */
+function registeredCommandName(text: string, outcome: CommandOutcome): string | null {
+  if (
+    outcome !== CommandOutcome.Ok &&
+    outcome !== CommandOutcome.PermissionDenied &&
+    outcome !== CommandOutcome.HandlerError
+  ) {
+    return null;
+  }
+  const parsed = parseCommand(text);
+  return parsed.kind === 'command' ? parsed.command.name : null;
 }

@@ -70,6 +70,29 @@ export enum AuditAction {
    * conteudo devolvido, valores financeiros, CPF/CNPJ nem o token.
    */
   PlantaeQueried = 'PLANTAE_QUERIED',
+
+  /**
+   * Mensagem de um canal de mensageria (Telegram) entregue ao backend pela entrada
+   * de servico. Uma linha por mensagem. `usuarioId` e a PESSOA vinculada ao
+   * remetente (ausente quando nao ha vinculo ou a entrega foi recusada).
+   *
+   * Os metadados levam so: `canal`, `resultado`, `comando` (apenas nome de comando
+   * REGISTRADO), `autorizacao`, `principal` e `credencial` (QUEM entregou, o
+   * servico - nunca confundido com a pessoa), `correlacao` e `updateId`. NUNCA o
+   * texto da mensagem, a resposta, dado de negocio, token nem o payload do Telegram.
+   *
+   * `resultado`: EXECUTED, DENIED, UNLINKED, UNKNOWN_COMMAND, FAILED, DUPLICATE,
+   * ENVELOPE_REJECTED.
+   */
+  ChannelMessage = 'CHANNEL_MESSAGE',
+
+  /**
+   * Intervencao MANUAL do operador na tabela de eventos do Telegram (CLI
+   * `telegram-events`): abandonar um evento preso ou apagar eventos antigos. Sem
+   * `usuarioId` (o operador usa o servidor, nao a aplicacao). Os metadados levam so:
+   * `operacao` (`abandonar`/`limpar`), `eventoId` ou `quantidade`/`dias`. NUNCA conteudo.
+   */
+  TelegramEventAdmin = 'TELEGRAM_EVENT_ADMIN',
 }
 
 /** Modulo do sistema onde a acao ocorreu. */
@@ -80,4 +103,5 @@ export enum AuditModuleName {
   Settings = 'SETTINGS',
   Documents = 'DOCUMENTS',
   Plantae = 'PLANTAE',
+  Channels = 'CHANNELS',
 }

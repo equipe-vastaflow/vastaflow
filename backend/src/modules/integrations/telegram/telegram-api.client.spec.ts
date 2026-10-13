@@ -286,4 +286,43 @@ describe('TelegramApiClient', () => {
       expect((erro as Error & { cause?: unknown }).cause).toBeUndefined();
     });
   });
+  describe('base da API (servidor de teste, Fase 5.1)', () => {
+    const comBase = (base: string | undefined): TelegramApiClient =>
+      new TelegramApiClient(
+        new ConfigService({
+          TELEGRAM_BOT_TOKEN: TOKEN_FALSO,
+          ...(base === undefined ? {} : { TELEGRAM_API_BASE_URL: base }),
+        }),
+      );
+
+    it('sem a variavel: SEMPRE a API oficial', async () => {
+      fetchMock.mockResolvedValue(json(200, { ok: true, result: [] }));
+
+      await comBase(undefined).getUpdates(1);
+
+      expect(fetchMock.mock.calls[0][0]).toBe(
+        `https://api.telegram.org/bot${TOKEN_FALSO}/getUpdates`,
+      );
+    });
+
+    it('com um servidor de teste permitido: chama so ele', async () => {
+      fetchMock.mockResolvedValue(json(200, { ok: true, result: [] }));
+
+      await comBase('http://telegram-fake:8081').getUpdates(1);
+
+      expect(fetchMock.mock.calls[0][0]).toBe(
+        `http://telegram-fake:8081/bot${TOKEN_FALSO}/getUpdates`,
+      );
+    });
+
+    it.each(['http://evil.example:8081', 'https://api.telegram.org', 'http://u:p@telegram-fake'])(
+      'base nao permitida (%s): falha ANTES da rede e o token nao sai',
+      async (base) => {
+        const erro = await falhaDe(comBase(base).sendMessage('1', 'oi'));
+
+        expect(erro.kind).toBe('not-configured');
+        expect(fetchMock).not.toHaveBeenCalled();
+      },
+    );
+  });
 });

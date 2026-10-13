@@ -400,6 +400,27 @@ describe('CommandRouter', () => {
       expect(event).toContain(USUARIO.id);
     });
 
+    it('em canal de mensageria NAO grava o conversationId (e o id da conta da pessoa)', async () => {
+      catalog.register([handler({ name: 'negocio', audit: AUDIT })]);
+
+      await router.execute({
+        ...context('/negocio'),
+        channel: CommandChannel.Telegram,
+        conversationId: '910000001',
+      });
+
+      const [event] = auditService.record.mock.calls[0];
+      expect(JSON.stringify(event)).not.toContain('910000001');
+      expect(Object.keys(event.metadados ?? {}).sort()).toEqual(['canal', 'comando', 'outcome']);
+      expect(event.usuarioId).toBe(USUARIO.id);
+    });
+
+    it('no endpoint de teste o rotulo da conversa continua registrado', async () => {
+      const event = await recordedEventFor('/negocio');
+
+      expect(event).toContain('conversa-1');
+    });
+
     it('envia apenas a lista fechada de campos previstos', async () => {
       await recordedEventFor('/negocio arg1');
       const [event] = auditService.record.mock.calls[0];

@@ -533,6 +533,7 @@ describe('Auth, usuarios e RBAC (e2e)', () => {
           '/notifications/{id}/read',
           '/profile',
           '/service/identity',
+          '/service/telegram/ingest',
           '/settings',
           '/settings/{key}',
           '/users',
@@ -585,10 +586,12 @@ describe('Auth, usuarios e RBAC (e2e)', () => {
         'users:status',
         'users:update',
       ];
+      // `plantae:read` (consulta ao Plantae, inclusive por chat) e SO do ADMIN.
       expect(permissionsOf(RoleName.Admin)).toEqual(
-        [...doGestor, 'settings:read', 'settings:update'].sort(),
+        [...doGestor, 'plantae:read', 'settings:read', 'settings:update'].sort(),
       );
       expect(permissionsOf(RoleName.Gestor)).toEqual(doGestor);
+      expect(permissionsOf(RoleName.Gestor)).not.toContain('plantae:read');
       expect(permissionsOf(RoleName.Gestor)).not.toContain('settings:read');
       expect(permissionsOf(RoleName.Gestor)).not.toContain('settings:update');
       expect(permissionsOf(RoleName.Operador)).toEqual([]);

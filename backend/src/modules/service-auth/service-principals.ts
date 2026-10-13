@@ -9,6 +9,13 @@
  */
 export enum ServicePrincipalId {
   N8n = 'n8n',
+  /**
+   * O workflow de entrada do Telegram no n8n. Principal PROPRIO, e nao um escopo
+   * a mais em `n8n`, para que a credencial do fluxo de mensagens seja outra: um
+   * vazamento dela nao abre `service:identity`, e a identidade tecnica de
+   * `n8n` nao ganha poder de ingestao. Credenciais proprias, rotacao propria.
+   */
+  N8nTelegram = 'n8n-telegram',
 }
 
 /**
@@ -21,6 +28,14 @@ export enum ServicePrincipalId {
 export enum ServiceScope {
   /** Consultar a propria identidade de servico. Endpoint tecnico, sem dado de negocio. */
   Identity = 'service:identity',
+  /**
+   * Entregar ao backend um envelope de mensagem do Telegram JA ASSINADO por ele.
+   *
+   * Nao autoriza nada de negocio: o backend so age se a assinatura do envelope
+   * confere, e age como a PESSOA vinculada ao remetente (RBAC dela), nunca como o
+   * servico. Ter este escopo nao permite escolher quem fala.
+   */
+  TelegramIngest = 'service:telegram:ingest',
 }
 
 export interface ServicePrincipalDefinition {
@@ -44,6 +59,10 @@ export const SERVICE_PRINCIPALS: Readonly<Record<ServicePrincipalId, ServicePrin
     [ServicePrincipalId.N8n]: {
       description: 'n8n (orquestrador de integracoes e automacoes)',
       scopes: [ServiceScope.Identity],
+    },
+    [ServicePrincipalId.N8nTelegram]: {
+      description: 'n8n - workflow de entrada de mensagens do Telegram',
+      scopes: [ServiceScope.TelegramIngest],
     },
   };
 

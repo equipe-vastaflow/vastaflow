@@ -55,10 +55,17 @@ const PERMITIDOS = new Set([
   '../../audit/audit-action.enum',
   '../../audit/entities/audit-log.entity',
   '../../auth/auth.types',
+  // Comando de chat /contas_pagar: so o contrato do Command Engine e o codigo de permissao.
+  '../../commands/command-catalog',
+  '../../commands/command-parser',
+  '../../commands/command.types',
+  '../../commands/commands.module',
+  '../../permissions/permission-code.enum',
   '../../auth/decorators/current-user.decorator',
   '../../auth/decorators/roles.decorator',
   '../../roles/role-name.enum',
   '../../../common/decorators/client-ip.decorator',
+  '../../../common/rate-limit/sliding-window-limiter',
 ]);
 
 describe('Arquitetura do modulo Plantae', () => {
@@ -84,7 +91,7 @@ describe('Arquitetura do modulo Plantae', () => {
         importsDe(codigo)
           .filter((origem) => !origem.startsWith('./'))
           .filter((origem) =>
-            /finance|documents|users|settings|notifications|commands|external-identities|dashboard/.test(
+            /finance|documents|users|settings|notifications|external-identities|dashboard/.test(
               origem,
             ),
           ),

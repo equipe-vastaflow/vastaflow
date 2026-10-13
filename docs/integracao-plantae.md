@@ -33,6 +33,12 @@ Oito consultas `GET` ao Plantae, expostas **somente a ADMIN humano** pelo VastaF
 | 8 | `/people` | `/integrations/plantae/people` |
 | - | (local) | `/integrations/plantae/status` - estado, sem chamar o Plantae |
 
+**Fase 5 - `/contas_pagar` no chat.** Existe **um** comando de conversa, somente leitura, sobre o
+`PlantaeService` (`/financial/entries`, despesas pendentes): permissao propria `plantae:read` (so ADMIN),
+opt-in `PLANTAE_CHAT_COMMANDS_ENABLED` (desligado), uma pagina de 5 itens, **sem CPF/CNPJ, observacao,
+descricao ou rateio**. **Nunca consultou o Plantae real** (testes com `fetch` simulado; no Docker o Plantae
+esta desligado). Detalhes em [`telegram-n8n.md`](telegram-n8n.md), secao 7.
+
 **Nao existe**: escrita de qualquer tipo, NFS-e, XML, DANFE, baixa, conciliacao,
 sincronizacao, cache, tabela, migration, workflow, canal. A API do Plantae nao
 tem rota de escrita; o VastaFlow nao tem verbo de escrita para ela (um teste de

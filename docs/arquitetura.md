@@ -1028,6 +1028,16 @@ desconhecido, sem permissao, nao-comando, falha do handler); o adapter so aplica
 o limite de 4096 caracteres e envia sem `parse_mode`. Sem auditoria por mensagem
 e sem comando novo.
 
+### Fase 5: entrada pelo n8n (envelope assinado)
+
+No modo `TELEGRAM_DELIVERY_MODE=n8n` o mesmo polling alimenta o `TelegramRelayService`, que assina um
+envelope e o entrega ao workflow do n8n; o workflow o repassa a `POST /service/telegram/ingest`, onde o
+`TelegramIngestService` verifica, reserva o update (idempotencia persistente), identifica a pessoa e executa
+pelo **mesmo** `TelegramAdapter.processMessage` do modo direto. O n8n nao recebe o token do bot nem escolhe o
+usuario. Ver [`telegram-n8n.md`](telegram-n8n.md) e o
+[ADR 0004](adr/0004-telegram-n8n-envelope-assinado.md). O mapper tambem passou a ignorar mensagens
+encaminhadas (`forward_*`, `via_bot`).
+
 ## Vinculo de identidade externa
 
 `backend/src/modules/external-identities/`. Liga uma conta EXTERNA (hoje, do

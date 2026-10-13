@@ -32,6 +32,8 @@ const CHANNELS = fontes(join(__dirname, '../channels'));
 const PERMITIDOS = new Set([
   '@nestjs/common',
   '@nestjs/config',
+  'node:crypto',
+  '../../../common/rate-limit/sliding-window-limiter',
   '../channels/channel-identity',
   '../channels/channel-link',
   '../channels/incoming-message',
@@ -41,6 +43,7 @@ const PERMITIDOS = new Set([
   '../integration.types',
   '../integrations.module',
   '../../auth/auth.types',
+  '../../commands/command-parser',
   '../../commands/command-router.service',
   '../../commands/command.types',
   '../../commands/commands.module',
@@ -80,17 +83,21 @@ describe('Arquitetura do canal Telegram', () => {
     '%s nao depende de modulo de negocio',
     (_arquivo, codigo) => {
       expect(
-        importsDe(codigo).filter((origem) => /finance|notifications|users|settings/.test(origem)),
+        importsDe(codigo)
+          .filter((origem) => !origem.startsWith('./'))
+          .filter((origem) => /finance|notifications|users|settings/.test(origem)),
       ).toEqual([]);
     },
   );
 
-  it('somente o cliente HTTP chama fetch', () => {
+  it('somente os dois clientes HTTP chamam fetch', () => {
     const comFetch = TELEGRAM.filter(({ codigo }) => /\bfetch\s*\(/.test(codigo)).map(
       ({ arquivo }) => arquivo,
     );
 
-    expect(comFetch).toEqual(['telegram-api.client.ts']);
+    // Bot API (telegram-api.client) e webhook do n8n (telegram-n8n.client): os dois
+    // unicos pontos de rede, cada um com destino fixo e validado.
+    expect(comFetch).toEqual(['telegram-api.client.ts', 'telegram-n8n.client.ts']);
   });
 
   it('a camada de canal e neutra: nao conhece o Telegram', () => {

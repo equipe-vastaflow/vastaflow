@@ -29,6 +29,12 @@ export enum PermissionCode {
   // foi o criterio que levou a NAO criar `finance:export`.
   DocumentsRead = 'documents:read',
   DocumentsCreate = 'documents:create',
+
+  // Consulta a dados financeiros EXTERNOS (Plantae) pelos canais de mensageria.
+  // Permissao propria, e nao `finance:read`: aquela cobre o financeiro LOCAL, e
+  // reaproveita-la daria ao GESTOR (que a tem) acesso aos dados da cliente no
+  // Plantae sem decisao nenhuma. So o ADMIN a tem por padrao; ampliar e decisao.
+  PlantaeRead = 'plantae:read',
 }
 
 export const PERMISSION_DESCRIPTIONS: Record<PermissionCode, string> = {
@@ -46,4 +52,6 @@ export const PERMISSION_DESCRIPTIONS: Record<PermissionCode, string> = {
   [PermissionCode.SettingsUpdate]: 'Alterar o valor das configuracoes do sistema',
   [PermissionCode.DocumentsRead]: 'Listar e baixar documentos',
   [PermissionCode.DocumentsCreate]: 'Enviar documentos',
+  [PermissionCode.PlantaeRead]:
+    'Consultar dados financeiros do Plantae pelos canais (somente leitura)',
 };

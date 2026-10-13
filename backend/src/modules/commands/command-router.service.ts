@@ -5,6 +5,7 @@ import { CommandCatalog } from './command-catalog';
 import { parseCommand } from './command-parser';
 import {
   commandFailure,
+  CommandChannel,
   CommandOutcome,
   type CommandAuditConfig,
   type CommandContext,
@@ -124,7 +125,12 @@ export class CommandRouter {
         metadados: {
           comando: handler.name,
           canal: context.channel,
-          conversationId: context.conversationId,
+          // Rotulo livre do endpoint de teste. Em canal de mensageria o `conversationId`
+          // E o id da conta da pessoa (ex.: chat do Telegram): identificador pessoal que a
+          // auditoria nao precisa guardar - o `usuarioId` ja diz quem foi.
+          ...(context.channel === CommandChannel.Test
+            ? { conversationId: context.conversationId }
+            : {}),
           outcome: result.outcome,
         },
       });

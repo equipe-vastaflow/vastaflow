@@ -3,6 +3,7 @@ import { Document } from '../modules/documents/entities/document.entity';
 import { ExternalIdentityLink } from '../modules/external-identities/entities/external-identity-link.entity';
 import { IdentityLinkRequest } from '../modules/external-identities/entities/identity-link-request.entity';
 import { FinancialEntry } from '../modules/finance/entities/financial-entry.entity';
+import { TelegramInboundEvent } from '../modules/integrations/telegram-ingest/telegram-inbound-event.entity';
 import { Notification } from '../modules/notifications/entities/notification.entity';
 import { Permission } from '../modules/permissions/entities/permission.entity';
 import { Role } from '../modules/roles/entities/role.entity';
@@ -28,4 +29,5 @@ export const ENTITIES = [
   ExternalIdentityLink,
   IdentityLinkRequest,
   Document,
+  TelegramInboundEvent,
 ];

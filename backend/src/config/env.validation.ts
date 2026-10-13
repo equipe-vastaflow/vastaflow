@@ -4,6 +4,7 @@ import {
   IsBoolean,
   IsEmail,
   IsEnum,
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -19,6 +20,13 @@ import {
   isPlausibleToken,
   parsePlantaeBaseUrl,
 } from '../modules/integrations/plantae/plantae-settings';
+import { resolveTelegramApiBase } from '../modules/integrations/telegram/telegram-api-base';
+import {
+  isAcceptableSigningKey,
+  parseN8nWebhookUrl,
+  TELEGRAM_DELIVERY_MODES,
+  type TelegramDeliveryMode,
+} from '../modules/integrations/telegram/telegram-n8n-settings';
 
 /**
  * Valor bruto recebido do ambiente.
@@ -373,6 +381,58 @@ export class EnvironmentVariables {
   TELEGRAM_POLLING_ENABLED: boolean = false;
 
   /**
+   * Quem trata cada mensagem que o polling le: `direct` (padrao; o backend, como
+   * sempre foi) ou `n8n` (o transporte assina um envelope e o entrega a um workflow
+   * do n8n). Nao muda QUEM consome o bot - o polling e o mesmo nos dois modos.
+   * `n8n` exige `TELEGRAM_N8N_WEBHOOK_URL` e `TELEGRAM_INGEST_SIGNING_KEY`.
+   */
+  @Transform(({ value }: TransformInput): unknown => (isBlank(value) ? 'direct' : value))
+  @IsIn(TELEGRAM_DELIVERY_MODES, {
+    message: "TELEGRAM_DELIVERY_MODE deve ser 'direct' ou 'n8n'",
+  })
+  TELEGRAM_DELIVERY_MODE: TelegramDeliveryMode = 'direct';
+
+  /**
+   * URL do webhook de producao do n8n que recebe os envelopes (ex.:
+   * `http://n8n:5678/webhook/vastaflow-telegram`). So hosts da rede do Compose ou
+   * loopback: o texto das mensagens vai para ela.
+   */
+  @Transform(optionalString)
+  @IsOptional()
+  @IsString()
+  TELEGRAM_N8N_WEBHOOK_URL?: string;
+
+  /**
+   * Chave de assinatura dos envelopes e das respostas (>= 32 caracteres
+   * aleatorios). SEGREDO: so o backend a tem - nunca o n8n, o frontend ou o Git.
+   * Sem ela a entrada `POST /service/telegram/ingest` recusa tudo.
+   */
+  @Transform(optionalString)
+  @IsOptional()
+  @IsString()
+  TELEGRAM_INGEST_SIGNING_KEY?: string;
+
+  /**
+   * SO PARA TESTE: aponta a Bot API para um servidor falso (`telegram-fake`,
+   * `localhost`, `127.0.0.1`). Vazio = `api.telegram.org`. Lista fechada de hosts - o
+   * token do bot vai na URL, entao um valor livre seria um desvio de segredo.
+   */
+  @Transform(optionalString)
+  @IsOptional()
+  @IsString()
+  TELEGRAM_API_BASE_URL?: string;
+
+  /**
+   * Quantas mensagens por minuto UM remetente pode enviar ao bot antes de ser
+   * ignorado (limite por identidade; o excesso e descartado sem executar). Padrao 10.
+   */
+  @Transform(({ value }: TransformInput): number => (isBlank(value) ? 10 : Number(value)))
+  @IsInt({ message: 'TELEGRAM_USER_RATE_LIMIT_PER_MINUTE deve ser um numero inteiro' })
+  @Min(1)
+  @Max(120)
+  TELEGRAM_USER_RATE_LIMIT_PER_MINUTE: number = 10;
+
+  /**
    * Integracao com a API externa do Plantae (somente leitura). Desligada por
    * padrao: sem `PLANTAE_ENABLED=true` nada e chamado e as demais variaveis sao
    * ignoradas em runtime. Ver `modules/integrations/plantae/`.
@@ -380,6 +440,16 @@ export class EnvironmentVariables {
   @Transform(({ value }: TransformInput): boolean => value === 'true' || value === true)
   @IsBoolean({ message: "PLANTAE_ENABLED deve ser 'true' ou 'false'" })
   PLANTAE_ENABLED: boolean = false;
+
+  /**
+   * Libera o comando `/contas_pagar` nos canais de mensageria (Telegram). Opt-in
+   * SEPARADO de `PLANTAE_ENABLED`: ligar a integracao para o ADMIN consultar pela
+   * API nao deve, sozinho, levar dado financeiro da cliente para uma conversa de
+   * Telegram. Desligado por padrao. Mesmo ligado, exige a permissao `plantae:read`.
+   */
+  @Transform(({ value }: TransformInput): boolean => value === 'true' || value === true)
+  @IsBoolean({ message: "PLANTAE_CHAT_COMMANDS_ENABLED deve ser 'true' ou 'false'" })
+  PLANTAE_CHAT_COMMANDS_ENABLED: boolean = false;
 
   /**
    * URL base da API. SO aceita o host de HOMOLOGACAO conhecido (`rc.plantae.agr.br`),
@@ -543,6 +613,33 @@ function validateCrossFieldRules(env: EnvironmentVariables): string[] {
       problems.push(`PLANTAE_BASE_URL invalida: ${base.problem}`);
     }
   }
+  // Telegram via n8n. Mensagens fixas: nada do que foi informado e repetido.
+  if (env.TELEGRAM_INGEST_SIGNING_KEY && !isAcceptableSigningKey(env.TELEGRAM_INGEST_SIGNING_KEY)) {
+    problems.push(
+      'TELEGRAM_INGEST_SIGNING_KEY invalida: use pelo menos 32 caracteres, sem espacos',
+    );
+  }
+  if (env.TELEGRAM_API_BASE_URL) {
+    const base = resolveTelegramApiBase(env.TELEGRAM_API_BASE_URL);
+    if (!base.ok) {
+      problems.push(`TELEGRAM_API_BASE_URL invalida: ${base.problem}`);
+    }
+  }
+  if (env.TELEGRAM_N8N_WEBHOOK_URL) {
+    const webhook = parseN8nWebhookUrl(env.TELEGRAM_N8N_WEBHOOK_URL);
+    if (!webhook.ok) {
+      problems.push(`TELEGRAM_N8N_WEBHOOK_URL invalida: ${webhook.problem}`);
+    }
+  }
+  if (env.TELEGRAM_DELIVERY_MODE === 'n8n') {
+    if (!env.TELEGRAM_N8N_WEBHOOK_URL) {
+      problems.push('TELEGRAM_DELIVERY_MODE=n8n exige TELEGRAM_N8N_WEBHOOK_URL');
+    }
+    if (!env.TELEGRAM_INGEST_SIGNING_KEY) {
+      problems.push('TELEGRAM_DELIVERY_MODE=n8n exige TELEGRAM_INGEST_SIGNING_KEY');
+    }
+  }
+
   if (env.PLANTAE_API_TOKEN && !isPlausibleToken(env.PLANTAE_API_TOKEN)) {
     problems.push(
       'PLANTAE_API_TOKEN invalido: use de 8 a 512 caracteres ASCII imprimiveis, sem espacos',

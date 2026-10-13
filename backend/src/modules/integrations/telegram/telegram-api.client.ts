@@ -1,12 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { hasConfigValues } from '../integration-config';
+import { resolveTelegramApiBase, TELEGRAM_API_BASE_URL_KEY } from './telegram-api-base';
 import { isRecord } from './telegram-json';
 
 /** Chave do token no ambiente. O VALOR nunca sai deste arquivo. */
 export const TELEGRAM_TOKEN_KEY = 'TELEGRAM_BOT_TOKEN';
-
-const API_BASE = 'https://api.telegram.org';
 
 /** Limite de uma chamada comum (`getMe`, `sendMessage`). */
 export const TELEGRAM_REQUEST_TIMEOUT_MS = 10_000;
@@ -65,6 +64,16 @@ export class TelegramApiClient {
     return hasConfigValues(this.config, [TELEGRAM_TOKEN_KEY]);
   }
 
+  /**
+   * Id numerico do bot: a parte do token ANTES dos dois-pontos. Nao e segredo (e
+   * publico no Telegram) e escopa o `update_id`. `null` sem token ou em formato
+   * inesperado. O resto do token nunca sai daqui.
+   */
+  botId(): string | null {
+    const id = this.config.get<string>(TELEGRAM_TOKEN_KEY)?.trim().split(':')[0];
+    return id !== undefined && /^\d{1,20}$/.test(id) ? id : null;
+  }
+
   /** Confere que o token e aceito e pertence a um bot. */
   async getMe(): Promise<void> {
     const result = await this.call('getMe', {}, TELEGRAM_REQUEST_TIMEOUT_MS);
@@ -115,12 +124,18 @@ export class TelegramApiClient {
       throw new TelegramApiError(method, 'not-configured');
     }
 
+    // Base oficial, salvo o servidor de TESTE (lista fechada de hosts; ver `telegram-api-base.ts`).
+    const base = resolveTelegramApiBase(this.config.get<string>(TELEGRAM_API_BASE_URL_KEY));
+    if (!base.ok) {
+      throw new TelegramApiError(method, 'not-configured');
+    }
+
     const timeout = AbortSignal.timeout(timeoutMs);
     const signal = external ? AbortSignal.any([external, timeout]) : timeout;
 
     let response: Response;
     try {
-      response = await fetch(`${API_BASE}/bot${token}/${method}`, {
+      response = await fetch(`${base.base}/bot${token}/${method}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),

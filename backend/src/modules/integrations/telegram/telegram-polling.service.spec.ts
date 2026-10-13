@@ -2,7 +2,7 @@ import { Logger } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import type { EnvironmentVariables } from '../../../config/env.validation';
 import { TelegramApiError, type TelegramApiClient } from './telegram-api.client';
-import { TelegramUpdateOutcome, type TelegramAdapter } from './telegram.adapter';
+import { TelegramUpdateOutcome } from './telegram.adapter';
 import {
   POLLING_INITIAL_BACKOFF_MS,
   POLLING_MAX_BACKOFF_MS,
@@ -14,6 +14,7 @@ const TOKEN_FALSO = 'TOKEN-FALSO-DE-TESTE-nao-e-token-real';
 interface ClienteFalso {
   isConfigured: jest.Mock<boolean, []>;
   getUpdates: jest.Mock<Promise<unknown[]>, [number | undefined, AbortSignal | undefined]>;
+  sendMessage: jest.Mock<Promise<void>, [string, string]>;
 }
 
 interface AdapterFalso {
@@ -45,19 +46,24 @@ describe('TelegramPollingService', () => {
   let adapter: AdapterFalso;
   let logs: jest.SpyInstance[];
 
-  function servico({ habilitado = true } = {}): TelegramPollingService {
+  function servico({
+    habilitado = true,
+    limite = undefined as number | undefined,
+  } = {}): TelegramPollingService {
     const config = {
       get: (chave: string): unknown =>
         chave === 'TELEGRAM_POLLING_ENABLED'
           ? habilitado
           : chave === 'TELEGRAM_BOT_TOKEN'
             ? TOKEN_FALSO
-            : undefined,
+            : chave === 'TELEGRAM_USER_RATE_LIMIT_PER_MINUTE'
+              ? limite
+              : undefined,
     } as unknown as ConfigService<EnvironmentVariables, true>;
     const service = new TelegramPollingService(
       config,
       client as unknown as TelegramApiClient,
-      adapter as unknown as TelegramAdapter,
+      adapter,
     );
     criados.push(service);
     return service;
@@ -67,6 +73,7 @@ describe('TelegramPollingService', () => {
     client = {
       isConfigured: jest.fn(() => true),
       getUpdates: jest.fn(aguardaAteAbortar),
+      sendMessage: jest.fn((_chat: string, _texto: string) => Promise.resolve()),
     };
     adapter = {
       handleUpdate: jest.fn((_raw: unknown) =>
@@ -313,6 +320,122 @@ describe('TelegramPollingService', () => {
       expect(registrado).toContain('falha no polling');
       expect(registrado).not.toContain(TOKEN_FALSO);
       expect(registrado).not.toContain('api.telegram.org');
+    });
+  });
+  describe('barreiras antes do tratador (Fase 5.1)', () => {
+    const mensagem = (
+      updateId: number,
+      de: number,
+      texto = '/ajuda',
+      segundosAtras = 0,
+    ): unknown => ({
+      update_id: updateId,
+      message: {
+        message_id: updateId,
+        date: Math.floor(Date.now() / 1000) - segundosAtras,
+        chat: { id: de, type: 'private' },
+        from: { id: de, is_bot: false },
+        text: texto,
+      },
+    });
+
+    async function rodar(lote: unknown[], opcoes: { limite?: number } = {}): Promise<void> {
+      client.getUpdates.mockResolvedValueOnce(lote).mockImplementation(aguardaAteAbortar);
+      servico({ limite: opcoes.limite }).start();
+      await drenar();
+    }
+
+    it('mensagem com mais de 10 minutos NAO e entregue (nem responde), mas o offset avanca', async () => {
+      await rodar([mensagem(1, 500, '/financeiro', 11 * 60)]);
+
+      expect(adapter.handleUpdate).not.toHaveBeenCalled();
+      expect(client.sendMessage).not.toHaveBeenCalled();
+      expect(client.getUpdates.mock.calls[1][0]).toBe(2);
+    });
+
+    it('mensagem recente passa (controle positivo)', async () => {
+      await rodar([mensagem(1, 500, '/financeiro', 30)]);
+
+      expect(adapter.handleUpdate).toHaveBeenCalledTimes(1);
+    });
+
+    it('acima do limite por remetente: descarta o excesso, avisa UMA vez e nao chama o tratador', async () => {
+      await rodar(
+        [1, 2, 3, 4, 5].map((id) => mensagem(id, 500)),
+        { limite: 2 },
+      );
+
+      expect(adapter.handleUpdate).toHaveBeenCalledTimes(2);
+      expect(client.sendMessage).toHaveBeenCalledTimes(1);
+      expect(client.sendMessage).toHaveBeenCalledWith(
+        '500',
+        expect.stringContaining('mensagens demais'),
+      );
+    });
+
+    it('o limite e POR remetente: quem esgotou a cota nao atrapalha os outros', async () => {
+      const lote = [
+        mensagem(1, 500),
+        mensagem(2, 500),
+        mensagem(3, 500),
+        mensagem(4, 600),
+        mensagem(5, 700),
+      ];
+
+      await rodar(lote, { limite: 1 });
+
+      const entregues = adapter.handleUpdate.mock.calls.map(
+        ([u]) => (u as { update_id: number }).update_id,
+      );
+      expect(entregues).toEqual([1, 4, 5]);
+    });
+
+    it('so conta o que VIRA comando: grupo e nao-texto passam ao tratador sem gastar cota', async () => {
+      const grupo = {
+        update_id: 9,
+        message: {
+          message_id: 1,
+          date: Math.floor(Date.now() / 1000),
+          chat: { id: -1, type: 'group' },
+          from: { id: 500, is_bot: false },
+          text: '/ajuda',
+        },
+      };
+
+      await rodar([grupo, grupo, mensagem(10, 500)], { limite: 1 });
+
+      expect(adapter.handleUpdate).toHaveBeenCalledTimes(3);
+    });
+
+    it('a falha em enviar o aviso nao derruba o laco', async () => {
+      client.sendMessage.mockRejectedValue(new Error('telegram fora'));
+
+      await rodar([mensagem(1, 500), mensagem(2, 500)], { limite: 1 });
+
+      expect(adapter.handleUpdate).toHaveBeenCalledTimes(1);
+      expect(client.getUpdates).toHaveBeenCalledTimes(2);
+    });
+
+    it('sem configuracao valida usa 10 por minuto', async () => {
+      await rodar(Array.from({ length: 12 }, (_v, i) => mensagem(i + 1, 500)));
+
+      expect(adapter.handleUpdate).toHaveBeenCalledTimes(10);
+    });
+
+    it('os logs do descarte nao levam texto, id do remetente nem token', async () => {
+      await rodar(
+        [
+          mensagem(1, 31415926, '/financeiro SEGREDO-X', 20 * 60),
+          mensagem(2, 31415926, 'a'),
+          mensagem(3, 31415926, 'b'),
+        ],
+        { limite: 1 },
+      );
+
+      const registrado = JSON.stringify(logs.map((spy) => spy.mock.calls as unknown[]));
+      expect(registrado).not.toContain('SEGREDO-X');
+      expect(registrado).not.toContain('31415926');
+      expect(registrado).not.toContain(TOKEN_FALSO);
     });
   });
 });

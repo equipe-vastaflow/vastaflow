@@ -1,4 +1,10 @@
-import { isCalendarDate, parseCalendarDate, validatePeriod } from './plantae-dates';
+import {
+  addDaysToCalendarDate,
+  isCalendarDate,
+  parseCalendarDate,
+  todayInTimeZone,
+  validatePeriod,
+} from './plantae-dates';
 
 describe('parseCalendarDate', () => {
   it('aceita um dia real', () => {
@@ -111,5 +117,60 @@ describe('validatePeriod', () => {
         process.env.TZ = original;
       }
     }
+  });
+});
+
+describe('addDaysToCalendarDate', () => {
+  it.each([
+    ['2026-10-13', 7, '2026-10-20'],
+    ['2026-10-30', 3, '2026-11-02'],
+    ['2026-12-28', 7, '2027-01-04'],
+    ['2028-02-27', 2, '2028-02-29'],
+    ['2026-02-27', 2, '2026-03-01'],
+    ['2026-03-01', -1, '2026-02-28'],
+    ['2026-10-13', 0, '2026-10-13'],
+  ])('%s + %i dias = %s', (data, dias, esperado) => {
+    expect(addDaysToCalendarDate(data, dias)).toBe(esperado);
+  });
+
+  it.each(['2026-02-30', 'hoje', '', '2026-13-01', '13/10/2026'])(
+    'data invalida (%p): null',
+    (data) => {
+      expect(addDaysToCalendarDate(data, 1)).toBeNull();
+    },
+  );
+
+  it('nao depende do fuso do servidor (nem do horario de verao)', () => {
+    const original = process.env.TZ;
+    try {
+      for (const tz of ['America/Sao_Paulo', 'Pacific/Auckland', 'UTC']) {
+        process.env.TZ = tz;
+        expect(addDaysToCalendarDate('2026-10-01', 31)).toBe('2026-11-01');
+      }
+    } finally {
+      if (original === undefined) {
+        delete process.env.TZ;
+      } else {
+        process.env.TZ = original;
+      }
+    }
+  });
+});
+
+describe('todayInTimeZone', () => {
+  it('usa o fuso de Brasilia por padrao: 01:00 UTC ainda e o dia anterior', () => {
+    expect(todayInTimeZone(new Date('2026-10-13T01:00:00Z'))).toBe('2026-10-12');
+    expect(todayInTimeZone(new Date('2026-10-13T03:00:00Z'))).toBe('2026-10-13');
+    expect(todayInTimeZone(new Date('2026-10-13T15:00:00Z'))).toBe('2026-10-13');
+  });
+
+  it('respeita outro fuso quando pedido', () => {
+    expect(todayInTimeZone(new Date('2026-10-13T23:00:00Z'), 'Pacific/Auckland')).toBe(
+      '2026-10-14',
+    );
+  });
+
+  it('o formato e sempre AAAA-MM-DD', () => {
+    expect(todayInTimeZone(new Date('2026-01-05T12:00:00Z'))).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 });

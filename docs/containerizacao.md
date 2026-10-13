@@ -271,6 +271,75 @@ computador do desenvolvedor, e esta em `docs/integracao-plantae.md` (secao 7.1).
 - O que ainda nao foi exercitado na API real: `docs/integracao-plantae.md`, secoes 6 e 7.2.
 - Linux/VPS.
 
+## Fase 5 - Telegram + n8n no Docker (mensagens SIMULADAS; bot real NAO ativado)
+
+Validado em Docker Desktop em 2026-10-13, com a imagem reconstruida a partir do codigo da fase,
+MySQL 8.4.9 (TLS) e n8n 2.43.1 reais. **Nenhuma mensagem foi enviada ao Telegram, nenhum token de bot
+foi usado, o Plantae ficou desligado.** Detalhes e modelo de confianca: `docs/telegram-n8n.md`.
+
+| # | Prova | Resultado |
+| --- | --- | --- |
+| 1 | O backend **se recusou a subir** com a migration nova pendente (`PendingMigrationsCheck`); depois de reconstruir e rodar o `migrate`, aplicou `TelegramInboundEvents1791500000000` **sobre o banco existente** (8 migrations anteriores) | PASS |
+| 2 | Tabela `telegram_inbound_events` no MySQL real com indice unico `ux_tg_evt_bot_update (canal, bot_id, update_id)` e `update_id decimal(20,0)` | PASS |
+| 3 | Workflow versionado importado no n8n (credencial Header Auth do principal `n8n-telegram`) e **ativado** | PASS |
+| 4 | Simulador -> n8n -> backend: ADMIN `/ajuda`, `/status`, `/financeiro` = `EXECUTED` com assinatura da resposta valida; a ajuda do OPERADOR lista so o que ele pode | PASS |
+| 5 | OPERADOR `/financeiro` = `DENIED`; id nao vinculado = `UNLINKED`; ADMIN `/contas_pagar` com o chat desligado = frase fixa, nenhuma consulta | PASS |
+| 6 | Mesmo update 2x = `DUPLICATE` (sem resposta); apos **reiniciar o backend** continua duplicado; **6 entregas simultaneas** do mesmo update = **1** executa, 5 duplicadas | PASS |
+| 7 | Assinatura com chave errada = o backend recusa (403) e o workflow devolve `UNAVAILABLE`, que o simulador classifica como assinatura invalida | PASS |
+| 8 | Workflow desativado = entrega falha (`http`); credencial do principal `n8n` (so identidade) = 403 -> `UNAVAILABLE`; credencial desconhecida = 401 -> `UNAVAILABLE`; credencial correta restaurada | PASS |
+| 9 | O n8n **nao** tem variavel de Telegram/Plantae/chave de assinatura; **nao resolve** `mysql`; **nao guarda execucoes** (API de execucoes vazia) | PASS |
+| 10 | `/api/service/telegram/ingest` e `/api/service/identity` = 404 pela borda; so `127.0.0.1:8080` e `127.0.0.1:5678` publicados | PASS |
+| 11 | Auditoria `CHANNEL_MESSAGE` (7 desfechos vistos) com `principal` e `servicoId`, **sem** texto, id do Telegram nem chave; logs do backend e do n8n sem texto sentinela, id, chave nem token (com controle positivo) | PASS |
+
+### Defeitos que so a execucao revelou (corrigidos)
+
+1. **`migrate` usa imagem propria.** Reconstruir so o `backend` deixou o `migrate` velho ("No migrations are
+   pending") e o backend, corretamente, nao subiu. Em todo deploy: `build` de **ambos**.
+2. **Mensagens encaminhadas nao eram ignoradas** (achado na revisao final, nao no Docker): o mapper so
+   filtrava grupo, bot e nao-texto. Passou a ignorar `forward_*`, `is_automatic_forward` e `via_bot`, nos dois
+   modos de entrega.
+3. Artefatos do Git Bash no Windows: `/ajuda` virou caminho (`MSYS_NO_PATHCONV=1`); o rate limit de login do
+   n8n (429) apareceu ao automatizar logins repetidos.
+
+### Nao validado
+
+- `getUpdates` -> relay -> `sendMessage` contra o Telegram real (so testes unitarios com cliente falso).
+- `/contas_pagar` contra o Plantae real; Oracle; Linux/VPS; HTTPS publico.
+
+## Fase 5.1 - transporte do Telegram com Bot API FALSO
+
+Validado em Docker Desktop em 2026-10-13: Bot API falso (`telegram-fake`) -> polling real do backend ->
+n8n 2.43.1 real -> ingestao -> `sendMessage` no falso. **Sem Telegram real, sem Plantae real.**
+Cenarios A a L, mensagens antigas e limite por remetente: ver `docs/telegram-n8n.md` secao 12.7.
+
+| # | Prova | Resultado |
+| --- | --- | --- |
+| 1 | Imagens `backend` e `migrate` reconstruidas juntas; stack `healthy` (backend, mysql, postgres, n8n, nginx, telegram-fake) | PASS |
+| 2 | Migration em banco **vazio** (9 migrations, `ux_tg_evt_bot_update` unico em `(canal,bot_id,update_id)`, tabela vazia) e 2a execucao "No migrations are pending" | PASS |
+| 3 | Migration sobre banco **existente** sem apagar dados (Fase 5) e backend so sobe depois do `migrate` (`PendingMigrationsCheck`) | PASS |
+| 4 | Cadeia real: A, B, C, E, J, D (apos reiniciar o backend), G (0 conflitos de `getUpdates`) | PASS |
+| 5 | Adulteracao no n8n real: resposta (H), envelope/chat (I), escopo errado (L), Plantae desligado (K), n8n parado (F) | PASS |
+| 6 | Service auth do container do n8n: token `n8n-telegram` na rota de identidade = 403; token `n8n` = 200; desconhecido = 401 | PASS |
+| 7 | Eventos presos: `report`, aviso no boot, `abandon` (recusa recente/inexistente), `purge` (piso de 7 dias, simulacao, so terminais), auditoria `TELEGRAM_EVENT_ADMIN` | PASS |
+| 8 | Privacidade: logs de backend/n8n/PostgreSQL/Nginx/migrate e auditoria sem texto sentinela, id do Telegram, token do bot, chave nem tokens de servico (com controles positivos); n8n sem execucoes gravadas | PASS |
+
+### Defeitos corrigidos nesta fase (achados ao executar)
+
+1. A auditoria do roteador gravava `conversationId` (= id da conta no Telegram) nas linhas de comandos
+   auditados; agora so no endpoint de teste. Linhas antigas nao foram reescritas.
+2. `Buffer.from(hex)` aceitava assinatura valida + lixo no lado da resposta (hex estrito agora).
+3. Updates antigos reentregues apos queda eram executados; agora a mensagem tem prazo de 10 min.
+4. Sem limite por remetente; agora ha (secao 12.5 do doc do Telegram).
+5. No teste: `iniciarN8n()` repetido vazava um servidor (Jest nao encerrava); a base da Bot API estava fixa.
+
+### Reproduzir com o Bot API falso
+
+```bash
+# .env de TESTE: TELEGRAM_API_BASE_URL=http://telegram-fake:8081, TELEGRAM_BOT_TOKEN=<ficticio>,
+#                TELEGRAM_POLLING_ENABLED=true, TELEGRAM_DELIVERY_MODE=n8n (+ URL do webhook e chave)
+docker compose -f docker-compose.production.yml -f backend/test/fake-telegram/docker-compose.fake-telegram.yml up -d
+```
+
 ## Reproduzir
 
 Pre-requisitos: Docker Engine + Compose, `openssl`.

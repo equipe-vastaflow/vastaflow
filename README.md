@@ -35,7 +35,8 @@ O desenvolvimento e **incremental**: a fundacao vem antes das automacoes.
 | Notificacoes internas             | Funcionando (API + tela). Somente internas: sem e-mail, push ou mensageria |
 | Perfil do proprio usuario         | Funcionando (API + tela). So o nome e editavel; sem troca de senha ou e-mail |
 | Frontend: login, dashboard, usuarios, auditoria, financeiro, configuracoes | Funcionando |
-| Integracoes externas              | Nao iniciado - apenas pastas reservadas |
+| Integracoes externas              | Telegram (Fase 2), n8n + autenticacao de servico (Fase 3), Plantae somente leitura (Fase 4); WhatsApp, NFS-e e e-mail: nao iniciados |
+| Telegram + n8n (Fase 5)           | Fluxo conversacional ponta a ponta validado **localmente com mensagens simuladas**; **bot real nao ativado**, desligado por padrao. Ver [docs/telegram-n8n.md](docs/telegram-n8n.md) |
 
 > Nenhuma integracao possui endpoint, token ou payload definido. Nada foi
 > inventado: cada uma sera implementada quando houver documentacao e acesso
@@ -616,6 +617,9 @@ Respostas de erro 5xx nao expoem a causa: devolvem mensagem generica e um
 - [ADR 0003](docs/adr/0003-topologia-de-producao.md) - topologia de producao (VPS unica, Docker Compose, n8n self-hosted)
 - [docs/autenticacao-servico-a-servico.md](docs/autenticacao-servico-a-servico.md) - autenticacao do n8n na API: credencial de servico, rotacao e revogacao (implementada e validada localmente na Fase 3; **sem workflows de negocio**)
 - [docs/integracao-plantae.md](docs/integracao-plantae.md) - consulta ao Plantae (API externa, **somente leitura**, **somente homologacao**): contrato, decisoes, seguranca e procedimento de homologacao (Fase 4; testada com mocks e **parcialmente validada em homologacao real**: linhas do extrato, NF-e e organizacao da cliente ainda pendentes)
-- [docs/containerizacao.md](docs/containerizacao.md) - o que foi validado em Docker, incluindo n8n + PostgreSQL (Fase 3)
+- [docs/telegram-n8n.md](docs/telegram-n8n.md) - fluxo Telegram -> n8n -> NestJS (Fase 5): envelope assinado, autorizacao pela identidade vinculada, idempotencia, `/contas_pagar`, operacao e limites
+- [docs/telegram-n8n.md, secao 12](docs/telegram-n8n.md) - Fase 5.1: papel exato do n8n, entrega at-most-once, eventos presos, rate limit, Bot API falso e procedimento (nao executado) para o bot real
+- [ADR 0004](docs/adr/0004-telegram-n8n-envelope-assinado.md) - por que o backend le o Telegram e entrega um envelope assinado ao n8n (o n8n nao recebe o token do bot)
+- [docs/containerizacao.md](docs/containerizacao.md) - o que foi validado em Docker, incluindo n8n + PostgreSQL (Fase 3) e o fluxo do Telegram (Fase 5)
 
 Documentacao em portugues. Codigo em ingles.

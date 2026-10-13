@@ -288,12 +288,12 @@ describe('Autenticacao de servico (e2e)', () => {
       );
     });
 
-    it('as rotas de SERVICO sao exatamente [GET /service/identity]', () => {
+    it('as rotas de SERVICO sao exatamente [GET /service/identity, POST /service/telegram/ingest]', () => {
       const servico = rotas()
         .filter((r) => r.servico)
         .map((r) => `${r.metodo} ${r.caminho}`);
 
-      expect(servico).toEqual(['GET /service/identity']);
+      expect(servico.sort()).toEqual(['GET /service/identity', 'POST /service/telegram/ingest']);
     });
 
     it('nenhuma rota e publica E de servico ao mesmo tempo', () => {

@@ -3,7 +3,7 @@ import {
   type ServiceCredentialRecord,
   type ServiceCredentialsFile,
 } from './service-credentials.file';
-import { isServicePrincipalId, type ServicePrincipalId } from './service-principals';
+import { isServicePrincipalId } from './service-principals';
 import { generateServiceToken, hashServiceToken } from './service-token';
 
 /**
@@ -121,7 +121,7 @@ export function describeCredentials(file: ServiceCredentialsFile, now: Date): st
     ]
       .filter((part): part is string => part !== undefined)
       .join(' ');
-    return `${state.padEnd(9)} ${c.id.padEnd(24)} ${(c.principal as ServicePrincipalId).padEnd(6)} ${extra}`;
+    return `${state.padEnd(9)} ${c.id.padEnd(24)} ${c.principal.padEnd(14)} ${extra}`;
   });
 }
 

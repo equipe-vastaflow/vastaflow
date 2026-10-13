@@ -50,6 +50,36 @@ export function parseCalendarDate(
   return { year, month, day };
 }
 
+const pad = (n: number, width: number): string => String(n).padStart(width, '0');
+
+/**
+ * Soma dias a um dia de calendario `AAAA-MM-DD`, em UTC (sem fuso, sem horario de
+ * verao). `null` se a data de entrada nao for um dia real.
+ */
+export function addDaysToCalendarDate(text: string, days: number): string | null {
+  const date = parseCalendarDate(text);
+  if (!date) {
+    return null;
+  }
+  const moved = new Date(Date.UTC(date.year, date.month - 1, date.day) + days * DAY_MS);
+  return `${pad(moved.getUTCFullYear(), 4)}-${pad(moved.getUTCMonth() + 1, 2)}-${pad(moved.getUTCDate(), 2)}`;
+}
+
+/**
+ * O dia de HOJE em um fuso nomeado (padrao: o de Brasilia), como `AAAA-MM-DD`.
+ * Usado so onde "hoje" e uma regra de negocio documentada (periodo padrao dos
+ * comandos de chat); o fuso e fixo, nao o do servidor.
+ */
+export function todayInTimeZone(now: Date, timeZone = 'America/Sao_Paulo'): string {
+  // `en-CA` formata como AAAA-MM-DD.
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(now);
+}
+
 /** `true` se o texto for um dia real. Usado nas datas que o Plantae DEVOLVE. */
 export function isCalendarDate(text: string): boolean {
   return parseCalendarDate(text) !== null;

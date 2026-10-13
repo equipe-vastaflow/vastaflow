@@ -36,7 +36,9 @@ import { NonProductionGuard } from './non-production.guard';
     FinanceCommandHandler,
     NonProductionGuard,
   ],
-  exports: [CommandRouter],
+  // O catalogo e exportado para que um modulo de dominio/integracao registre o SEU
+  // comando (ex.: `/contas_pagar`, do Plantae) sem este modulo importa-lo.
+  exports: [CommandRouter, CommandCatalog],
 })
 export class CommandsModule implements OnModuleInit {
   constructor(

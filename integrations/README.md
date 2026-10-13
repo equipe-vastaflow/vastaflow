@@ -22,7 +22,7 @@ precisar ser jogado fora. Cada integracao so sera escrita quando tivermos:
 | Pasta       | Provedor         | Pendencia                                        |
 | ----------- | ---------------- | ------------------------------------------------ |
 | `whatsapp/` | a definir        | Provedor nao escolhido (API oficial? terceiro?)   |
-| `telegram/` | Telegram Bot API | Feito (polling + vinculo administrativo) no backend |
+| `telegram/` | Telegram Bot API | Feito (polling + vinculo administrativo) no backend; `telegram/n8n/` tem o workflow versionado da Fase 5 |
 | `plantae/`  | Plantae          | Sem documentacao de API e sem acesso              |
 | `nfse/`     | a definir        | Municipio e provedor nao definidos                |
 | `email/`    | SMTP             | Servidor, porta e politica de autenticacao        |

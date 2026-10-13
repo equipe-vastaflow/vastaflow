@@ -5,6 +5,7 @@ import { CommandCatalog } from '../../commands/command-catalog';
 import { CommandRouter, ROUTER_MESSAGES } from '../../commands/command-router.service';
 import {
   CommandChannel,
+  CommandOutcome,
   commandOk,
   type CommandContext,
   type CommandHandler,
@@ -15,7 +16,7 @@ import { PermissionCode } from '../../permissions/permission-code.enum';
 import { RoleName } from '../../roles/role-name.enum';
 import { type ChannelIdentityResolver } from '../channels/channel-identity';
 import { type ChannelLinkConfirmer, LinkConfirmationOutcome } from '../channels/channel-link';
-import type { ExternalIdentity } from '../channels/incoming-message';
+import type { ExternalIdentity, IncomingMessage } from '../channels/incoming-message';
 import { DatabaseIdentityResolver } from '../../external-identities/database-identity.resolver';
 import type { ExternalIdentityLink } from '../../external-identities/entities/external-identity-link.entity';
 import type { ExternalIdentitiesRepository } from '../../external-identities/external-identities.repository';
@@ -512,6 +513,108 @@ describe('TelegramAdapter', () => {
       expect(registrado).not.toContain('minha-senha-secreta');
       expect(registrado).not.toContain(String(CHAT));
       expect(registrado).not.toContain('Comandos disponiveis');
+    });
+  });
+  describe('processMessage (reutilizado pela entrada de servico)', () => {
+    const mensagem = (text: string, externalId = String(CHAT)): IncomingMessage => ({
+      channel: 'telegram',
+      conversationId: externalId,
+      sender: { channel: 'telegram', externalId },
+      text,
+      receivedAt: new Date('2026-10-13T12:00:00Z'),
+    });
+
+    it('decide a resposta SEM enviar nada ao Telegram', async () => {
+      const out = await adapter(vinculado()).processMessage(mensagem('/ajuda'));
+
+      expect(out).toMatchObject({
+        outcome: TelegramUpdateOutcome.Executed,
+        userId: VINCULADO.id,
+        commandOutcome: CommandOutcome.Ok,
+        command: 'ajuda',
+      });
+      expect(out.reply).toContain('Comandos disponiveis');
+      expect(client.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it('sem vinculo: nao vinculado e nenhum comando executado', async () => {
+      const out = await adapter(SEM_VINCULO).processMessage(mensagem('/status'));
+
+      expect(out).toMatchObject({
+        outcome: TelegramUpdateOutcome.Unlinked,
+        reply: TELEGRAM_UNLINKED_REPLY,
+        userId: null,
+        commandOutcome: null,
+        command: null,
+      });
+      expect(execute).not.toHaveBeenCalled();
+    });
+
+    it('com permissao negada: o RBAC da PESSOA vale e o desfecho e PERMISSION_DENIED', async () => {
+      const out = await adapter(vinculado()).processMessage(mensagem('/restrito'));
+
+      expect(out.commandOutcome).toBe(CommandOutcome.PermissionDenied);
+      expect(out.command).toBe('restrito');
+      expect(out.reply).not.toContain('Conteudo restrito');
+    });
+
+    it('so devolve o nome de comando REGISTRADO (nunca texto livre nem argumentos)', async () => {
+      const resolvedor = vinculado();
+      const a = adapter(resolvedor);
+
+      expect((await a.processMessage(mensagem('/inexistente SEGREDO'))).command).toBeNull();
+      expect((await a.processMessage(mensagem('ola SEGREDO'))).command).toBeNull();
+      expect((await a.processMessage(mensagem('/ajuda SEGREDO'))).command).toBe('ajuda');
+    });
+
+    describe('allowLinking: false', () => {
+      it('/vincular NAO chega ao confirmador (o codigo nao e tratado aqui)', async () => {
+        const tryConfirm = jest.fn(() => Promise.resolve(LinkConfirmationOutcome.Confirmed));
+        const confirmador: ChannelLinkConfirmer = { tryConfirm };
+
+        const out = await adapter(SEM_VINCULO, confirmador).processMessage(
+          mensagem('/vincular ABCD-EFGH-IJKL'),
+          { allowLinking: false },
+        );
+
+        expect(tryConfirm).not.toHaveBeenCalled();
+        expect(out.outcome).toBe(TelegramUpdateOutcome.Unlinked);
+      });
+
+      it('com vinculo, `/vincular` vira comando desconhecido, nunca confirmacao', async () => {
+        const tryConfirm = jest.fn(() => Promise.resolve(LinkConfirmationOutcome.Confirmed));
+        const confirmador: ChannelLinkConfirmer = { tryConfirm };
+
+        const out = await adapter(vinculado(), confirmador).processMessage(
+          mensagem('/vincular ABCD-EFGH-IJKL'),
+          { allowLinking: false },
+        );
+
+        expect(tryConfirm).not.toHaveBeenCalled();
+        expect(out.outcome).toBe(TelegramUpdateOutcome.Executed);
+        expect(out.commandOutcome).toBe(CommandOutcome.UnknownCommand);
+      });
+
+      it('por padrao (handleUpdate direto) o vinculo continua funcionando', async () => {
+        const tryConfirm = jest.fn(() => Promise.resolve(LinkConfirmationOutcome.Confirmed));
+        const confirmador: ChannelLinkConfirmer = { tryConfirm };
+
+        const out = await adapter(SEM_VINCULO, confirmador).processMessage(
+          mensagem('/vincular ABCD-EFGH-IJKL'),
+        );
+
+        expect(out.outcome).toBe(TelegramUpdateOutcome.LinkConfirmed);
+      });
+    });
+
+    it('falha do resolvedor vira "nao vinculado", nunca acesso liberado', async () => {
+      const quebrado: ChannelIdentityResolver = { resolve: () => Promise.reject(new Error('db')) };
+      jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+      const out = await adapter(quebrado).processMessage(mensagem('/financeiro'));
+
+      expect(out.outcome).toBe(TelegramUpdateOutcome.Unlinked);
+      expect(execute).not.toHaveBeenCalled();
     });
   });
 });
