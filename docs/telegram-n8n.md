@@ -111,9 +111,9 @@ para outro, e a assinatura de um envelope nao vale como a de uma resposta.
 4. **Confidencialidade:** chats comuns do Telegram **nao** sao ponta a ponta; o
    texto e a resposta (que podem ter dado financeiro) ficam nos servidores deles.
    Por isso `/contas_pagar` e opt-in, tem permissao propria e e so de leitura.
-5. **O texto da mensagem trafega pelo n8n** (rede interna, HTTP). O n8n nao grava o
-   conteudo das execucoes (`EXECUTIONS_DATA_SAVE_*=none`, tambem no workflow), mas
-   quem administra o n8n pode ler o trafego em memoria.
+5. **O texto da mensagem trafega pelo n8n** (rede interna, HTTP) e e **gravado transitoriamente** no
+   PostgreSQL dele (secao 14): `EXECUTIONS_DATA_SAVE_*=none` NAO impede a gravacao inicial; o Compose
+   reduz a janela para ~segundos. Quem administra o n8n tambem pode ler o trafego em memoria.
 6. **Falsificar um evento do Telegram** exigiria o token do bot (so no backend); a
    assinatura **nao** protege o trecho Telegram -> backend (TLS da Bot API protege).
 7. **At-most-once:** se o backend cair depois de reservar o update e antes de
@@ -444,3 +444,109 @@ Precisa de autorizacao explicita e separada. Em um ambiente de homologacao, uma 
 - Rate limit por processo; laco sequencial (uma consulta lenta atrasa todos).
 - `PROCESSANDO` preso exige intervencao humana (CLI); nao ha recuperacao automatica por desenho.
 - Sem agendador interno de retencao; Oracle nao executado; `/contas_pagar` nunca consultou o Plantae real.
+
+## 13. Fase 5.2 - ativacao do bot REAL (@VastaOficialBot), ambiente local
+
+> Executada em 2026-10-14, **somente em ambiente local**, com uma conta de teste, comandos
+> inofensivos, Plantae desligado e nenhuma operacao financeira real. Nenhum segredo e documentado.
+
+### 13.1 Procedimento que foi seguido (reutilizavel)
+
+1. **Token:** o token inicial do BotFather foi revogado e substituido; o novo foi colado **pela pessoa**
+   no `.env` local (gitignored). Ele nunca passa por chat, argumento de linha de comando ou Git.
+2. **`.env`:** segredos aleatorios (bancos, JWT, n8n, chave HMAC) gerados sem imprimir; `TELEGRAM_BOT_TOKEN`
+   preenchido a mao; `TELEGRAM_API_BASE_URL` **vazio** (API oficial); `PLANTAE_ENABLED=false` e
+   `PLANTAE_CHAT_COMMANDS_ENABLED=false`; `TELEGRAM_POLLING_ENABLED=false` ate a autorizacao final.
+3. **Stack:** TLS local (`scripts/gerar-tls-dev.sh`), `docker compose build backend migrate`, `up -d backend n8n`
+   (sem Nginx: nada de porta publica; so o editor do n8n em `127.0.0.1`). O primeiro boot do MySQL pode passar
+   do prazo do healthcheck; basta subir de novo.
+4. **Credencial de servico** pelo CLI oficial (principal `n8n-telegram`; o principal `n8n` nao e reutilizado); o
+   token foi para o cofre do n8n e o arquivo temporario foi apagado.
+5. **n8n:** dono local, credencial Header Auth, importacao e ativacao do workflow versionado.
+6. **Diagnostico unico:** `getMe` (conferir `@VastaOficialBot`) e `getWebhookInfo` (conferir que NAO ha webhook).
+   Com webhook ou outro consumidor, **parar**: nao se executa `deleteWebhook`/`setWebhook` sem autorizacao.
+7. **Usuario de teste e vinculo** pelo CLI local (13.2), sem ADMIN.
+8. **Ativacao:** `TELEGRAM_POLLING_ENABLED=true`, recriar **so o backend**, conferir `polling iniciado`.
+9. A pessoa enviou `/start`, gerou o codigo no proprio terminal, enviou `/vincular <codigo>` ao bot e testou
+   `/ajuda`, `/status` e `/financeiro`.
+
+### 13.2 CLI local de preparacao (`local-operator.cli.js`)
+
+```bash
+docker compose -f docker-compose.production.yml exec backend \
+  node dist/modules/external-identities/local-operator.cli.js create-operator
+docker compose -f docker-compose.production.yml exec backend \
+  node dist/modules/external-identities/local-operator.cli.js link-code --email <email>
+```
+
+- Para quem tem acesso ao **servidor** (mesmo nivel de quem le o `.env`). Exige terminal interativo; e-mail, nome e
+  senha sao digitados no prompt (senha sem eco). Nada de senha por argumento, variavel de ambiente ou pipe.
+- O perfil criado e **sempre OPERADOR**; nao ha opcao de perfil, e `link-code` recusa ADMIN, usuario inativo e
+  inexistente. O codigo (15 min, uso unico) aparece **uma vez**, so no terminal; so o hash vai ao banco.
+- **Nao sobe a aplicacao Nest** (nada de segundo polling).
+- Auditoria `USER_CREATED` / `IDENTITY_LINK_REQUESTED` com `origem: cli-local`, **sem ator** (`usuarioId` nulo; o
+  usuario atingido em `alvoId`). A solicitacao de vinculo registra o proprio alvo como autor: e um procedimento de
+  quem opera o servidor, nao uma acao de um usuario da aplicacao.
+- Limites: nao e um fluxo de producao com ADMIN (para isso existem as rotas administrativas); a captura de senha em
+  modo raw nao trata teclas de edicao alem de apagar.
+
+### 13.3 O que foi observado com o bot real
+
+| Comando | Resultado | Registro |
+| --- | --- | --- |
+| `/start` (antes do vinculo) | "conta nao vinculada" | `UNLINKED`, sem usuario |
+| `/vincular <codigo>` | vinculo criado | tratado no backend, **nunca no n8n** (sem evento no n8n) |
+| `/start` (depois) | comando desconhecido (`/start` nao existe no Command Engine) | `UNKNOWN_COMMAND`, com usuario |
+| `/ajuda`, `/status` | resposta correta no mesmo chat | `EXECUTED / AUTORIZADO` |
+| `/financeiro` (OPERADOR) | acesso negado | `DENIED / NEGADO` |
+
+Evidencias internas (auditoria somente de leitura): 8 updates reais na tabela de idempotencia, todos `CONCLUIDO`, sem
+duplicatas; `principal = n8n-telegram` em todas as linhas; usuario = o OPERADOR; o contador do workflow no n8n bate
+com as execucoes (8 reais + testes); zero avisos de falha de entrega, assinatura ou envio; zero consultas ao Plantae;
+nenhum token, chave, codigo de vinculo ou id do Telegram nos logs de backend, n8n, PostgreSQL, MySQL e migrate.
+Nao exercitado com o bot real: reentrega duplicada (provada na 5.1 com o servidor falso).
+
+### 13.4 Rollback
+
+`TELEGRAM_POLLING_ENABLED=false` no `.env` e `docker compose up -d --no-deps backend` (para o consumo). Opcional:
+desativar o workflow e revogar a credencial (`service-credential.cli.js revoke`). Nada disto apaga volumes ou dados.
+
+## 14. Fase 5.3 - privacidade do n8n: o que ele REALMENTE grava
+
+### 14.1 O achado (Fase 5.2)
+
+Com `EXECUTIONS_DATA_SAVE_*=none`, a API do n8n mostrava **zero** execucoes, mas o PostgreSQL do n8n tinha linhas em
+`execution_entity` (status `running`, com `deletedAt` preenchido) e payloads em `execution_data` contendo o **texto do
+comando, os ids do Telegram e o envelope assinado** do trafego real. Nao havia resposta do backend nem token de servico
+nos payloads. As afirmacoes anteriores deste projeto de que "o n8n nao guarda o conteudo das execucoes" estavam
+**imprecisas** e foram corrigidas.
+
+### 14.2 Como o n8n 2.43.1 funciona (lido do codigo da imagem em uso)
+
+| Peca | Comportamento |
+| --- | --- |
+| Criacao | A execucao do webhook e **gravada ao iniciar**, com o corpo recebido em `execution_data`, independentemente de `SAVE_ON_SUCCESS`. |
+| Fim | Se o resultado nao deve ser salvo, o n8n **nao apaga** a linha: faz **soft-delete** (`deletedAt`). O status continua `running`. |
+| Hard-delete | Um job do lider apaga fisicamente as linhas com `deletedAt <= agora - EXECUTIONS_DATA_HARD_DELETE_BUFFER` (padrao **1 h**), a cada `EXECUTIONS_DATA_PRUNE_HARD_DELETE_INTERVAL` (padrao **15 min**). Janela padrao: **ate ~1 h 15 min**. |
+| Tabelas com payload | `execution_data` (corpo/payload, verificado: contem comando, ids e envelope) e `execution_entity` (metadados da execucao). |
+| Poda por idade/contagem | `EXECUTIONS_DATA_MAX_AGE` (336 h) e `EXECUTIONS_DATA_PRUNE_MAX_COUNT` (10000): pouco relevantes aqui: a linha e soft-deleted ao terminar a execucao. |
+
+### 14.3 Correcao aplicada (minimizacao, nao eliminacao)
+
+No Compose do n8n: `EXECUTIONS_DATA_HARD_DELETE_BUFFER=0` e `EXECUTIONS_DATA_PRUNE_HARD_DELETE_INTERVAL=1`. **Medido** no
+Docker real: uma mensagem com texto sentinela ficava gravada logo apos a execucao e foi **removida fisicamente em ~25 s**
+(antes: ate ~1 h 15 min); as 4 linhas reais antigas foram removidas pelo proprio pruner do n8n. Nenhum `DELETE` manual foi
+feito. `backend/src/n8n-privacy.compose.spec.ts` trava essas configuracoes (e a mutacao que volta o buffer para 1 h derruba o teste).
+
+### 14.4 O que continua verdadeiro (limitacoes honestas)
+
+- O n8n **ainda grava** o texto do comando, os ids e o envelope **por alguns segundos**, no PostgreSQL interno
+  (sem porta publicada, fora das redes do nucleo). Nao ha configuracao do n8n que evite a gravacao inicial.
+- Depois do `DELETE`, os bytes podem permanecer em paginas do PostgreSQL (tuplas mortas, WAL) ate o autovacuum/reciclagem, e
+  em **backups do volume** feitos nessa janela. Backup do volume do n8n deve ser tratado como dado pessoal.
+- Quem administra o n8n pode ler o trafego em memoria e, durante a janela, o banco.
+- Reducao real exigiria que o texto nao passasse pelo n8n (ex.: o n8n receber so referencias) - uma mudanca de desenho,
+  nao feita nesta fase.
+- Os logs do n8n e do backend nao registram texto, ids, chave ou tokens (verificado com sentinela).
+- Em ambientes com muitos eventos, a varredura de 1 min adiciona carga leve ao PostgreSQL do n8n.
+- O n8n registra, no boot, falha de conexao do *task runner* de Code nodes; o workflow nao usa Code nodes e o aviso nao afeta o fluxo.

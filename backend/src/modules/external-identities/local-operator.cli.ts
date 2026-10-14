@@ -34,7 +34,8 @@ import { generateLinkCode, hashLinkCode, normalizeLinkCode } from './link-code';
  *   so no terminal de quem rodou, vale 15 min e e uso unico; so o hash vai ao banco e nada do
  *   codigo vai para log ou auditoria;
  * - NAO sobe a aplicacao Nest (nada de segundo polling): fala so com o banco;
- * - deixa auditoria (`USER_CREATED`/`EXTERNAL_IDENTITY_LINK_REQUESTED`) com origem `cli-local`.
+ * - deixa auditoria (`USER_CREATED`/`IDENTITY_LINK_REQUESTED`) com origem `cli-local`, SEM ator
+ *   (`usuarioId` nulo) e com o usuario atingido em `alvoId`.
  *
  * O Telegram so vira identidade depois que a PESSOA envia `/vincular <codigo>` ao bot - a prova
  * de posse acontece no chat, nao aqui.
@@ -207,12 +208,14 @@ async function main(): Promise<number> {
       audit: async (acao, userId, metadados) => {
         await audit.save(
           audit.create({
-            usuarioId: userId,
+            // Sem ATOR de aplicacao: quem operou foi alguem com acesso ao servidor. O usuario
+            // atingido consta como `alvoId` (o `usuarioId` da trilha e sempre o ator).
+            usuarioId: null,
             acao,
             modulo: AuditModuleName.Users,
             descricao: 'Procedimento local de preparacao de usuario de teste',
             ip: null,
-            metadados,
+            metadados: { ...metadados, alvoId: userId },
           }),
         );
       },

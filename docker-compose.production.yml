@@ -439,6 +439,15 @@ services:
       EXECUTIONS_DATA_SAVE_ON_ERROR: none
       EXECUTIONS_DATA_SAVE_ON_PROGRESS: 'false'
       EXECUTIONS_DATA_SAVE_MANUAL_EXECUTIONS: 'false'
+      # ATENCAO (achado da Fase 5.2): "nao salvar" NAO significa "nunca gravar". O n8n grava a
+      # execucao (inclusive o corpo do webhook: texto do comando, ids do Telegram e o envelope)
+      # ao INICIAR e, ao terminar, so a marca como apagada (soft-delete); o apagamento fisico
+      # espera `EXECUTIONS_DATA_HARD_DELETE_BUFFER` (padrao 1 h) e roda a cada
+      # `EXECUTIONS_DATA_PRUNE_HARD_DELETE_INTERVAL` (padrao 15 min). Aqui o buffer e 0 e a
+      # varredura e de 1 min: o dado fica no PostgreSQL por ~1-2 min, nao ~1 h 15 min.
+      # Continua sendo retencao transitoria, nao ausencia de gravacao (docs/telegram-n8n.md).
+      EXECUTIONS_DATA_HARD_DELETE_BUFFER: '0'
+      EXECUTIONS_DATA_PRUNE_HARD_DELETE_INTERVAL: '1'
       # Uma mensagem de chat e minuscula: corpo maximo de 1 MiB no webhook.
       N8N_PAYLOAD_SIZE_MAX: '1'
     volumes:

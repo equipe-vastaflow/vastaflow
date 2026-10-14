@@ -68,7 +68,8 @@ destino**.
   cujos chats comuns nao sao ponta a ponta.
 - **Entrega ao n8n em HTTP** na rede interna (`automation`), como a Fase 3; a autenticidade
   vem da assinatura **dentro** do corpo, nao do canal.
-- O n8n **nao grava conteudo** de execucao (global e no workflow).
+- O n8n **grava o conteudo de forma transitoria**, mesmo com "nao salvar" (correcao da 5.3, ver
+  `docs/telegram-n8n.md` secao 14): corpo do webhook por ~segundos, com o buffer de apagamento em 0.
 
 ## Consequencias
 

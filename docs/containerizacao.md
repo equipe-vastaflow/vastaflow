@@ -287,7 +287,7 @@ foi usado, o Plantae ficou desligado.** Detalhes e modelo de confianca: `docs/te
 | 6 | Mesmo update 2x = `DUPLICATE` (sem resposta); apos **reiniciar o backend** continua duplicado; **6 entregas simultaneas** do mesmo update = **1** executa, 5 duplicadas | PASS |
 | 7 | Assinatura com chave errada = o backend recusa (403) e o workflow devolve `UNAVAILABLE`, que o simulador classifica como assinatura invalida | PASS |
 | 8 | Workflow desativado = entrega falha (`http`); credencial do principal `n8n` (so identidade) = 403 -> `UNAVAILABLE`; credencial desconhecida = 401 -> `UNAVAILABLE`; credencial correta restaurada | PASS |
-| 9 | O n8n **nao** tem variavel de Telegram/Plantae/chave de assinatura; **nao resolve** `mysql`; **nao guarda execucoes** (API de execucoes vazia) | PASS |
+| 9 | O n8n **nao** tem variavel de Telegram/Plantae/chave de assinatura; **nao resolve** `mysql`; execucoes nao aparecem na API (**mas o corpo e gravado transitoriamente no PostgreSQL**; corrigido/medido na Fase 5.3, `docs/telegram-n8n.md` secao 14) | PASS com ressalva |
 | 10 | `/api/service/telegram/ingest` e `/api/service/identity` = 404 pela borda; so `127.0.0.1:8080` e `127.0.0.1:5678` publicados | PASS |
 | 11 | Auditoria `CHANNEL_MESSAGE` (7 desfechos vistos) com `principal` e `servicoId`, **sem** texto, id do Telegram nem chave; logs do backend e do n8n sem texto sentinela, id, chave nem token (com controle positivo) | PASS |
 
@@ -339,6 +339,13 @@ Cenarios A a L, mensagens antigas e limite por remetente: ver `docs/telegram-n8n
 #                TELEGRAM_POLLING_ENABLED=true, TELEGRAM_DELIVERY_MODE=n8n (+ URL do webhook e chave)
 docker compose -f docker-compose.production.yml -f backend/test/fake-telegram/docker-compose.fake-telegram.yml up -d
 ```
+
+## Fase 5.2 e 5.3 - bot real e privacidade do n8n
+
+Bot real `@VastaOficialBot` ativado **so em ambiente local** (Fase 5.2) e achado/correcao da persistencia transitoria
+do n8n (Fase 5.3): ver `docs/telegram-n8n.md`, secoes 13 e 14. Em Docker: `EXECUTIONS_DATA_HARD_DELETE_BUFFER=0` e
+`EXECUTIONS_DATA_PRUNE_HARD_DELETE_INTERVAL=1` reduziram a retencao do corpo das mensagens de ~1 h 15 min para ~25 s
+(medido com sentinela); stack saudavel, volumes preservados.
 
 ## Reproduzir
 

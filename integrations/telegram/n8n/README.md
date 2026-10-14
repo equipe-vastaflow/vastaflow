@@ -20,7 +20,9 @@ A verificacao CRIPTOGRAFICA da assinatura acontece so no backend (transporte e i
 chave e nao deve ter. A decisao do workflow e apenas estrutural.
 
 O n8n **nao**: acessa o MySQL, conhece o token do bot, o token do Plantae ou a chave de
-assinatura, escolhe o usuario, altera a resposta, nem guarda o conteudo das execucoes.
+assinatura, escolhe o usuario nem altera a resposta. O n8n **grava transitoriamente** o corpo de cada
+execucao (texto do comando, ids do Telegram, envelope) no PostgreSQL dele: com "nao salvar" + buffer 0 a
+linha some em ~segundos, mas existe (docs/telegram-n8n.md, secao 14).
 
 ## Importar (ambiente local ou servidor)
 
@@ -40,7 +42,8 @@ assinatura, escolhe o usuario, altera a resposta, nem guarda o conteudo das exec
 3. **Workflows -> Import from File** com o JSON desta pasta. No no
    "Entregar ao VastaFlow", confirme que a credencial acima esta selecionada.
 
-4. Confira nas configuracoes do workflow: execucoes de sucesso/erro **nao** salvas.
+4. Confira nas configuracoes do workflow: execucoes de sucesso/erro **nao** salvas, e no Compose o
+   `EXECUTIONS_DATA_HARD_DELETE_BUFFER=0` (sem ele o dado fica ~1 h 15 min no PostgreSQL).
 
 5. **Ative** o workflow somente quando for ligar o fluxo de verdade
    (`TELEGRAM_DELIVERY_MODE=n8n`). Antes disso, teste com o simulador:
