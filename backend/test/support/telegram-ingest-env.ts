@@ -12,3 +12,5 @@ export const INGEST_KEY_E2E = 'chave-e2e-de-assinatura-com-mais-de-32-caracteres
 
 process.env.TELEGRAM_INGEST_SIGNING_KEY = INGEST_KEY_E2E;
 process.env.PLANTAE_CHAT_COMMANDS_ENABLED = 'true';
+// Organizacao FICTICIA confirmada, so para exercitar o comando com `fetch` simulado.
+process.env.PLANTAE_ORGANIZATION_CONFIRMED = 'true';

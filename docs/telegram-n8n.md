@@ -176,9 +176,10 @@ Contas a pagar **pendentes** (`status=0`, `tipo=despesa`) por vencimento.
 - Periodo: sem argumentos = hoje (fuso de Brasilia) ate +7 dias; ou
   `/contas_pagar AAAA-MM-DD AAAA-MM-DD` (ate 31 dias). Um pedido por vez, **uma
   pagina de 5 itens**; se ha mais, avisa e orienta a reduzir o periodo.
-- Cada linha: vencimento, valor **na moeda do titulo** (texto decimal exato, sem
-  `float`, sem somar), parcela e nome (truncado, sem quebra de linha).
-  **CPF/CNPJ, observacao, descricao, documento e rateio nunca saem.**
+- Toda resposta comeca pelo aviso de **HOMOLOGACAO**. Cada linha: vencimento, valor **na moeda do titulo** (texto
+  decimal exato, sem `float`, sem somar), parcela e referencia curta (`ref <parcela_id>`); o nome do favorecido so
+  aparece com `PLANTAE_CHAT_SHOW_PAYEE_NAME=true` (padrao: oculto). So parcelas **pendentes** (filtro tambem no backend).
+  **CPF/CNPJ, observacao, descricao, documento e rateio nunca saem.** Detalhes e procedimento: `docs/integracao-plantae.md`, secao 10.
 - Falha do Plantae vira frase fixa; prazo de 20 s no chat. Reaproveita o
   `PlantaeService` (so GET, limitador de taxa, validacao de contrato).
 - **Nenhuma chamada real ao Plantae foi feita nesta fase** (testes com `fetch`
@@ -196,6 +197,8 @@ Variaveis (so o **backend** as recebe; o n8n nunca):
 | `TELEGRAM_N8N_WEBHOOK_URL` | vazio | so hosts `n8n`, `localhost`, `127.0.0.1`; `/webhook/...`; sem credencial/query |
 | `TELEGRAM_INGEST_SIGNING_KEY` | vazio | >= 32 caracteres, sem espaco; **segredo** |
 | `PLANTAE_CHAT_COMMANDS_ENABLED` | `false` | opt-in de `/contas_pagar` |
+| `PLANTAE_ORGANIZATION_CONFIRMED` | `false` | atestado da organizacao; sem ele o comando nao consulta e o boot recusa ligar o comando com a integracao ativa |
+| `PLANTAE_CHAT_SHOW_PAYEE_NAME` | `false` | mostrar o favorecido (abreviado) no chat |
 | `TELEGRAM_USER_RATE_LIMIT_PER_MINUTE` | `10` | mensagens/min por remetente (1 a 120); ver 12.5 |
 | `TELEGRAM_API_BASE_URL` | vazio | **so teste**: Bot API falso (hosts `telegram-fake`, `localhost`, `127.0.0.1`); vazio em ambiente real |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_POLLING_ENABLED` | vazio / `false` | inalterados |

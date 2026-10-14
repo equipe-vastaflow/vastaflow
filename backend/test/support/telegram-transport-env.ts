@@ -21,5 +21,6 @@ process.env.TELEGRAM_INGEST_SIGNING_KEY = TRANSPORT_KEY_E2E;
 // O Plantae fica DESLIGADO (cenario K): o comando de chat esta ligado, a integracao nao.
 process.env.PLANTAE_ENABLED = 'false';
 process.env.PLANTAE_CHAT_COMMANDS_ENABLED = 'true';
+process.env.PLANTAE_ORGANIZATION_CONFIRMED = 'true';
 // Folga para a suite inteira usar o mesmo remetente; o teste de abuso envia mais que isto.
 process.env.TELEGRAM_USER_RATE_LIMIT_PER_MINUTE = '30';

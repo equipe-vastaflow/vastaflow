@@ -362,6 +362,38 @@ describe('CommandRouter', () => {
     });
   });
 
+  describe('detalhe de auditoria (Fase 6)', () => {
+    const AUDIT = { acao: AuditAction.PlantaeQueried, modulo: AuditModuleName.Plantae };
+
+    async function metadadosDe(detail: string | undefined): Promise<Record<string, unknown>> {
+      catalog.register([
+        handler({
+          name: 'negocio',
+          audit: AUDIT,
+          handle: () => commandOk('ok', detail),
+        }),
+      ]);
+      await router.execute(context('/negocio'));
+      const [event] = auditService.record.mock.calls[0];
+      return event.metadados ?? {};
+    }
+
+    it('grava o detalhe em vocabulario fechado', async () => {
+      expect((await metadadosDe('vazio')).detalhe).toBe('vazio');
+    });
+
+    it('sem detalhe, a chave nao existe', async () => {
+      expect(await metadadosDe(undefined)).not.toHaveProperty('detalhe');
+    });
+
+    it.each(['Conteudo Livre', 'R$ 1.000,00', 'a'.repeat(41), '', 'com-hifen', 'CPF123'])(
+      'descarta detalhe fora do formato (%p) - nada de conteudo na auditoria',
+      async (invalido) => {
+        expect(await metadadosDe(invalido)).not.toHaveProperty('detalhe');
+      },
+    );
+  });
+
   describe('auditoria nao recebe dado sensivel', () => {
     const AUDIT = { acao: AuditAction.UserUpdated, modulo: AuditModuleName.Users };
     const SEGREDO = 'SenhaSuperSecreta123';

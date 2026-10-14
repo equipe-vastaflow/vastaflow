@@ -3,6 +3,7 @@ import { CommandOutcome, type CommandContext } from '../../commands/command.type
 import { PermissionCode } from '../../permissions/permission-code.enum';
 import {
   CHAT_PAGE_SIZE,
+  HOMOLOGATION_BANNER,
   CONTAS_PAGAR_MESSAGES,
   CONTAS_PAGAR_USAGE,
   AccountsPayableCommandHandler,
@@ -20,7 +21,11 @@ function config(values: Record<string, unknown>): { get: <T>(k: string) => T | u
   return { get: <T>(key: string): T | undefined => values[key] as T };
 }
 
-const LIGADO = { PLANTAE_CHAT_COMMANDS_ENABLED: true, PLANTAE_ENABLED: true };
+const LIGADO = {
+  PLANTAE_CHAT_COMMANDS_ENABLED: true,
+  PLANTAE_ENABLED: true,
+  PLANTAE_ORGANIZATION_CONFIRMED: true,
+};
 
 function contexto(text = '/contas_pagar'): CommandContext {
   return {
@@ -114,8 +119,26 @@ describe('AccountsPayableCommandHandler', () => {
       ],
       [
         'integracao desligada',
-        { PLANTAE_CHAT_COMMANDS_ENABLED: true, PLANTAE_ENABLED: false },
+        {
+          PLANTAE_CHAT_COMMANDS_ENABLED: true,
+          PLANTAE_ENABLED: false,
+          PLANTAE_ORGANIZATION_CONFIRMED: true,
+        },
         CONTAS_PAGAR_MESSAGES.integrationDisabled,
+      ],
+      [
+        'organizacao NAO confirmada (fail-closed, mesmo com tudo ligado)',
+        { PLANTAE_CHAT_COMMANDS_ENABLED: true, PLANTAE_ENABLED: true },
+        CONTAS_PAGAR_MESSAGES.organizationNotConfirmed,
+      ],
+      [
+        'organizacao com texto "true" (so o booleano vale)',
+        {
+          PLANTAE_CHAT_COMMANDS_ENABLED: true,
+          PLANTAE_ENABLED: true,
+          PLANTAE_ORGANIZATION_CONFIRMED: 'true',
+        },
+        CONTAS_PAGAR_MESSAGES.organizationNotConfirmed,
       ],
       ['tudo desligado', {}, CONTAS_PAGAR_MESSAGES.chatDisabled],
     ])('%s', async (_nome, values, mensagem) => {
@@ -202,15 +225,13 @@ describe('AccountsPayableCommandHandler', () => {
   });
 
   describe('resposta', () => {
-    it('formata vencimento, valor na moeda do titulo, pessoa e parcela', async () => {
+    it('formata vencimento, valor na moeda do titulo, parcela e referencia curta', async () => {
       const { handler } = montar();
 
       const result = await handler.handle(contexto());
 
       expect(result.outcome).toBe(CommandOutcome.Ok);
-      expect(result.reply).toContain(
-        '15/10/2026 - R$ 1.234.567,50 - Fornecedor Ficticio (parcela 2/6)',
-      );
+      expect(result.reply).toContain('15/10/2026 - R$ 1.234.567,50 (parcela 2/6) - ref 1');
       expect(result.reply).toContain('13/10/2026 a 20/10/2026');
       expect(result.reply).toContain('Total listado: 1.');
     });
@@ -269,7 +290,7 @@ describe('AccountsPayableCommandHandler', () => {
 
     it('dado externo hostil e neutralizado: quebra de linha e comprimento', async () => {
       const nome = `Fulano\n/ajuda\r\n${'x'.repeat(200)}`;
-      const { handler } = montar(LIGADO, () =>
+      const { handler } = montar({ ...LIGADO, PLANTAE_CHAT_SHOW_PAYEE_NAME: true }, () =>
         Promise.resolve(
           pagina([
             entrada({
@@ -306,7 +327,7 @@ describe('AccountsPayableCommandHandler', () => {
 
       const reply = (await handler.handle(contexto())).reply;
 
-      expect(reply).toContain('sem vencimento - valor nao informado - sem nome');
+      expect(reply).toContain('sem vencimento - valor nao informado - ref 1');
     });
   });
 
@@ -451,5 +472,235 @@ describe('limite por pessoa (Fase 5.1)', () => {
     }
 
     expect(listEntries).not.toHaveBeenCalled();
+  });
+});
+
+describe('Fase 6: prontidao do comando financeiro no chat', () => {
+  const contextoDe = (text = '/contas_pagar'): CommandContext => contexto(text);
+
+  describe('aviso de HOMOLOGACAO (M)', () => {
+    it('toda resposta com dados, e a de "sem registros", comeca pelo aviso', async () => {
+      const cheia = await montar().handler.handle(contextoDe());
+      const vazia = await montar(LIGADO, () => Promise.resolve(pagina([]))).handler.handle(
+        contextoDe(),
+      );
+
+      for (const r of [cheia, vazia]) {
+        expect(r.reply.split('\n')[0]).toBe(HOMOLOGATION_BANNER);
+      }
+      expect(HOMOLOGATION_BANNER).toContain('HOMOLOGACAO');
+      expect(HOMOLOGATION_BANNER).toContain('nao sao os dados definitivos');
+    });
+
+    it('falhas nao trazem valores (nao ha dado de homologacao para parecer definitivo)', async () => {
+      const r = await montar(LIGADO, () =>
+        Promise.reject(new PlantaeApiError('server-error')),
+      ).handler.handle(contextoDe());
+
+      expect(r.reply).not.toMatch(/R\$|\d+,\d{2}/);
+    });
+  });
+
+  describe('somente parcelas PENDENTES, mesmo que o Plantae ignore o filtro (E, F, G)', () => {
+    const quitada = (): PlantaeEntry =>
+      entrada({ parcela_id: 20, status: { codigo: 1, descricao: 'Quitada' } });
+    const substituida = (): PlantaeEntry =>
+      entrada({ parcela_id: 30, status: { codigo: 2, descricao: 'Substituida' } });
+
+    it('pendente aparece; quitada e substituida nao', async () => {
+      const { handler } = montar(LIGADO, () =>
+        Promise.resolve(pagina([entrada({ parcela_id: 10 }), quitada(), substituida()])),
+      );
+
+      const reply = (await handler.handle(contextoDe())).reply;
+
+      expect(reply).toContain('ref 10');
+      expect(reply).not.toContain('ref 20');
+      expect(reply).not.toContain('ref 30');
+      expect(reply).toContain('Total listado: 1.');
+      expect(reply).toContain('2 item(ns) fora do status pendente foram ignorados');
+    });
+
+    it('so quitadas/substituidas: tratado como vazio, sem inventar item', async () => {
+      const { handler } = montar(LIGADO, () => Promise.resolve(pagina([quitada(), substituida()])));
+
+      const r = await handler.handle(contextoDe());
+
+      expect(r.reply).toContain(CONTAS_PAGAR_MESSAGES.empty);
+      expect(r.reply).not.toContain('1)');
+      expect(r.auditDetail).toBe('vazio');
+    });
+
+    it('o pedido ao Plantae pede SO pendentes (status 0) de despesa', async () => {
+      const { handler, listEntries } = montar();
+
+      await handler.handle(contextoDe());
+
+      expect((listEntries.mock.calls[0] as [unknown] | undefined)?.[0]).toMatchObject({
+        tipo: 'despesa',
+        status: [0],
+      });
+    });
+  });
+
+  describe('limite de itens (defesa contra varredura)', () => {
+    it('se o Plantae devolver mais que o maximo, mostra so 5 e avisa que ha mais', async () => {
+      const muitas = Array.from({ length: 12 }, (_v, i) => entrada({ parcela_id: 100 + i }));
+      const { handler, listEntries } = montar(LIGADO, () => Promise.resolve(pagina(muitas, false)));
+
+      const reply = (await handler.handle(contextoDe())).reply;
+
+      expect(reply.split('\n').filter((l) => /^\d\)/.test(l))).toHaveLength(CHAT_PAGE_SIZE);
+      expect(reply).toContain('Ha mais resultados');
+      expect(listEntries).toHaveBeenCalledTimes(1);
+      expect((listEntries.mock.calls[0] as [unknown] | undefined)?.[0]).toMatchObject({
+        perPage: CHAT_PAGE_SIZE,
+      });
+    });
+
+    it('a resposta com 5 itens cabe no limite do Telegram, mesmo com dados externos enormes', async () => {
+      const grandes = Array.from({ length: 5 }, (_v, i) =>
+        entrada({
+          parcela_id: i,
+          pessoa: {
+            pessoa_id: i,
+            nome: 'N'.repeat(5000),
+            razao_social: null,
+            tipo_pessoa: 'J',
+            cpf_cnpj: null,
+          },
+        }),
+      );
+      const { handler } = montar({ ...LIGADO, PLANTAE_CHAT_SHOW_PAYEE_NAME: true }, () =>
+        Promise.resolve(pagina(grandes)),
+      );
+
+      const reply = (await handler.handle(contextoDe())).reply;
+
+      expect(reply.length).toBeLessThan(1500);
+      expect(reply.length).toBeLessThan(4096);
+    });
+  });
+
+  describe('minimizacao de dados (I)', () => {
+    it('por padrao NAO mostra o favorecido; mostra a referencia curta', async () => {
+      const reply = (await montar().handler.handle(contextoDe())).reply;
+
+      expect(reply).not.toContain('Fornecedor Ficticio');
+      expect(reply).toContain('ref 1');
+    });
+
+    it('com a politica ligada, mostra o nome abreviado - e ainda nunca o CPF/CNPJ', async () => {
+      const reply = (
+        await montar({ ...LIGADO, PLANTAE_CHAT_SHOW_PAYEE_NAME: true }).handler.handle(contextoDe())
+      ).reply;
+
+      expect(reply).toContain('Fornecedor Ficticio');
+      expect(reply).not.toMatch(/12\.345|12345678/);
+    });
+
+    it('nunca devolve dados bancarios, documento, observacao, descricao, rateio nem payload bruto', async () => {
+      const reply = (
+        await montar({ ...LIGADO, PLANTAE_CHAT_SHOW_PAYEE_NAME: true }).handler.handle(contextoDe())
+      ).reply;
+
+      for (const proibido of [
+        'DOC-SIGILOSO',
+        'DESCRICAO-SIGILOSA',
+        'OBSERVACAO-SIGILOSA',
+        'rateio',
+        '{',
+        '"',
+      ]) {
+        expect(reply).not.toContain(proibido);
+      }
+    });
+  });
+
+  describe('pagamento parcial e valores (semantica de saldo nao documentada)', () => {
+    it('parcela com pagamento realizado e SINALIZADA, sem calcular saldo', async () => {
+      const { handler } = montar(LIGADO, () =>
+        Promise.resolve(
+          pagina([entrada({ valor: '1000.00', total_pago: '250.00', saldo_atual: '750.00' })]),
+        ),
+      );
+
+      const reply = (await handler.handle(contextoDe())).reply;
+
+      expect(reply).toContain('JA TEVE PAGAMENTO PARCIAL');
+      expect(reply).toContain('1.000,00');
+      expect(reply).not.toContain('750,00');
+    });
+
+    it.each([null, '0', '0.00', '0.000'])('total_pago %p: sem sinalizacao', async (pago) => {
+      const { handler } = montar(LIGADO, () =>
+        Promise.resolve(pagina([entrada({ total_pago: pago })])),
+      );
+
+      expect((await handler.handle(contextoDe())).reply).not.toContain('PAGAMENTO PARCIAL');
+    });
+
+    it('moedas diferentes ficam cada uma na sua moeda e nunca sao somadas (H)', async () => {
+      const dolar = entrada({
+        parcela_id: 2,
+        valor: '100.00',
+        titulo: { ...entrada().titulo, moeda: { moeda_id: 2, nome: 'Dolar', simbolo: 'US$' } },
+      });
+      const { handler } = montar(LIGADO, () =>
+        Promise.resolve(pagina([entrada({ parcela_id: 1, valor: '100.00' }), dolar])),
+      );
+
+      const reply = (await handler.handle(contextoDe())).reply;
+
+      expect(reply).toContain('R$ 100,00');
+      expect(reply).toContain('US$ 100,00');
+      expect(reply).not.toContain('200,00');
+    });
+
+    it('valor com mais de 2 casas nao e arredondado', async () => {
+      const { handler } = montar(LIGADO, () =>
+        Promise.resolve(pagina([entrada({ valor: '10.005' })])),
+      );
+
+      expect((await handler.handle(contextoDe())).reply).toContain('R$ 10,005');
+    });
+  });
+
+  describe('detalhe de auditoria em vocabulario fechado', () => {
+    const detalhe = async (
+      values: Record<string, unknown>,
+      fn?: () => Promise<PlantaePage<PlantaeEntry>>,
+    ): Promise<string | undefined> =>
+      (await montar(values, fn).handler.handle(contextoDe())).auditDetail;
+
+    it('distingue cada situacao', async () => {
+      expect(await detalhe({})).toBe('comando_desligado');
+      expect(await detalhe({ PLANTAE_CHAT_COMMANDS_ENABLED: true })).toBe(
+        'organizacao_nao_confirmada',
+      );
+      expect(
+        await detalhe({
+          PLANTAE_CHAT_COMMANDS_ENABLED: true,
+          PLANTAE_ORGANIZATION_CONFIRMED: true,
+        }),
+      ).toBe('integracao_desligada');
+      expect(await detalhe(LIGADO)).toBe('ok');
+      expect(await detalhe(LIGADO, () => Promise.resolve(pagina([])))).toBe('vazio');
+      expect(await detalhe(LIGADO, () => Promise.reject(new PlantaeApiError('unauthorized')))).toBe(
+        'credencial_recusada',
+      );
+      expect(await detalhe(LIGADO, () => Promise.reject(new PlantaeApiError('rate-limited')))).toBe(
+        'limite_fornecedor',
+      );
+      expect(await detalhe(LIGADO, () => Promise.reject(new PlantaeApiError('server-error')))).toBe(
+        'erro_fornecedor',
+      );
+    });
+
+    it('todo detalhe respeita o formato fechado (nada de conteudo)', async () => {
+      const r = await montar(LIGADO).handler.handle(contextoDe());
+
+      expect(r.auditDetail).toMatch(/^[a-z_]{1,40}$/);
+    });
   });
 });

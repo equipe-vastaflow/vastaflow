@@ -452,6 +452,24 @@ export class EnvironmentVariables {
   PLANTAE_CHAT_COMMANDS_ENABLED: boolean = false;
 
   /**
+   * Atestado do operador de que a ORGANIZACAO da chave do Plantae foi conferida com uma referencia
+   * INDEPENDENTE (dado da cliente ou confirmacao formal do Plantae) - `GET /me` devolver 200 nao
+   * prova isso. Padrao `false`. Sem ele, `/contas_pagar` nao consulta o Plantae e, ligado o comando
+   * de chat com a integracao ativa, o boot e recusado. Ver `docs/integracao-plantae.md` (fase 6).
+   */
+  @Transform(({ value }: TransformInput): boolean => value === 'true' || value === true)
+  @IsBoolean({ message: "PLANTAE_ORGANIZATION_CONFIRMED deve ser 'true' ou 'false'" })
+  PLANTAE_ORGANIZATION_CONFIRMED: boolean = false;
+
+  /**
+   * Mostra o nome (abreviado) do favorecido em `/contas_pagar`. Padrao `false`: o Telegram nao e
+   * ponta a ponta e o projeto nao tem politica que autorize divulgar o favorecido por chat.
+   */
+  @Transform(({ value }: TransformInput): boolean => value === 'true' || value === true)
+  @IsBoolean({ message: "PLANTAE_CHAT_SHOW_PAYEE_NAME deve ser 'true' ou 'false'" })
+  PLANTAE_CHAT_SHOW_PAYEE_NAME: boolean = false;
+
+  /**
    * URL base da API. SO aceita o host de HOMOLOGACAO conhecido (`rc.plantae.agr.br`),
    * em HTTPS, no caminho `/api/v1/external`. Uma URL de producao so entra depois da
    * liberacao oficial da Plantae, por mudanca de codigo - ver `plantae.constants.ts`.
@@ -617,6 +635,17 @@ function validateCrossFieldRules(env: EnvironmentVariables): string[] {
   if (env.TELEGRAM_INGEST_SIGNING_KEY && !isAcceptableSigningKey(env.TELEGRAM_INGEST_SIGNING_KEY)) {
     problems.push(
       'TELEGRAM_INGEST_SIGNING_KEY invalida: use pelo menos 32 caracteres, sem espacos',
+    );
+  }
+  // Fail-closed da Fase 6: consulta financeira real pelo chat so com a organizacao confirmada.
+  if (
+    env.PLANTAE_ENABLED &&
+    env.PLANTAE_CHAT_COMMANDS_ENABLED &&
+    !env.PLANTAE_ORGANIZATION_CONFIRMED
+  ) {
+    problems.push(
+      'PLANTAE_CHAT_COMMANDS_ENABLED com PLANTAE_ENABLED exige PLANTAE_ORGANIZATION_CONFIRMED=true ' +
+        '(organizacao do Plantae conferida com referencia independente)',
     );
   }
   if (env.TELEGRAM_API_BASE_URL) {

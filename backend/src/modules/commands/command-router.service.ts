@@ -13,6 +13,9 @@ import {
   type CommandResult,
 } from './command.types';
 
+/** Formato aceito para `CommandResult.auditDetail` (vocabulario fechado, sem conteudo). */
+const AUDIT_DETAIL = /^[a-z_]{1,40}$/;
+
 /** Mensagens devolvidas ao usuario. Nenhuma delas expoe detalhe interno. */
 export const ROUTER_MESSAGES = {
   empty: 'Mensagem vazia. Envie /ajuda para ver os comandos disponiveis.',
@@ -132,6 +135,9 @@ export class CommandRouter {
             ? { conversationId: context.conversationId }
             : {}),
           outcome: result.outcome,
+          ...(result.auditDetail !== undefined && AUDIT_DETAIL.test(result.auditDetail)
+            ? { detalhe: result.auditDetail }
+            : {}),
         },
       });
     } catch {

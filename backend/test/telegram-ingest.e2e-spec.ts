@@ -385,6 +385,10 @@ describe('Entrada do Telegram pelo n8n (e2e)', () => {
       expect(out.reply).toContain('8.337,10');
       expect(out.reply).not.toContain('000.000.000-00');
       expect(out.reply).not.toContain('DOC-001');
+      // Fase 6: aviso de homologacao na 1a linha, favorecido oculto por padrao, referencia curta.
+      expect(out.reply?.split(String.fromCharCode(10))[0]).toContain('HOMOLOGACAO');
+      expect(out.reply).not.toContain('Pessoa Ficticia');
+      expect(out.reply).toMatch(/ref 482/);
       expect(chamadasAoPlantae()).toBe(1);
       const [url, init] = fetchSpy.mock.calls[0] as [string | URL, RequestInit];
       expect(init.method).toBe('GET');
@@ -392,6 +396,39 @@ describe('Entrada do Telegram pelo n8n (e2e)', () => {
       expect(u.pathname).toBe('/api/v1/external/financial/entries');
       expect(u.searchParams.get('tipo')).toBe('despesa');
       expect(u.searchParams.get('per_page')).toBe('5');
+    });
+
+    it('Plantae devolve parcela QUITADA e SUBSTITUIDA mesmo com o filtro: nenhuma aparece no chat', async () => {
+      fetchSpy.mockImplementation(() =>
+        Promise.resolve(
+          jsonResponse(
+            listJson(
+              [
+                entryJson(501, { statusCode: 0 }),
+                entryJson(502, { statusCode: 1 }),
+                entryJson(503, { statusCode: 2 }),
+              ],
+              { endpoint: 'financial/entries' },
+            ),
+          ),
+        ),
+      );
+
+      const out = await ingerir({ text: '/contas_pagar' });
+
+      expect(out.reply).toContain('ref 501');
+      expect(out.reply).not.toContain('ref 502');
+      expect(out.reply).not.toContain('ref 503');
+      expect(out.reply).toContain('2 item(ns) fora do status pendente foram ignorados');
+    });
+
+    it('erro do fornecedor (500): frase fixa, nenhum valor inventado', async () => {
+      fetchSpy.mockImplementation(() => Promise.resolve(jsonResponse('{}', { status: 500 })));
+
+      const out = await ingerir({ text: '/contas_pagar' });
+
+      expect(out.outcome).toBe('FAILED');
+      expect(out.reply).not.toMatch(/R\$|\d+,\d{2}/);
     });
 
     it('OPERADOR vinculado SEM plantae:read + /contas_pagar: DENIED e o Plantae nem e chamado', async () => {
@@ -550,6 +587,14 @@ describe('Entrada do Telegram pelo n8n (e2e)', () => {
       expect(eventos.length).toBeGreaterThan(0);
       expect(JSON.stringify(eventos)).not.toContain('Pessoa Ficticia');
       expect(JSON.stringify(eventos)).not.toContain('8337');
+      // Detalhe fechado: distingue "consulta ok" de vazio/erro/desligado.
+      const detalhes = eventos.map((e) => e.metadados?.detalhe);
+      expect(detalhes).toContain('ok');
+      expect(
+        detalhes
+          .filter((d) => typeof d === 'string')
+          .every((d) => /^[a-z_]{1,40}$/.test(String(d))),
+      ).toBe(true);
     });
 
     it('nenhum log da suite traz texto de mensagem, resposta, token, chave ou id do Telegram', () => {

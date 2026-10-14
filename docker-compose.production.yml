@@ -246,6 +246,11 @@ services:
       TELEGRAM_N8N_WEBHOOK_URL: ${TELEGRAM_N8N_WEBHOOK_URL:-}
       TELEGRAM_INGEST_SIGNING_KEY: ${TELEGRAM_INGEST_SIGNING_KEY:-}
       PLANTAE_CHAT_COMMANDS_ENABLED: ${PLANTAE_CHAT_COMMANDS_ENABLED:-false}
+      # Fase 6: atestado da organizacao (conferida com referencia INDEPENDENTE) e politica do
+      # favorecido no chat. Ambos desligados por padrao; sem o atestado o backend RECUSA o boot
+      # se o comando de chat for ligado com a integracao ativa.
+      PLANTAE_ORGANIZATION_CONFIRMED: ${PLANTAE_ORGANIZATION_CONFIRMED:-false}
+      PLANTAE_CHAT_SHOW_PAYEE_NAME: ${PLANTAE_CHAT_SHOW_PAYEE_NAME:-false}
       # Limite por remetente (mensagens/minuto) e SERVIDOR DE TESTE da Bot API. O segundo
       # fica VAZIO em producao: so aceita os hosts telegram-fake/localhost/127.0.0.1 e
       # existe para backend/test/fake-telegram (ver docs/telegram-n8n.md).

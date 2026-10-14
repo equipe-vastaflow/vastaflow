@@ -599,4 +599,75 @@ describe('validateEnv', () => {
       ).toBe(30);
     });
   });
+  describe('Plantae no chat: organizacao confirmada e politica de favorecido (Fase 6)', () => {
+    const plantaeLigado = {
+      PLANTAE_ENABLED: 'true',
+      PLANTAE_BASE_URL: 'https://rc.plantae.agr.br/api/v1/external',
+      PLANTAE_API_TOKEN: 'plt_TOKEN_FALSO_apenas_para_testes_0123456789abcdef',
+    };
+
+    it('padroes: organizacao NAO confirmada e favorecido oculto', () => {
+      const env = validateEnv(baseEnv);
+
+      expect(env.PLANTAE_ORGANIZATION_CONFIRMED).toBe(false);
+      expect(env.PLANTAE_CHAT_SHOW_PAYEE_NAME).toBe(false);
+    });
+
+    it('FAIL-CLOSED: comando de chat + Plantae ativo sem organizacao confirmada derruba o boot', () => {
+      expect(() =>
+        validateEnv({ ...baseEnv, ...plantaeLigado, PLANTAE_CHAT_COMMANDS_ENABLED: 'true' }),
+      ).toThrow(/PLANTAE_ORGANIZATION_CONFIRMED/);
+    });
+
+    it('com a organizacao confirmada, o boot passa', () => {
+      expect(() =>
+        validateEnv({
+          ...baseEnv,
+          ...plantaeLigado,
+          PLANTAE_CHAT_COMMANDS_ENABLED: 'true',
+          PLANTAE_ORGANIZATION_CONFIRMED: 'true',
+        }),
+      ).not.toThrow();
+    });
+
+    it.each([
+      ['integracao ligada, comando de chat desligado', { PLANTAE_ENABLED: 'true' }],
+      ['comando de chat ligado, integracao desligada', { PLANTAE_CHAT_COMMANDS_ENABLED: 'true' }],
+      ['tudo desligado', {}],
+    ] as Array<[string, Record<string, string>]>)(
+      '%s: nao exige o atestado (nada financeiro sai pelo chat)',
+      (_nome, extra) => {
+        expect(() =>
+          validateEnv({
+            ...baseEnv,
+            ...(extra.PLANTAE_ENABLED === undefined ? {} : plantaeLigado),
+            ...extra,
+          }),
+        ).not.toThrow();
+      },
+    );
+
+    it('so o texto "true" liga as flags', () => {
+      for (const valor of ['1', 'sim', 'TRUE', '']) {
+        const env = validateEnv({
+          ...baseEnv,
+          PLANTAE_ORGANIZATION_CONFIRMED: valor,
+          PLANTAE_CHAT_SHOW_PAYEE_NAME: valor,
+        });
+        expect(env.PLANTAE_ORGANIZATION_CONFIRMED).toBe(false);
+        expect(env.PLANTAE_CHAT_SHOW_PAYEE_NAME).toBe(false);
+      }
+    });
+
+    it('a mensagem de recusa nao repete segredo', () => {
+      let mensagem = '';
+      try {
+        validateEnv({ ...baseEnv, ...plantaeLigado, PLANTAE_CHAT_COMMANDS_ENABLED: 'true' });
+      } catch (error) {
+        mensagem = (error as Error).message;
+      }
+
+      expect(mensagem).not.toContain('plt_TOKEN_FALSO');
+    });
+  });
 });

@@ -361,3 +361,104 @@ Declaradas explicitamente; nenhuma foi omitida:
 - **Nao ha teste automatizado contra o Plantae**, de proposito. A validacao de TLS e
   coberta por classificacao de erro simulada; o handshake real contra
   `rc.plantae.agr.br` esta na lista de pendencias.
+
+## 10. Fase 6 - prontidao do `/contas_pagar` no Telegram (preparacao; NADA foi consultado)
+
+> **Estado de prontidao para consulta real: PARTIAL / BLOCKED** (ver 10.1). Nesta fase **nenhuma** chamada ao
+> Plantae foi feita, nenhuma flag foi ligada e nenhum servico foi reiniciado. Tudo abaixo e preparacao,
+> codigo e testes (com `fetch` simulado e fixtures ficticias).
+
+### 10.1 Semaforo
+
+| Condicao | Estado |
+| --- | --- |
+| Organizacao da chave = a da cliente | **PENDING VALIDATION (bloqueante)** - ver 10.2 |
+| Escopo para `financial/entries` | **Comprovado na homologacao** (Fase 4.x: 200 com dados); o *nome* do escopo da rota segue nao documentado. A chave tem 3 escopos (`financial-entries:read`, `financial-movements:read`, `account-statements:read`); nenhum adicional foi necessario |
+| Credencial Plantae no ambiente local | **Ausente** (nenhuma `PLANTAE_API_TOKEN`; nenhum arquivo de credencial local) |
+| Usuario humano ADMIN | **Nao existe** (1 usuario: OPERADOR). Caminho legitimo existe e **nao foi executado** - 10.5 |
+| Vinculo Telegram do ADMIN | Pendente (depende do ADMIN) |
+| `PLANTAE_ENABLED` / `PLANTAE_CHAT_COMMANDS_ENABLED` / `PLANTAE_ORGANIZATION_CONFIRMED` | todos `false` |
+| Semantica de valor/saldo de parcela parcial | **Pendente** (10.7); o chat so *sinaliza* |
+
+### 10.2 Como confirmar a organizacao (procedimento)
+
+O Bearer define a organizacao e `X-Tenant-Id` nao e usado; um `200` em `GET /me` so prova que a chave e valida.
+Para atestar que a organizacao e a da cliente, e preciso uma **referencia independente**:
+
+1. **Fonte A** - dado que a *cliente* informou por canal proprio (razao social e/ou identificador da organizacao no
+   Plantae, conforme a tela dela), **ou** **fonte B** - confirmacao *formal e escrita* da Plantae associando a chave (ou o
+   `organizacao_id`) a cliente. Resposta informal de fornecedor, ou o fato de a chave ter chegado por conversa, **nao** vale.
+2. Com autorizacao especifica, **uma** chamada `GET /integrations/plantae/me` (e, se preciso, `organization/legal-entities`) e
+   comparacao **local** com a referencia. Nao copiar identificadores fiscais/pessoais para relatorios, tickets ou Git.
+3. Registrar **quem conferiu, quando e contra qual fonte** no registro da mudanca (fora do repositorio).
+4. So entao colocar `PLANTAE_ORGANIZATION_CONFIRMED=true` no `.env` privado. **E um atestado do operador**: o sistema nao
+   tem como verificar sozinho. Se a chave for trocada ou rotacionada, o atestado deve ser refeito.
+
+Fail-closed no codigo: sem o atestado, `/contas_pagar` responde "bloqueada" **sem chamar o Plantae**, e o **boot e recusado**
+se `PLANTAE_ENABLED=true` e `PLANTAE_CHAT_COMMANDS_ENABLED=true` sem ele.
+
+### 10.3 Contrato do comando `/contas_pagar` (decisoes e por que)
+
+| Decisao | Regra |
+| --- | --- |
+| Fonte | `GET /financial/entries?tipo=despesa&status[]=0&data_inicio=..&data_fim=..&per_page=5` - **somente leitura**, **uma pagina** |
+| Pendente | `status.codigo == 0`. O filtro e aplicado **tambem no backend**: se o Plantae devolver quitada (1) ou **substituida (2)**, elas sao descartadas e o fato e informado ("N item(ns) fora do status pendente foram ignorados") |
+| Periodo | sem argumentos: hoje (Brasilia) a +7 dias; ou duas datas `AAAA-MM-DD`, ate 31 dias; invalido = uso, **sem consulta** |
+| Valor | o **valor da parcela**, na **moeda do titulo**, formatado a partir do **texto decimal** (sem `float`, sem arredondar, **sem somar**, **sem converter moeda**) |
+| Pagamento parcial | `total_pago` diferente de zero => linha marcada **"JA TEVE PAGAMENTO PARCIAL (confira no Plantae)"**. **Nao** se calcula nem se exibe saldo: a semantica de `saldo_atual` nao e documentada |
+| Itens | no maximo **5**; se o Plantae devolver mais, mostra 5 e avisa que ha mais (nunca varre a organizacao) |
+| Homologacao | **toda** resposta comeca por "HOMOLOGACAO - dados de teste do Plantae, nao sao os dados definitivos da empresa." |
+| Favorecido | **oculto por padrao** (`PLANTAE_CHAT_SHOW_PAYEE_NAME=false`); a linha traz a referencia curta `ref <parcela_id>`. Ligado: nome abreviado (28 car.), sem quebra de linha |
+| Nunca sai | CPF/CNPJ, dados bancarios, observacao, descricao, documento, rateio, payload bruto |
+| Erros | frase fixa por categoria; **nenhum valor inventado**; 429/5xx/timeout nao geram numeros |
+
+### 10.4 Portoes, na ordem em que sao checados
+
+1. Remetente **vinculado**, vinculo e usuario **ativos** (resolvidos do id do Telegram assinado; o `username` nunca e prova).
+2. **RBAC** do Command Engine: `plantae:read` (so ADMIN por padrao) - o OPERADOR e negado **antes** do handler, sem Plantae.
+3. `PLANTAE_CHAT_COMMANDS_ENABLED=true`.
+4. `PLANTAE_ORGANIZATION_CONFIRMED=true`.
+5. `PLANTAE_ENABLED=true` (e a chave/URL de homologacao validas).
+6. Periodo valido; **3 consultas/min por pessoa**; limite do Telegram de **10 msg/min por remetente**; limitador do Plantae
+   (60/min por chave, conservador); **uma pagina**; prazo de **20 s**; sem retry automatico.
+
+Auditoria (`PLANTAE_QUERIED`, ator = a **pessoa**; `CHANNEL_MESSAGE` registra `principal`/`servicoId` do servico):
+`metadados.detalhe` distingue `ok`, `vazio`, `comando_desligado`, `organizacao_nao_confirmada`, `integracao_desligada`,
+`nao_configurado`, `credencial_recusada`, `limite_fornecedor`, `limite_pessoa`, `parametros_rejeitados`, `erro_fornecedor`,
+`prazo_excedido`, `periodo_invalido`; **acesso negado** aparece como `DENIED` no `CHANNEL_MESSAGE`. Nenhum valor, nome, documento, token ou texto.
+
+### 10.5 Procedimento para um usuario ADMIN de teste (auditado; NAO executado)
+
+Modelo existente: ADMIN ignora a checagem de permissoes; **so um ADMIN cria ou promove ADMIN**; o cadastro publico
+(`/auth/register`) cria `USUARIO` e e fechado em producao; **nao ha** ferramenta que crie ADMIN (o CLI local cria **so OPERADOR**, de proposito).
+O unico caminho legitimo sem ADMIN previo e o **bootstrap do administrador inicial**:
+
+1. O responsavel define `SEED_ADMIN_EMAIL`, `SEED_ADMIN_PASSWORD` (e `SEED_ADMIN_NAME`) **manualmente** no `.env` privado.
+2. O backend e recriado (`docker compose up -d --no-deps backend`). O `SeedService` cria o ADMIN **uma vez** (idempotente; nao altera usuarios
+   existentes). **Impacto:** o bot fica sem consumidor ~1 min; mensagens enviadas nesse intervalo sao entregues na volta se tiverem menos de
+   10 min. **Exige autorizacao explicita** (servico ativo).
+3. Depois do bootstrap, remover `SEED_ADMIN_*` do `.env` (a senha nao deve ficar em arquivo).
+4. **Vinculo:** o par `(canal, id externo)` e **unico**: um mesmo Telegram nao pode estar vinculado ao OPERADOR e ao ADMIN ao mesmo tempo.
+   Opcao A (preferida): vincular o ADMIN a uma **segunda conta** de Telegram do responsavel (via solicitacao administrativa + `/vincular`).
+   Opcao B: revogar o vinculo do OPERADOR (`DELETE /users/:id/external-identities/:linkId`) e vincular o ADMIN ao mesmo Telegram.
+5. O perfil do OPERADOR existente **nao e alterado**.
+
+### 10.6 Plano de teste financeiro controlado (para aprovacao; NAO executado)
+
+Pre-condicoes (todas): organizacao confirmada (10.2); credencial de **homologacao** em arquivo privado, colada pelo proprio responsavel;
+ADMIN vinculado (10.5); stack saudavel; autorizacao explicita para (a) reiniciar o backend, (b) **uma** chamada a `/me`, (c) ligar as flags.
+Passos: (1) `PLANTAE_BASE_URL` de homologacao, `PLANTAE_API_TOKEN`, `PLANTAE_ENABLED=true`, `PLANTAE_ORGANIZATION_CONFIRMED=true`,
+`PLANTAE_CHAT_COMMANDS_ENABLED=true`; recriar so o backend; (2) OPERADOR envia `/contas_pagar` -> **negado, Plantae nao chamado**;
+(3) ADMIN envia `/contas_pagar` (periodo curto) -> resposta com o aviso de **HOMOLOGACAO**, <= 5 itens, sem CPF/CNPJ/nome; (4) conferir
+os valores na tela do Plantae (homologacao); (5) auditoria `PLANTAE_QUERIED` com `detalhe=ok`; (6) **conferir o PostgreSQL do n8n**: o texto da
+resposta financeira nao deve estar em `execution_data` (so o corpo do pedido, transitoriamente); (7) logs sem token/valores.
+Criterios de parada: qualquer valor divergente, dado pessoal na resposta, chamada fora de homologacao ou erro inesperado => desligar as flags.
+Rollback: `PLANTAE_CHAT_COMMANDS_ENABLED=false` (e/ou `PLANTAE_ENABLED=false`), recriar so o backend; revogar a chave na Plantae se vazou.
+
+### 10.7 Pendencias que continuam
+
+- Semantica de `valor` x `saldo_atual` x `total_pago` em parcela **parcialmente paga** (por isso so se sinaliza).
+- Parcela **substituida** (status 2) nunca apareceu na amostra real; o tratamento e defensivo e testado so com fixtures.
+- Erros reais 401/403/429/5xx do Plantae nunca foram observados; testados com simulacao.
+- Resposta financeira passa pelo n8n em claro (trafego interno) e pelos servidores do Telegram (nao ponta a ponta).
+- Politica de divulgacao do favorecido e decisao do negocio (hoje: oculto).

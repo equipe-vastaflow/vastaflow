@@ -24,6 +24,14 @@ import type { PlantaeService } from './plantae.service';
 import type { PlantaeEntry } from './plantae.types';
 
 export const PLANTAE_CHAT_COMMANDS_KEY = 'PLANTAE_CHAT_COMMANDS_ENABLED';
+/** Atestado do operador: a organizacao da chave foi conferida com referencia independente. */
+export const PLANTAE_ORGANIZATION_CONFIRMED_KEY = 'PLANTAE_ORGANIZATION_CONFIRMED';
+/** Politica: mostrar o nome do favorecido no chat? Padrao NAO. */
+export const PLANTAE_CHAT_SHOW_PAYEE_KEY = 'PLANTAE_CHAT_SHOW_PAYEE_NAME';
+
+/** Primeira linha de TODA resposta com dados: o ambiente e de TESTE. */
+export const HOMOLOGATION_BANNER =
+  'HOMOLOGACAO - dados de teste do Plantae, nao sao os dados definitivos da empresa.';
 
 /** Janela padrao de `/contas_pagar` sem argumentos: hoje + 7 dias (8 dias, extremos incluidos). */
 export const DEFAULT_WINDOW_DAYS = 7;
@@ -47,6 +55,8 @@ export const CONTAS_PAGAR_USAGE =
 export const CONTAS_PAGAR_MESSAGES = {
   chatDisabled: 'A consulta de contas a pagar por este canal esta desativada neste ambiente.',
   integrationDisabled: 'A integracao com o Plantae esta desativada neste ambiente.',
+  organizationNotConfirmed:
+    'Consulta bloqueada: a organizacao do Plantae ainda nao foi confirmada. Avise quem administra o sistema.',
   notConfigured: 'A integracao com o Plantae nao esta configurada neste ambiente.',
   credentialRefused:
     'O Plantae recusou a credencial da integracao. Avise quem administra o sistema.',
@@ -73,12 +83,20 @@ export const CONTAS_PAGAR_MESSAGES = {
  * 3. `PLANTAE_ENABLED` precisa estar ligado; do contrario nao ha consulta e a
  *    resposta diz exatamente isso - nunca finge ter consultado.
  *
+ * 4. `PLANTAE_ORGANIZATION_CONFIRMED` (desligado por padrao) e o atestado de que a organizacao
+ *    da chave foi conferida com referencia INDEPENDENTE; sem ele nao ha consulta (e o boot
+ *    recusa ligar o comando com a integracao ativa).
+ *
  * REGRAS DE DADOS (documentadas porque sao decisoes):
  * - sem argumentos: vencimentos de HOJE (fuso de Brasilia) ate hoje + 7 dias, so
  *   status 0 (pendente). Nada e inferido alem disso;
  * - com datas: `AAAA-MM-DD AAAA-MM-DD`, ate 31 dias;
- * - cada linha mostra vencimento, valor na MOEDA DO TITULO, parcela e o nome da
- *   pessoa (truncado). CPF/CNPJ, observacao, descricao e rateio NUNCA saem;
+ * - toda resposta comeca com o aviso de HOMOLOGACAO; so entram parcelas com status 0 (pendente)
+ *   - o filtro e conferido AQUI tambem, nao so no Plantae (quitada/substituida nunca aparecem);
+ * - cada linha mostra vencimento, valor na MOEDA DO TITULO, parcela e a referencia curta
+ *   (`parcela_id`). O NOME do favorecido so aparece com `PLANTAE_CHAT_SHOW_PAYEE_NAME=true`
+ *   (padrao: nao). Parcela com pagamento parcial e SINALIZADA (nao se calcula saldo: a semantica
+ *   de `saldo_atual` nao e documentada). CPF/CNPJ, observacao, descricao e rateio NUNCA saem;
  * - dinheiro e formatado a partir do TEXTO decimal exato: sem `float`, sem
  *   arredondar, sem somar - nao ha total, entao nao ha mistura de moedas;
  * - falha do Plantae vira uma frase fixa. Nao ha dado de substituicao.
@@ -110,20 +128,31 @@ export class AccountsPayableCommandHandler implements CommandHandler {
 
   async handle(context: CommandContext): Promise<CommandResult> {
     if (this.config.get<unknown>(PLANTAE_CHAT_COMMANDS_KEY) !== true) {
-      return unavailable(CONTAS_PAGAR_MESSAGES.chatDisabled);
+      return unavailable(CONTAS_PAGAR_MESSAGES.chatDisabled, 'comando_desligado');
+    }
+    // FAIL-CLOSED: sem o atestado da organizacao nao se consulta o Plantae.
+    if (this.config.get<unknown>(PLANTAE_ORGANIZATION_CONFIRMED_KEY) !== true) {
+      return unavailable(
+        CONTAS_PAGAR_MESSAGES.organizationNotConfirmed,
+        'organizacao_nao_confirmada',
+      );
     }
     if (!resolvePlantaeSettings(this.config).enabled) {
-      return unavailable(CONTAS_PAGAR_MESSAGES.integrationDisabled);
+      return unavailable(CONTAS_PAGAR_MESSAGES.integrationDisabled, 'integracao_desligada');
     }
 
     const period = this.resolvePeriod(context.text);
     if (period === null) {
-      return commandFailure(CommandOutcome.MalformedCommand, CONTAS_PAGAR_USAGE);
+      return commandFailure(
+        CommandOutcome.MalformedCommand,
+        CONTAS_PAGAR_USAGE,
+        'periodo_invalido',
+      );
     }
 
     // Por PESSOA (nao global): quem insiste so se limita a si. So conta consulta valida.
     if (!this.limiter.take(context.user.id).allowed) {
-      return unavailable(CONTAS_PAGAR_MESSAGES.throttled);
+      return unavailable(CONTAS_PAGAR_MESSAGES.throttled, 'limite_pessoa');
     }
 
     try {
@@ -137,16 +166,30 @@ export class AccountsPayableCommandHandler implements CommandHandler {
         }),
         CHAT_DEADLINE_MS,
       );
-      return commandOk(formatReply(period, page.items, page.pagination.hasMore));
+      // Defesa em profundidade: so parcela PENDENTE (status 0) e no maximo `CHAT_PAGE_SIZE`,
+      // mesmo que o Plantae devolva mais ou ignore o filtro.
+      const pending = page.items.filter((entry) => entry.status.codigo === PENDING_STATUS);
+      const shown = pending.slice(0, CHAT_PAGE_SIZE);
+      const ignored = page.items.length - pending.length;
+      const hasMore = pending.length > shown.length ? true : page.pagination.hasMore;
+      const showPayee = this.config.get<unknown>(PLANTAE_CHAT_SHOW_PAYEE_KEY) === true;
+      return commandOk(
+        formatReply(period, shown, hasMore, { showPayee, ignored }),
+        shown.length === 0 ? 'vazio' : 'ok',
+      );
     } catch (error) {
       if (error instanceof PlantaeInputError) {
-        return commandFailure(CommandOutcome.MalformedCommand, CONTAS_PAGAR_USAGE);
+        return commandFailure(
+          CommandOutcome.MalformedCommand,
+          CONTAS_PAGAR_USAGE,
+          'periodo_invalido',
+        );
       }
       if (error instanceof PlantaeApiError) {
-        return unavailable(messageFor(error));
+        return unavailable(messageFor(error), detailFor(error));
       }
       if (error instanceof DeadlineError) {
-        return unavailable(CONTAS_PAGAR_MESSAGES.unavailable);
+        return unavailable(CONTAS_PAGAR_MESSAGES.unavailable, 'prazo_excedido');
       }
       throw error; // bug de programacao: o router responde com o texto generico
     }
@@ -177,9 +220,31 @@ export class AccountsPayableCommandHandler implements CommandHandler {
   }
 }
 
+/** Status documentado do Plantae para parcela PENDENTE (1 quitada, 2 substituida). */
+const PENDING_STATUS = 0;
+
 /** Falha operacional: o comando nao pode ser atendido agora. */
-function unavailable(reply: string): CommandResult {
-  return commandFailure(CommandOutcome.HandlerError, reply);
+function unavailable(reply: string, auditDetail: string): CommandResult {
+  return commandFailure(CommandOutcome.HandlerError, reply, auditDetail);
+}
+
+/** Detalhe de auditoria (vocabulario fechado) para uma falha do Plantae. */
+function detailFor(error: PlantaeApiError): string {
+  switch (error.kind) {
+    case 'disabled':
+      return 'integracao_desligada';
+    case 'not-configured':
+      return 'nao_configurado';
+    case 'unauthorized':
+    case 'forbidden':
+      return 'credencial_recusada';
+    case 'rate-limited':
+      return 'limite_fornecedor';
+    case 'rejected-parameters':
+      return 'parametros_rejeitados';
+    default:
+      return 'erro_fornecedor';
+  }
 }
 
 function messageFor(error: PlantaeApiError): string {
@@ -229,39 +294,63 @@ function withDeadline<T>(promise: Promise<T>, ms: number): Promise<T> {
 
 // --- formatacao --------------------------------------------------------------
 
+interface ReplyOptions {
+  readonly showPayee: boolean;
+  /** Itens devolvidos pelo Plantae que NAO eram pendentes e foram descartados. */
+  readonly ignored: number;
+}
+
 function formatReply(
   period: { from: string; to: string },
   items: readonly PlantaeEntry[],
   hasMore: boolean | null,
+  options: ReplyOptions,
 ): string {
-  const head = `Contas a pagar pendentes (Plantae, homologacao)\nVencimento: ${formatDate(period.from)} a ${formatDate(period.to)}`;
+  const head = `${HOMOLOGATION_BANNER}\nContas a pagar pendentes (Plantae)\nVencimento: ${formatDate(period.from)} a ${formatDate(period.to)}`;
+  const note =
+    options.ignored > 0
+      ? [`Obs.: ${String(options.ignored)} item(ns) fora do status pendente foram ignorados.`]
+      : [];
   if (items.length === 0) {
-    return `${head}\n${CONTAS_PAGAR_MESSAGES.empty}`;
+    return [head, CONTAS_PAGAR_MESSAGES.empty, ...note].join('\n');
   }
-  const lines = items.map((entry, index) => `${String(index + 1)}) ${formatLine(entry)}`);
+  const lines = items.map(
+    (entry, index) => `${String(index + 1)}) ${formatLine(entry, options.showPayee)}`,
+  );
   const tail =
     hasMore === true
       ? `Mostrando ${String(items.length)}. Ha mais resultados: use um periodo menor.`
       : hasMore === null
         ? `Mostrando ${String(items.length)}. Nao foi possivel confirmar se ha mais.`
         : `Total listado: ${String(items.length)}.`;
-  return [head, ...lines, tail].join('\n');
+  return [head, ...lines, tail, ...note].join('\n');
 }
 
-function formatLine(entry: PlantaeEntry): string {
+/** `true` se o decimal-texto e diferente de zero (pagamento realmente feito). */
+function isNonZeroDecimal(value: string | null): boolean {
+  return value !== null && !/^-?0*(\.0*)?$/.test(value);
+}
+
+function formatLine(entry: PlantaeEntry, showPayee: boolean): string {
   const due = entry.data_vencto === null ? 'sem vencimento' : formatDate(entry.data_vencto);
   const symbol = cleanText(entry.titulo.moeda?.simbolo ?? '', SYMBOL_MAX);
   const money =
     entry.valor === null
       ? 'valor nao informado'
       : `${symbol === '' ? '' : `${symbol} `}${formatDecimal(entry.valor)}${symbol === '' ? ' (moeda nao informada)' : ''}`;
-  const who =
-    cleanText(entry.pessoa?.nome ?? entry.pessoa?.razao_social ?? '', NAME_MAX) || 'sem nome';
   const installment =
     entry.numero !== null && entry.total_parcelas !== null
       ? ` (parcela ${String(entry.numero)}/${String(entry.total_parcelas)})`
       : '';
-  return `${due} - ${money} - ${who}${installment}`;
+  const reference = ` - ref ${String(entry.parcela_id)}`;
+  const who = showPayee
+    ? ` - ${cleanText(entry.pessoa?.nome ?? entry.pessoa?.razao_social ?? '', NAME_MAX) || 'sem nome'}`
+    : '';
+  // Nao se calcula saldo (semantica de `saldo_atual` nao documentada): so se avisa.
+  const partial = isNonZeroDecimal(entry.total_pago)
+    ? ' - JA TEVE PAGAMENTO PARCIAL (confira no Plantae)'
+    : '';
+  return `${due} - ${money}${installment}${reference}${who}${partial}`;
 }
 
 /** `2026-10-15` -> `15/10/2026`. */

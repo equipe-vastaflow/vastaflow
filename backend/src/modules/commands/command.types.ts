@@ -72,6 +72,13 @@ export interface CommandResult {
   readonly outcome: CommandOutcome;
   /** Texto a ser devolvido ao usuario. Nunca contem stack trace. */
   readonly reply: string;
+  /**
+   * Detalhe do desfecho para a AUDITORIA, em vocabulario fechado (`[a-z_]`, ate 40
+   * caracteres): distingue, por exemplo, "consulta vazia" de "erro do fornecedor" quando o
+   * `outcome` e o mesmo. Nunca conteudo, valor, nome ou dado de negocio. O router descarta
+   * qualquer valor fora do formato.
+   */
+  readonly auditDetail?: string;
 }
 
 /**
@@ -124,10 +131,24 @@ export interface CommandHandler {
   handle(context: CommandContext): Promise<CommandResult> | CommandResult;
 }
 
-export function commandOk(reply: string): CommandResult {
-  return { success: true, outcome: CommandOutcome.Ok, reply };
+export function commandOk(reply: string, auditDetail?: string): CommandResult {
+  return {
+    success: true,
+    outcome: CommandOutcome.Ok,
+    reply,
+    ...(auditDetail === undefined ? {} : { auditDetail }),
+  };
 }
 
-export function commandFailure(outcome: CommandOutcome, reply: string): CommandResult {
-  return { success: false, outcome, reply };
+export function commandFailure(
+  outcome: CommandOutcome,
+  reply: string,
+  auditDetail?: string,
+): CommandResult {
+  return {
+    success: false,
+    outcome,
+    reply,
+    ...(auditDetail === undefined ? {} : { auditDetail }),
+  };
 }
