@@ -3,6 +3,7 @@ import { Document } from '../modules/documents/entities/document.entity';
 import { ExternalIdentityLink } from '../modules/external-identities/entities/external-identity-link.entity';
 import { IdentityLinkRequest } from '../modules/external-identities/entities/identity-link-request.entity';
 import { FinancialEntry } from '../modules/finance/entities/financial-entry.entity';
+import { NfseEmission } from '../modules/integrations/nfse/nfse-emission.entity';
 import { TelegramInboundEvent } from '../modules/integrations/telegram-ingest/telegram-inbound-event.entity';
 import { WhatsappInboundEvent } from '../modules/integrations/whatsapp/whatsapp-inbound-event.entity';
 import { Notification } from '../modules/notifications/entities/notification.entity';
@@ -32,4 +33,5 @@ export const ENTITIES = [
   Document,
   TelegramInboundEvent,
   WhatsappInboundEvent,
+  NfseEmission,
 ];

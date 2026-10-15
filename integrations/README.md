@@ -24,7 +24,7 @@ precisar ser jogado fora. Cada integracao so sera escrita quando tivermos:
 | `whatsapp/` | Meta Cloud API   | Codigo no backend (`modules/integrations/whatsapp`), desligado; ver docs/whatsapp.md |
 | `telegram/` | Telegram Bot API | Feito (polling + vinculo administrativo) no backend; `telegram/n8n/` tem o workflow versionado da Fase 5 |
 | `plantae/`  | Plantae          | Sem documentacao de API e sem acesso              |
-| `nfse/`     | a definir        | Municipio e provedor nao definidos                |
+| `nfse/`     | implementado     | Backend: `backend/src/modules/integrations/nfse` (ver `docs/nfse.md`) |
 | `email/`    | SMTP             | Servidor, porta e politica de autenticacao        |
 | `index/`    | -                | Feito: `IntegrationRegistry` no backend           |
 

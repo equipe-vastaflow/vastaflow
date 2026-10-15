@@ -93,6 +93,20 @@ export enum AuditAction {
    * `operacao` (`abandonar`/`limpar`), `eventoId` ou `quantidade`/`dias`. NUNCA conteudo.
    */
   TelegramEventAdmin = 'TELEGRAM_EVENT_ADMIN',
+
+  /**
+   * Comando de NFS-e (`/nfse`, `/nfse_confirmar`, `/nfse_status`) executado pelo Command Engine.
+   * `usuarioId` e quem pediu. Metadados: `comando`, `canal`, `outcome` e `detalhe` (vocabulario
+   * fechado). NUNCA dados do tomador, valores, descricao, codigo de confirmacao nem a chave de acesso.
+   */
+  NfseCommand = 'NFSE_COMMAND',
+
+  /**
+   * Mudanca de estado de uma emissao de NFS-e. `usuarioId` e quem confirmou. Metadados: `emissaoId`,
+   * `de`, `para` (estados), `tentativa` e, quando houver, `codigo` (codigo oficial `E####` ou motivo
+   * interno). NUNCA o XML, a chave de acesso, o tomador ou o valor.
+   */
+  NfseStateChanged = 'NFSE_STATE_CHANGED',
 }
 
 /** Modulo do sistema onde a acao ocorreu. */
@@ -104,4 +118,5 @@ export enum AuditModuleName {
   Documents = 'DOCUMENTS',
   Plantae = 'PLANTAE',
   Channels = 'CHANNELS',
+  Nfse = 'NFSE',
 }

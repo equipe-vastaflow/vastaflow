@@ -35,7 +35,7 @@ O desenvolvimento e **incremental**: a fundacao vem antes das automacoes.
 | Notificacoes internas             | Funcionando (API + tela). Somente internas: sem e-mail, push ou mensageria |
 | Perfil do proprio usuario         | Funcionando (API + tela). So o nome e editavel; sem troca de senha ou e-mail |
 | Frontend: login, dashboard, usuarios, auditoria, financeiro, configuracoes | Funcionando |
-| Integracoes externas              | Telegram (Fase 2), n8n + autenticacao de servico (Fase 3), Plantae somente leitura (Fase 4); WhatsApp (codigo pronto e testado com simulacao, desligado), NFS-e e e-mail: nao validados/nao iniciados |
+| Integracoes externas              | Telegram (Fase 2), n8n + autenticacao de servico (Fase 3), Plantae somente leitura (Fase 4); WhatsApp e NFS-e Nacional (codigo pronto e testado com simulacao, desligados e nao validados com a Meta/Sefin), e-mail: nao iniciado |
 | Telegram + n8n (Fase 5)           | Fluxo conversacional ponta a ponta validado **localmente com mensagens simuladas**; **bot real nao ativado**, desligado por padrao. Ver [docs/telegram-n8n.md](docs/telegram-n8n.md) |
 
 > Nenhuma integracao possui endpoint, token ou payload definido. Nada foi
@@ -620,7 +620,7 @@ Respostas de erro 5xx nao expoem a causa: devolvem mensagem generica e um
 - [docs/telegram-n8n.md](docs/telegram-n8n.md) - fluxo Telegram -> n8n -> NestJS (Fase 5): envelope assinado, autorizacao pela identidade vinculada, idempotencia, `/contas_pagar`, operacao e limites
 - [docs/telegram-n8n.md, secao 12](docs/telegram-n8n.md) - Fase 5.1: papel exato do n8n, entrega at-most-once, eventos presos, rate limit, Bot API falso e procedimento (nao executado) para o bot real
 - [docs/whatsapp.md](docs/whatsapp.md) - WhatsApp (Cloud API oficial da Meta): webhook assinado direto ao backend, vinculo, RBAC e o que depende da conta Meta (desenvolvido e testado com simulacao; **nao validado com a Meta**)
-- [docs/nfse.md](docs/nfse.md) - NFS-e: **nao implementada**; o que foi consultado e o que falta (emissor, municipio, certificado)
+- [docs/nfse.md](docs/nfse.md) - NFS-e Nacional: implementada e testada com simulacao, **desligada e nao validada na Sefin**; contratos oficiais, comandos, estados e o que falta (certificado, empresa, municipio)
 - [docs/prontidao-vps.md](docs/prontidao-vps.md) - o que esta provado, o que falta (HTTPS, backup, restauracao, rollback) antes da VPS
 - [ADR 0004](docs/adr/0004-telegram-n8n-envelope-assinado.md) - por que o backend le o Telegram e entrega um envelope assinado ao n8n (o n8n nao recebe o token do bot)
 - [docs/containerizacao.md](docs/containerizacao.md) - o que foi validado em Docker, incluindo n8n + PostgreSQL (Fase 3) e o fluxo do Telegram (Fase 5)

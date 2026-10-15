@@ -182,7 +182,7 @@ Nada disso foi construido nesta fase.
 
 Autenticacao humana (inalterada); `external_identity_links` (inalterado);
 `financial_entries`, `documents`, `audit_logs` (inalterados); workflows de
-negocio, WhatsApp, Plantae pelo n8n, NFS-e (nao implementados). O Telegram via n8n passou a existir na
+negocio, WhatsApp, Plantae pelo n8n e NFS-e (a NFS-e existe, mas nao usa o n8n: ver [`nfse.md`](nfse.md)). O Telegram via n8n passou a existir na
 Fase 5 ([`telegram-n8n.md`](telegram-n8n.md)).
 
 ## 11. Workflows

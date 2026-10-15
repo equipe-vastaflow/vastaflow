@@ -586,12 +586,21 @@ describe('Auth, usuarios e RBAC (e2e)', () => {
         'users:status',
         'users:update',
       ];
-      // `plantae:read` (consulta ao Plantae, inclusive por chat) e SO do ADMIN.
+      // `plantae:read` (consulta ao Plantae, inclusive por chat) e `nfse:*` (emissao de NFS-e) sao SO do ADMIN.
       expect(permissionsOf(RoleName.Admin)).toEqual(
-        [...doGestor, 'plantae:read', 'settings:read', 'settings:update'].sort(),
+        [
+          ...doGestor,
+          'nfse:emit',
+          'nfse:read',
+          'plantae:read',
+          'settings:read',
+          'settings:update',
+        ].sort(),
       );
       expect(permissionsOf(RoleName.Gestor)).toEqual(doGestor);
       expect(permissionsOf(RoleName.Gestor)).not.toContain('plantae:read');
+      expect(permissionsOf(RoleName.Gestor)).not.toContain('nfse:emit');
+      expect(permissionsOf(RoleName.Gestor)).not.toContain('nfse:read');
       expect(permissionsOf(RoleName.Gestor)).not.toContain('settings:read');
       expect(permissionsOf(RoleName.Gestor)).not.toContain('settings:update');
       expect(permissionsOf(RoleName.Operador)).toEqual([]);

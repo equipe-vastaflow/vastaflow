@@ -35,6 +35,12 @@ export enum PermissionCode {
   // reaproveita-la daria ao GESTOR (que a tem) acesso aos dados da cliente no
   // Plantae sem decisao nenhuma. So o ADMIN a tem por padrao; ampliar e decisao.
   PlantaeRead = 'plantae:read',
+
+  // NFS-e. Documento fiscal tem efeito legal: permissoes PROPRIAS e sem nenhum perfil que as tenha
+  // por padrao (so o ADMIN, que passa em qualquer verificacao). Conceder a um perfil e decisao
+  // explicita da cliente, nunca conveniencia.
+  NfseEmit = 'nfse:emit',
+  NfseRead = 'nfse:read',
 }
 
 export const PERMISSION_DESCRIPTIONS: Record<PermissionCode, string> = {
@@ -54,4 +60,6 @@ export const PERMISSION_DESCRIPTIONS: Record<PermissionCode, string> = {
   [PermissionCode.DocumentsCreate]: 'Enviar documentos',
   [PermissionCode.PlantaeRead]:
     'Consultar dados financeiros do Plantae pelos canais (somente leitura)',
+  [PermissionCode.NfseEmit]: 'Solicitar e confirmar a emissao de NFS-e pelos canais',
+  [PermissionCode.NfseRead]: 'Consultar a situacao de NFS-e emitidas pelos canais',
 };

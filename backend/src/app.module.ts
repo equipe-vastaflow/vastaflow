@@ -13,6 +13,7 @@ import { FinanceModule } from './modules/finance/finance.module';
 import { HealthModule } from './modules/health/health.module';
 import { IntegrationsModule } from './modules/integrations/integrations.module';
 import { PlantaeModule } from './modules/integrations/plantae/plantae.module';
+import { NfseModule } from './modules/integrations/nfse/nfse.module';
 import { WhatsappModule } from './modules/integrations/whatsapp/whatsapp.module';
 import { TelegramIngestModule } from './modules/integrations/telegram-ingest/telegram-ingest.module';
 import { TelegramModule } from './modules/integrations/telegram/telegram.module';
@@ -85,6 +86,7 @@ import { UsersModule } from './modules/users/users.module';
     // ADMIN humano. Desligado por padrao (PLANTAE_ENABLED). Nao grava nada.
     PlantaeModule,
     WhatsappModule,
+    NfseModule,
   ],
 })
 export class AppModule {}

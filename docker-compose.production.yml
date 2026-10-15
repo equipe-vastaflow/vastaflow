@@ -266,6 +266,28 @@ services:
       WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
       WHATSAPP_GRAPH_API_VERSION: ${WHATSAPP_GRAPH_API_VERSION:-}
       WHATSAPP_API_BASE_URL: ${WHATSAPP_API_BASE_URL:-}
+      # NFS-e Nacional. DESLIGADA por padrao (comandos /nfse* respondem "desligado"). Ligada, exige a
+      # configuracao fiscal completa (sem padrao tributario). So o backend as recebe (nunca o n8n/frontend).
+      # O certificado A1 (.pfx) NAO vai para a imagem: monte-o somente leitura FORA do Git quando existir
+      # (ex.: `- /srv/vastaflow/secrets/nfse:/run/secrets/nfse:ro`) e aponte NFSE_CERT_PFX_PATH para ele.
+      # Ver docs/nfse.md.
+      NFSE_ENABLED: ${NFSE_ENABLED:-false}
+      NFSE_AMBIENTE: ${NFSE_AMBIENTE:-}
+      NFSE_API_BASE_URL: ${NFSE_API_BASE_URL:-}
+      NFSE_WIRE_CONTRACT_CONFIRMED: ${NFSE_WIRE_CONTRACT_CONFIRMED:-false}
+      NFSE_CERT_PFX_PATH: ${NFSE_CERT_PFX_PATH:-}
+      NFSE_CERT_PFX_PASSWORD: ${NFSE_CERT_PFX_PASSWORD:-}
+      NFSE_CA_BUNDLE_PATH: ${NFSE_CA_BUNDLE_PATH:-}
+      NFSE_PRESTADOR_CNPJ: ${NFSE_PRESTADOR_CNPJ:-}
+      NFSE_PRESTADOR_IM: ${NFSE_PRESTADOR_IM:-}
+      NFSE_PRESTADOR_NOME: ${NFSE_PRESTADOR_NOME:-}
+      NFSE_MUNICIPIO_EMISSOR_IBGE: ${NFSE_MUNICIPIO_EMISSOR_IBGE:-}
+      NFSE_OPCAO_SIMPLES: ${NFSE_OPCAO_SIMPLES:-}
+      NFSE_REGIME_APURACAO_SN: ${NFSE_REGIME_APURACAO_SN:-}
+      NFSE_REGIME_ESPECIAL_TRIBUTACAO: ${NFSE_REGIME_ESPECIAL_TRIBUTACAO:-}
+      NFSE_DPS_SERIE: ${NFSE_DPS_SERIE:-}
+      NFSE_VALOR_MAXIMO: ${NFSE_VALOR_MAXIMO:-}
+      NFSE_CONFIRMATION_TTL_MINUTES: ${NFSE_CONFIRMATION_TTL_MINUTES:-}
     volumes:
       - *ca-mount
       # DIRETORIO, nao arquivo, e somente leitura. Diretorio porque o CLI

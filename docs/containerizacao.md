@@ -109,7 +109,7 @@ quando "parece certo".**
   exercitados no navegador.
 - **Servidor MySQL com a chave `0600` de dono 999** (o fix do defeito 7 foi
   demonstrado com `cat`, nao subindo o MySQL com ela).
-- Backup externo e restauracao; n8n; WhatsApp; Plantae; NFS-e.
+- Backup externo e restauracao; n8n; WhatsApp; Plantae; NFS-e (so simulada: sem certificado nem Sefin reais).
 
 ## Observacoes que nao bloqueiam
 

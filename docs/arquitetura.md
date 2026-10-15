@@ -43,8 +43,8 @@ Nenhuma regra de negocio pode ser duplicada por canal. Um adapter so faz
 traducao de formato.
 
 > O adapter do **Telegram** existe (ver "Canal Telegram" abaixo). WhatsApp,
-> Plantae e NFS-e continuam sem implementacao: endpoints, autenticacao e
-> payloads so serao definidos quando houver documentacao e acesso oficiais.
+> A NFS-e Nacional foi implementada com contratos oficiais (ver [`nfse.md`](nfse.md)), desligada e
+> nao validada na Sefin. Os payloads do Plantae so foram definidos com a documentacao e o acesso oficiais.
 
 ## Estrutura do backend
 

@@ -20,6 +20,7 @@ import {
   isPlausibleToken,
   parsePlantaeBaseUrl,
 } from '../modules/integrations/plantae/plantae-settings';
+import { validateNfseSettings } from '../modules/integrations/nfse/nfse-settings';
 import { validateWhatsappSettings } from '../modules/integrations/whatsapp/whatsapp-settings';
 import { resolveTelegramApiBase } from '../modules/integrations/telegram/telegram-api-base';
 import {
@@ -516,6 +517,114 @@ export class EnvironmentVariables {
   WHATSAPP_API_BASE_URL?: string;
 
   /**
+   * NFS-e Nacional (Emissor Publico Nacional / Sefin Nacional). DESLIGADA por padrao: com `false`
+   * os comandos /nfse* respondem "desligado" e nada e gerado, assinado ou enviado. Ligada, exige a
+   * configuracao fiscal completa (sem padrao tributario) - ver `docs/nfse.md`. So o backend le estas
+   * variaveis; o certificado digital nunca vai ao n8n, ao frontend, a log ou a auditoria.
+   */
+  @Transform(({ value }: TransformInput): boolean => value === 'true' || value === true)
+  @IsBoolean({ message: "NFSE_ENABLED deve ser 'true' ou 'false'" })
+  NFSE_ENABLED: boolean = false;
+
+  /** `restrita` (homologacao) ou `producao`. Sem padrao. */
+  @Transform(optionalString)
+  @IsOptional()
+  @IsString()
+  NFSE_AMBIENTE?: string;
+
+  /** SO TESTE: servidor falso (hosts nfse-fake, localhost, 127.0.0.1). Vazio = Sefin oficial do ambiente. */
+  @Transform(optionalString)
+  @IsOptional()
+  @IsString()
+  NFSE_API_BASE_URL?: string;
+
+  /**
+   * A troca de mensagens com a Sefin real so e liberada depois de o formato do corpo JSON ser validado
+   * em producao restrita (o Swagger oficial exige certificado). Padrao `false`.
+   */
+  @Transform(({ value }: TransformInput): boolean => value === 'true' || value === true)
+  @IsBoolean({ message: "NFSE_WIRE_CONTRACT_CONFIRMED deve ser 'true' ou 'false'" })
+  NFSE_WIRE_CONTRACT_CONFIRMED: boolean = false;
+
+  /** Caminho do certificado A1 (.pfx) DENTRO do conteiner do backend. Montado somente leitura; nunca no Git. */
+  @Transform(optionalString)
+  @IsOptional()
+  @IsString()
+  NFSE_CERT_PFX_PATH?: string;
+
+  /** Senha do .pfx. SEGREDO. */
+  @Transform(optionalString)
+  @IsOptional()
+  @IsString()
+  NFSE_CERT_PFX_PASSWORD?: string;
+
+  /** Opcional: cadeia de AC (PEM) para validar o servidor da Sefin, se o repositorio padrao nao a conhecer. */
+  @Transform(optionalString)
+  @IsOptional()
+  @IsString()
+  NFSE_CA_BUNDLE_PATH?: string;
+
+  /** CNPJ do prestador (14 digitos). Deve ser o do certificado. */
+  @Transform(optionalString)
+  @IsOptional()
+  @IsString()
+  NFSE_PRESTADOR_CNPJ?: string;
+
+  /** Inscricao municipal do prestador (opcional no leiaute; o municipio pode exigir). */
+  @Transform(optionalString)
+  @IsOptional()
+  @IsString()
+  NFSE_PRESTADOR_IM?: string;
+
+  /** Razao social do prestador (opcional no leiaute). */
+  @Transform(optionalString)
+  @IsOptional()
+  @IsString()
+  NFSE_PRESTADOR_NOME?: string;
+
+  /** Codigo IBGE (7 digitos) do municipio emissor (`cLocEmi`). */
+  @Transform(optionalString)
+  @IsOptional()
+  @IsString()
+  NFSE_MUNICIPIO_EMISSOR_IBGE?: string;
+
+  /** Situacao no Simples Nacional: 1 nao optante (NAO suportado: exige IBS/CBS), 2 MEI, 3 ME/EPP. */
+  @Transform(optionalString)
+  @IsOptional()
+  @IsString()
+  NFSE_OPCAO_SIMPLES?: string;
+
+  /** Somente ME/EPP: 1, 2 ou 3 (regime de apuracao). Vazio = nao informar. */
+  @Transform(optionalString)
+  @IsOptional()
+  @IsString()
+  NFSE_REGIME_APURACAO_SN?: string;
+
+  /** Regime especial de tributacao municipal: 0 (nenhum), 1 a 6 ou 9. */
+  @Transform(optionalString)
+  @IsOptional()
+  @IsString()
+  NFSE_REGIME_ESPECIAL_TRIBUTACAO?: string;
+
+  /** Serie da DPS (1 a 49999 = aplicativo proprio). */
+  @Transform(optionalString)
+  @IsOptional()
+  @IsString()
+  NFSE_DPS_SERIE?: string;
+
+  /** Valor MAXIMO por emissao (ex.: 5000.00). Limite de negocio da cliente; sem padrao. */
+  @Transform(optionalString)
+  @IsOptional()
+  @IsString()
+  NFSE_VALOR_MAXIMO?: string;
+
+  /** Validade do codigo de confirmacao (2 a 30). Padrao 10. */
+  @Transform(optionalString)
+  @IsOptional()
+  @IsString()
+  NFSE_CONFIRMATION_TTL_MINUTES?: string;
+
+  /**
    * URL base da API. SO aceita o host de HOMOLOGACAO conhecido (`rc.plantae.agr.br`),
    * em HTTPS, no caminho `/api/v1/external`. Uma URL de producao so entra depois da
    * liberacao oficial da Plantae, por mudanca de codigo - ver `plantae.constants.ts`.
@@ -697,6 +806,10 @@ function validateCrossFieldRules(env: EnvironmentVariables): string[] {
     }
   }
   for (const problem of validateWhatsappSettings(env)) {
+    problems.push(problem);
+  }
+  // NFS-e: ligada exige a configuracao fiscal completa (so avalia quando NFSE_ENABLED=true).
+  for (const problem of validateNfseSettings(env)) {
     problems.push(problem);
   }
   // Fail-closed da Fase 6: consulta financeira real pelo chat so com a organizacao confirmada.
