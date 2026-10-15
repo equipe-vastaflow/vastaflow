@@ -181,7 +181,10 @@ describe('Vinculacao de identidade externa com confirmacao (e2e)', () => {
         { canal: 'telegram', idExterno: '123' },
         { canal: 'telegram', usuarioId: admin.id },
         { canal: 'telegram', role: 'ADMIN' },
-        { canal: 'whatsapp' },
+        // `whatsapp` e canal valido desde que o adaptador existe; o contrato segue estrito: canal
+        // desconhecido e campo a mais continuam recusados.
+        { canal: 'sms' },
+        { canal: 'whatsapp', idExterno: '5511999990000' },
       ]) {
         await request(server())
           .post(`/users/${alvo.id}/external-identities/link-requests`)

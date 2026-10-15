@@ -9,6 +9,7 @@ import { Notifications1790305530902 as MysqlNotifications } from './mysql/179030
 import { NotificationsReadAt1790706805546 as MysqlNotificationsReadAt } from './mysql/1790706805546-NotificationsReadAt';
 import { SystemSettings1790303010994 as MysqlSystemSettings } from './mysql/1790303010994-SystemSettings';
 import { TelegramInboundEvents1791500000000 as MysqlTelegramInboundEvents } from './mysql/1791500000000-TelegramInboundEvents';
+import { WhatsappInboundEvents1791600000000 as MysqlWhatsappInboundEvents } from './mysql/1791600000000-WhatsappInboundEvents';
 import { ExternalIdentityLinks1790798470956 as OracleExternalIdentityLinks } from './oracle/1790798470956-ExternalIdentityLinks';
 import { FinancialEntries1790136699120 as OracleFinancialEntries } from './oracle/1790136699120-FinancialEntries';
 import { Documents1791257785308 as OracleDocuments } from './oracle/1791257785308-Documents';
@@ -18,6 +19,7 @@ import { Notifications1790305530902 as OracleNotifications } from './oracle/1790
 import { NotificationsReadAt1790706805546 as OracleNotificationsReadAt } from './oracle/1790706805546-NotificationsReadAt';
 import { SystemSettings1790303010994 as OracleSystemSettings } from './oracle/1790303010994-SystemSettings';
 import { TelegramInboundEvents1791500000000 as OracleTelegramInboundEvents } from './oracle/1791500000000-TelegramInboundEvents';
+import { WhatsappInboundEvents1791600000000 as OracleWhatsappInboundEvents } from './oracle/1791600000000-WhatsappInboundEvents';
 
 type MigrationClass = new () => MigrationInterface;
 
@@ -40,6 +42,7 @@ export const MIGRATIONS: Record<DatabaseType, MigrationClass[]> = {
     MysqlIdentityLinkRequests,
     MysqlDocuments,
     MysqlTelegramInboundEvents,
+    MysqlWhatsappInboundEvents,
   ],
   oracle: [
     OracleInitialSchema,
@@ -51,5 +54,6 @@ export const MIGRATIONS: Record<DatabaseType, MigrationClass[]> = {
     OracleIdentityLinkRequests,
     OracleDocuments,
     OracleTelegramInboundEvents,
+    OracleWhatsappInboundEvents,
   ],
 };

@@ -15,7 +15,7 @@ async function bootstrap(): Promise<void> {
   const logger = new Logger('Bootstrap');
   // Tipado como aplicacao Express porque `configureApp` precisa de
   // `set('trust proxy')` e `useBodyParser`, que nao existem em `INestApplication`.
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true });
 
   const configService = app.get(ConfigService<EnvironmentVariables, true>);
   const appName = configService.get('APP_NAME', { infer: true });

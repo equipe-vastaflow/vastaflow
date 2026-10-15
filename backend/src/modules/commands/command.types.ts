@@ -15,6 +15,8 @@ export enum CommandChannel {
   Test = 'test',
   /** Adaptador do Telegram (`modules/integrations/telegram`). */
   Telegram = 'telegram',
+  /** Adaptador do WhatsApp (`modules/integrations/whatsapp`), Cloud API oficial da Meta. */
+  Whatsapp = 'whatsapp',
 }
 
 /**

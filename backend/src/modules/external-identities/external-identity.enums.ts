@@ -7,6 +7,8 @@
  */
 export enum IdentityChannel {
   Telegram = 'telegram',
+  /** Numero de WhatsApp (`wa_id`, so digitos) recebido pela Cloud API oficial da Meta. */
+  Whatsapp = 'whatsapp',
 }
 
 /**

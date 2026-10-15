@@ -12,7 +12,10 @@ interface Montagem {
     Promise<{ id: string }>,
     [{ nome: string; email: string; senha: string }]
   >;
-  createLinkRequest: jest.Mock<Promise<{ id: string; codigo: string; expiraEm: Date }>, [string]>;
+  createLinkRequest: jest.Mock<
+    Promise<{ id: string; codigo: string; expiraEm: Date }>,
+    [string, string]
+  >;
   audit: jest.Mock<Promise<void>, [AuditAction, string, Record<string, string>]>;
   findByEmail: jest.Mock<Promise<{ id: string; ativo: boolean; role: string } | null>, [string]>;
 }
@@ -31,7 +34,7 @@ function montar(
   const createOperator = jest.fn((_i: { nome: string; email: string; senha: string }) =>
     Promise.resolve({ id: 'user-1' }),
   );
-  const createLinkRequest = jest.fn((_u: string) =>
+  const createLinkRequest = jest.fn((_u: string, _c: string) =>
     Promise.resolve({ id: 'req-1', codigo: 'ABCD-EFGH-JKLM', expiraEm: EXPIRA }),
   );
   const audit = jest.fn((_a: AuditAction, _u: string, _m: Record<string, string>) =>
@@ -159,6 +162,31 @@ describe('local-operator CLI', () => {
       expect(await run(['link-code', '--email', 'a@b.co'], m.deps)).toBe(1);
       expect(m.createLinkRequest).not.toHaveBeenCalled();
       expect(m.saida.join('\n')).not.toContain('/vincular');
+    });
+
+    it('--canal whatsapp: gera o pedido para o WhatsApp e orienta o envio ao numero da empresa', async () => {
+      const m = montar({ existente: alvo });
+
+      expect(await run(['link-code', '--email', 'a@b.co', '--canal', 'whatsapp'], m.deps)).toBe(0);
+
+      expect(m.createLinkRequest).toHaveBeenCalledWith('user-1', 'whatsapp');
+      expect(m.saida.join(String.fromCharCode(10))).toContain('WHATSAPP');
+      expect(m.audit.mock.calls[0]?.[2]).toMatchObject({ canal: 'whatsapp' });
+    });
+
+    it('sem --canal o padrao continua sendo o Telegram', async () => {
+      const m = montar({ existente: alvo });
+
+      await run(['link-code', '--email', 'a@b.co'], m.deps);
+
+      expect(m.createLinkRequest).toHaveBeenCalledWith('user-1', 'telegram');
+    });
+
+    it.each([['sms'], ['TELEGRAM'], ['']])('canal desconhecido (%p): recusado', async (canal) => {
+      const m = montar({ existente: alvo });
+
+      expect(await run(['link-code', '--email', 'a@b.co', '--canal', canal], m.deps)).toBe(1);
+      expect(m.createLinkRequest).not.toHaveBeenCalled();
     });
 
     it.each([

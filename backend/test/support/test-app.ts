@@ -39,7 +39,7 @@ export async function createTestApp(
   // permite ao `configureApp` ajustar `trust proxy` e o limite de corpo. Assim
   // o e2e exercita exatamente o pipeline de producao, incluindo essas duas
   // configuracoes.
-  const app = moduleRef.createNestApplication<NestExpressApplication>();
+  const app = moduleRef.createNestApplication<NestExpressApplication>({ rawBody: true });
   configureApp(app);
   await app.init();
   return app;

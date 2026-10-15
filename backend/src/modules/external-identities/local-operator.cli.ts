@@ -43,7 +43,7 @@ import { generateLinkCode, hashLinkCode, normalizeLinkCode } from './link-code';
 
 const USAGE = `uso:
   create-operator
-  link-code --email <email>`;
+  link-code --email <email> [--canal telegram|whatsapp]`;
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -58,7 +58,10 @@ export interface Prompter {
 export interface OperatorPorts {
   findByEmail(email: string): Promise<{ id: string; ativo: boolean; role: string } | null>;
   createOperator(input: { nome: string; email: string; senha: string }): Promise<{ id: string }>;
-  createLinkRequest(userId: string): Promise<{ id: string; codigo: string; expiraEm: Date }>;
+  createLinkRequest(
+    userId: string,
+    canal: IdentityChannel,
+  ): Promise<{ id: string; codigo: string; expiraEm: Date }>;
   audit(acao: AuditAction, userId: string, metadados: Record<string, string>): Promise<void>;
 }
 
@@ -130,10 +133,13 @@ async function createOperator(args: readonly string[], deps: OperatorCliDeps): P
 }
 
 async function linkCode(args: readonly string[], deps: OperatorCliDeps): Promise<number> {
-  if (args.length !== 2 || args[0] !== '--email' || args[1] === undefined) {
+  const email = args[0] === '--email' ? args[1] : undefined;
+  const canalArg = args.length === 4 && args[2] === '--canal' ? args[3] : 'telegram';
+  const canal = Object.values(IdentityChannel).find((c) => String(c) === canalArg);
+  if ((args.length !== 2 && args.length !== 4) || email === undefined || canal === undefined) {
     throw new UsageError(USAGE);
   }
-  const user = await deps.ports.findByEmail(normalizeEmail(args[1]));
+  const user = await deps.ports.findByEmail(normalizeEmail(email));
   if (user === null) {
     throw new UsageError('usuario nao encontrado');
   }
@@ -143,13 +149,17 @@ async function linkCode(args: readonly string[], deps: OperatorCliDeps): Promise
   if (user.role === String(RoleName.Admin)) {
     throw new UsageError('este procedimento local nao vincula ADMIN');
   }
-  const request = await deps.ports.createLinkRequest(user.id);
+  const request = await deps.ports.createLinkRequest(user.id, canal);
   await deps.ports.audit(AuditAction.ExternalIdentityLinkRequested, user.id, {
     origem: 'cli-local',
-    canal: IdentityChannel.Telegram,
+    canal,
     solicitacaoId: request.id,
   });
-  deps.out('Envie ao bot, em CONVERSA PRIVADA, exatamente:');
+  deps.out(
+    canal === IdentityChannel.Whatsapp
+      ? 'Envie, DO WHATSAPP que sera vinculado, ao numero da empresa, exatamente:'
+      : 'Envie ao bot, em CONVERSA PRIVADA, exatamente:',
+  );
   deps.out(`  /vincular ${request.codigo}`);
   deps.out(
     `O codigo vale ate ${request.expiraEm.toISOString()} (15 min), e de uso unico e NAO sera mostrado de novo.`,
@@ -185,8 +195,8 @@ async function main(): Promise<number> {
         const created = await usersService.create({ ...input, role: RoleName.Operador });
         return { id: created.id };
       },
-      createLinkRequest: async (userId) => {
-        const anterior = await requests.findPending(userId, IdentityChannel.Telegram);
+      createLinkRequest: async (userId, canal) => {
+        const anterior = await requests.findPending(userId, canal);
         if (anterior !== null) {
           if (anterior.expiraEm.getTime() > Date.now()) {
             throw new UsageError('ja existe uma solicitacao pendente para este usuario');
@@ -196,7 +206,7 @@ async function main(): Promise<number> {
         const codigo = generateLinkCode();
         const expiraEm = new Date(Date.now() + LINK_REQUEST_TTL_MS);
         const created = await requests.create({
-          canal: IdentityChannel.Telegram,
+          canal,
           usuarioId: userId,
           codigoHash: hashLinkCode(normalizeLinkCode(codigo) as string),
           expiraEm,

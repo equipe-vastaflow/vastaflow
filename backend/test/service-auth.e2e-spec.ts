@@ -283,8 +283,17 @@ describe('Autenticacao de servico (e2e)', () => {
         .map((r) => `${r.metodo} ${r.caminho}`)
         .sort();
 
+      // Decisao consciente (WhatsApp): o webhook da Meta chama sem JWT e e fechado por assinatura
+      // (X-Hub-Signature-256) e por WHATSAPP_ENABLED (desligado = 404). Nenhuma outra rota nova.
       expect(publicas).toEqual(
-        ['GET /health', 'GET /health/readiness', 'POST /auth/login', 'POST /auth/register'].sort(),
+        [
+          'GET /health',
+          'GET /health/readiness',
+          'GET /webhooks/whatsapp',
+          'POST /auth/login',
+          'POST /auth/register',
+          'POST /webhooks/whatsapp',
+        ].sort(),
       );
     });
 

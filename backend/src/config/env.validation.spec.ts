@@ -670,4 +670,59 @@ describe('validateEnv', () => {
       expect(mensagem).not.toContain('plt_TOKEN_FALSO');
     });
   });
+  describe('WhatsApp (Cloud API)', () => {
+    const completo: Record<string, string> = {
+      WHATSAPP_ENABLED: 'true',
+      WHATSAPP_WEBHOOK_TOKEN: 'token-do-webhook-123456',
+      WHATSAPP_APP_SECRET: 'app-secret-de-teste-0123456789',
+      WHATSAPP_ACCESS_TOKEN: 'EAAG-token-de-teste-0123456789',
+      WHATSAPP_PHONE_NUMBER_ID: '1234567890',
+      WHATSAPP_GRAPH_API_VERSION: 'v21.0',
+    };
+
+    it('padrao: desligado, sem nenhuma variavel exigida', () => {
+      expect(validateEnv(baseEnv).WHATSAPP_ENABLED).toBe(false);
+    });
+
+    it('ligado e completo: passa', () => {
+      expect(validateEnv({ ...baseEnv, ...completo }).WHATSAPP_ENABLED).toBe(true);
+    });
+
+    it.each([
+      'WHATSAPP_WEBHOOK_TOKEN',
+      'WHATSAPP_APP_SECRET',
+      'WHATSAPP_ACCESS_TOKEN',
+      'WHATSAPP_PHONE_NUMBER_ID',
+      'WHATSAPP_GRAPH_API_VERSION',
+    ])('ligado sem %s: o boot e recusado', (faltando) => {
+      const resto = Object.fromEntries(Object.entries(completo).filter(([k]) => k !== faltando));
+
+      expect(() => validateEnv({ ...baseEnv, ...resto })).toThrow(new RegExp(faltando));
+    });
+
+    it('valores implausiveis sao recusados sem repetir o segredo', () => {
+      let mensagem = '';
+      try {
+        validateEnv({ ...baseEnv, ...completo, WHATSAPP_APP_SECRET: 'curto SEGREDO' });
+      } catch (error) {
+        mensagem = (error as Error).message;
+      }
+
+      expect(mensagem).toMatch(/WHATSAPP_APP_SECRET/);
+      expect(mensagem).not.toContain('SEGREDO');
+    });
+
+    it('base da Graph fora da lista de hosts de teste: recusada', () => {
+      expect(() =>
+        validateEnv({ ...baseEnv, ...completo, WHATSAPP_API_BASE_URL: 'http://evil.example' }),
+      ).toThrow(/WHATSAPP_API_BASE_URL/);
+      expect(() =>
+        validateEnv({
+          ...baseEnv,
+          ...completo,
+          WHATSAPP_API_BASE_URL: 'http://whatsapp-fake:8082',
+        }),
+      ).not.toThrow();
+    });
+  });
 });

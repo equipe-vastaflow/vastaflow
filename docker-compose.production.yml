@@ -256,6 +256,16 @@ services:
       # existe para backend/test/fake-telegram (ver docs/telegram-n8n.md).
       TELEGRAM_USER_RATE_LIMIT_PER_MINUTE: ${TELEGRAM_USER_RATE_LIMIT_PER_MINUTE:-}
       TELEGRAM_API_BASE_URL: ${TELEGRAM_API_BASE_URL:-}
+      # WhatsApp (Cloud API oficial da Meta). DESLIGADO por padrao (rotas 404). Ligado, exige TODAS as
+      # variaveis; so o backend as recebe (nunca o n8n/frontend/migrate). O webhook publico passa pelo
+      # Nginx em /api/webhooks/whatsapp e exige HTTPS na borda (ver docs/whatsapp.md).
+      WHATSAPP_ENABLED: ${WHATSAPP_ENABLED:-false}
+      WHATSAPP_WEBHOOK_TOKEN: ${WHATSAPP_WEBHOOK_TOKEN:-}
+      WHATSAPP_APP_SECRET: ${WHATSAPP_APP_SECRET:-}
+      WHATSAPP_ACCESS_TOKEN: ${WHATSAPP_ACCESS_TOKEN:-}
+      WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
+      WHATSAPP_GRAPH_API_VERSION: ${WHATSAPP_GRAPH_API_VERSION:-}
+      WHATSAPP_API_BASE_URL: ${WHATSAPP_API_BASE_URL:-}
     volumes:
       - *ca-mount
       # DIRETORIO, nao arquivo, e somente leitura. Diretorio porque o CLI

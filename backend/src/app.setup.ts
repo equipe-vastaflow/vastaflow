@@ -46,6 +46,8 @@ export function configureApp(app: NestExpressApplication): void {
 
   // Limite explicito de corpo, antes de qualquer validacao: um payload grande e
   // recusado sem ser desserializado.
+  // O corpo BRUTO (necessario a assinatura do webhook do WhatsApp) vem de `rawBody: true` na criacao
+  // da aplicacao (`main.ts` e `test/support/test-app.ts`), que o Nest preserva neste parser.
   app.useBodyParser('json', { limit: MAX_REQUEST_BODY });
   app.useBodyParser('urlencoded', { limit: MAX_REQUEST_BODY, extended: true });
 

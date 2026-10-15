@@ -20,6 +20,7 @@ import {
   isPlausibleToken,
   parsePlantaeBaseUrl,
 } from '../modules/integrations/plantae/plantae-settings';
+import { validateWhatsappSettings } from '../modules/integrations/whatsapp/whatsapp-settings';
 import { resolveTelegramApiBase } from '../modules/integrations/telegram/telegram-api-base';
 import {
   isAcceptableSigningKey,
@@ -470,6 +471,51 @@ export class EnvironmentVariables {
   PLANTAE_CHAT_SHOW_PAYEE_NAME: boolean = false;
 
   /**
+   * WhatsApp (Cloud API OFICIAL da Meta). Desligado por padrao: com `false` as rotas do webhook
+   * respondem 404 e nada e enviado. Ligado, exige TODAS as variaveis abaixo (o boot e recusado se
+   * faltar alguma). Nenhuma e lida pelo n8n, pelo frontend ou pelo `migrate`.
+   */
+  @Transform(({ value }: TransformInput): boolean => value === 'true' || value === true)
+  @IsBoolean({ message: "WHATSAPP_ENABLED deve ser 'true' ou 'false'" })
+  WHATSAPP_ENABLED: boolean = false;
+
+  /** Token que VOCE escolhe e informa no painel da Meta para a verificacao do webhook (GET). */
+  @Transform(optionalString)
+  @IsOptional()
+  @IsString()
+  WHATSAPP_WEBHOOK_TOKEN?: string;
+
+  /** App Secret do app da Meta: assina cada POST do webhook (X-Hub-Signature-256). SEGREDO. */
+  @Transform(optionalString)
+  @IsOptional()
+  @IsString()
+  WHATSAPP_APP_SECRET?: string;
+
+  /** Token de acesso (usuario de sistema) para ENVIAR mensagens pela Graph API. SEGREDO. */
+  @Transform(optionalString)
+  @IsOptional()
+  @IsString()
+  WHATSAPP_ACCESS_TOKEN?: string;
+
+  /** Id do numero de telefone na Meta (so digitos). Mensagens de outro numero sao ignoradas. */
+  @Transform(optionalString)
+  @IsOptional()
+  @IsString()
+  WHATSAPP_PHONE_NUMBER_ID?: string;
+
+  /** Versao da Graph API (ex.: v21.0). Sem padrao no codigo: a versao e escolha de quem implanta. */
+  @Transform(optionalString)
+  @IsOptional()
+  @IsString()
+  WHATSAPP_GRAPH_API_VERSION?: string;
+
+  /** SO TESTE: servidor Graph falso (hosts whatsapp-fake, localhost, 127.0.0.1). Vazio = Meta. */
+  @Transform(optionalString)
+  @IsOptional()
+  @IsString()
+  WHATSAPP_API_BASE_URL?: string;
+
+  /**
    * URL base da API. SO aceita o host de HOMOLOGACAO conhecido (`rc.plantae.agr.br`),
    * em HTTPS, no caminho `/api/v1/external`. Uma URL de producao so entra depois da
    * liberacao oficial da Plantae, por mudanca de codigo - ver `plantae.constants.ts`.
@@ -636,6 +682,22 @@ function validateCrossFieldRules(env: EnvironmentVariables): string[] {
     problems.push(
       'TELEGRAM_INGEST_SIGNING_KEY invalida: use pelo menos 32 caracteres, sem espacos',
     );
+  }
+  // WhatsApp: ligado exige configuracao completa e plausivel (mensagens fixas, sem repetir valores).
+  if (env.WHATSAPP_ENABLED) {
+    const missing = [
+      'WHATSAPP_WEBHOOK_TOKEN',
+      'WHATSAPP_APP_SECRET',
+      'WHATSAPP_ACCESS_TOKEN',
+      'WHATSAPP_PHONE_NUMBER_ID',
+      'WHATSAPP_GRAPH_API_VERSION',
+    ].filter((key) => !env[key as keyof EnvironmentVariables]);
+    if (missing.length > 0) {
+      problems.push(`WHATSAPP_ENABLED=true exige: ${missing.join(', ')}`);
+    }
+  }
+  for (const problem of validateWhatsappSettings(env)) {
+    problems.push(problem);
   }
   // Fail-closed da Fase 6: consulta financeira real pelo chat so com a organizacao confirmada.
   if (
