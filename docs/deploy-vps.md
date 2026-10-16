@@ -8,7 +8,7 @@
 
 | # | Decisão | Opções | Por que importa |
 | --- | --- | --- | --- |
-| 1 | **Domínio** e quem controla o DNS | domínio da cliente (subdomínio `app.`) ou novo | o webhook da Meta exige HTTPS válido num domínio; o Let's Encrypt só emite para domínio real |
+| 1 | **Dominio** e quem controla o DNS | **inicial (decidido): subdominio gratuito DuckDNS**, ex.: `vastaflow.duckdns.org` (secao 5.1); depois, dominio da cliente (`app.<dominio>`) | o webhook da Meta exige HTTPS valido; o Let's Encrypt so emite para nome que resolva para a VPS |
 | 2 | **Plano da VPS** | KVM 4 (decisão anterior) | os limites de recurso do Compose foram medidos num Docker Desktop de 3,8 GB, **não** na VPS |
 | 3 | **Destino do backup externo** | ver `docs/backup-restauracao.md`, seção 6 | sem ele um backup só protege de erro humano, não de perder a VPS |
 | 4 | **Quem guarda a chave privada do backup** | dono do projeto + 1 cópia em cofre | sem ela **não existe restauração** |
@@ -60,10 +60,36 @@ mecanismo é o mesmo; ver ADR 0003). Copie para a VPS **somente** `infra/tls/mys
 (`scp -r`), mantenha `infra/tls/ca-private/` (a chave da CA) **offline**. Credenciais de serviço do n8n:
 `infra/service-auth/credentials.json` pelo CLI descrito em `docs/autenticacao-servico-a-servico.md`.
 
-## 5. DNS `[NÃO testado: não há domínio]`
-Crie o registro **A** de `SERVER_NAME` para o IP da VPS (e AAAA só se a VPS tiver IPv6 funcionando e liberado no firewall).
-Espere propagar: `dig +short app.exemplo.com.br` deve devolver o IP. **Não** rode o passo 6 antes: o Let's Encrypt limita tentativas
-falhas por domínio.
+## 5. DNS `[NAO testado: nao ha dominio nem VPS]`
+Crie o registro **A** de `SERVER_NAME` para o IP da VPS (e AAAA so se a VPS tiver IPv6 funcionando e liberado no firewall).
+Espere propagar: `dig +short <SERVER_NAME>` deve devolver o IP. **Nao** rode o passo 6 antes: o Let's Encrypt limita tentativas
+falhas por dominio — por isso o `https-init.sh` **recusa** rodar se o nome ainda nao resolver (e, com `EXPECTED_PUBLIC_IP`, se
+resolver para outro IP).
+
+### 5.1 Subdominio gratuito DuckDNS (inicial) `[testado local: atualizador e HTTP-01 contra servidor ACME de teste; NAO testado: DuckDNS real]`
+O HTTPS desta stack usa o desafio **HTTP-01 (porta 80)**, que nao depende de quem hospeda o DNS: `vastaflow.duckdns.org`
+funciona **exatamente** como um dominio pago (o `https-init.sh` o reconhece e confere o formato). Nao ha curinga: um nome, um certificado.
+1. **Voce** cria o subdominio na sua conta DuckDNS (este projeto nao cria conta nem registra nada) e **copia o token direto para a VPS**,
+   nunca para o chat nem para o Git:
+   ```bash
+   sudo install -d -m 700 /etc/vastaflow
+   sudo cp infra/duckdns/duckdns.env.example /etc/vastaflow/duckdns.env && sudo chmod 600 /etc/vastaflow/duckdns.env
+   sudoedit /etc/vastaflow/duckdns.env          # DUCKDNS_DOMAIN=vastaflow  (so o subdominio)  e  DUCKDNS_TOKEN=...
+   sudo bash scripts/duckdns-update.sh           # "DuckDNS: OK (vastaflow.duckdns.org atualizado)"
+   sudo cp infra/duckdns/vastaflow-duckdns.service infra/duckdns/vastaflow-duckdns.timer /etc/systemd/system/
+   sudo systemctl daemon-reload && sudo systemctl enable --now vastaflow-duckdns.timer   # reatualiza a cada 10 min e no boot
+   ```
+   O `duckdns-update.sh` entrega a URL (com o token) ao `curl` por **stdin** (o token nao aparece em `ps`), so fala HTTPS, nao segue
+   redirecionamento e nunca imprime o token. `DUCKDNS_IP` fixa o IPv4; vazio = o DuckDNS usa o IP de origem (a VPS).
+2. No `.env` da VPS: `SERVER_NAME=vastaflow.duckdns.org` e `LETSENCRYPT_EMAIL=<seu e-mail>`.
+3. `dig +short vastaflow.duckdns.org` deve mostrar o IP da VPS; so entao a secao 6.
+4. **Trocar para dominio proprio depois** nao exige mudanca de codigo: ajuste `SERVER_NAME`, aponte o DNS, rode
+   `bash scripts/https-init.sh` de novo (emite o novo certificado) e atualize a URL do webhook na Meta. O timer do DuckDNS pode ser desativado.
+
+**Riscos do DuckDNS (aceitos para comecar):** servico gratuito de terceiros — se o DuckDNS cair, o nome para de resolver (site e webhook
+ficam inacessiveis; os dados nao sao afetados); o token e um segredo (quem o tem controla o seu IP); o subdominio pertence ao DuckDNS, nao
+a cliente, entao a recomendacao e migrar para um dominio proprio antes de a operacao depender do sistema. A aceitacao da URL pela Meta
+**nao** foi verificada.
 
 ## 6. Build, HTTPS e subida `[testado local: configuração Nginx/TLS/webhook; NÃO testado: emissão real do certificado]`
 ```bash
@@ -74,6 +100,7 @@ STAGING=1 bash ./scripts/https-init.sh             # ensaio no Let's Encrypt de 
 # se deu certo, e só então:
 docker run --rm -v vastaflow-letsencrypt:/etc/letsencrypt alpine:3.20 rm -rf /etc/letsencrypt/live /etc/letsencrypt/archive /etc/letsencrypt/renewal
 bash ./scripts/https-init.sh                        # emissão real
+bash ./scripts/https-verify.sh                      # confere HTTPS, certificado, HSTS, bloqueios e o webhook (imprime a URL dele)
 $COMPOSE up -d
 ```
 O `https-init.sh` cria um certificado temporário (o nginx não sobe sem um), emite o real pelo desafio HTTP-01, recarrega o nginx e
@@ -102,13 +129,14 @@ curl -sI http://app.exemplo.com.br/ | head -n1                                  
 ```
 Editor do n8n (nunca público): `ssh -L 5678:127.0.0.1:5678 deploy@<IP>` e abra `http://127.0.0.1:5678` no seu computador.
 
-## 10. Teste do webhook HTTPS (WhatsApp) `[testado local contra backend falso; NÃO testado com a Meta]`
-Com `WHATSAPP_ENABLED=false` a rota existe no Nginx mas o backend responde 404:
-```bash
-curl -s -o /dev/null -w '%{http_code}\n' "https://app.exemplo.com.br/api/webhooks/whatsapp?hub.mode=subscribe&hub.verify_token=x&hub.challenge=1"   # 404
-```
-Só depois de decidir número, conta Meta e ligar as 5 variáveis `WHATSAPP_*` (ver `docs/whatsapp.md`): o mesmo comando, com um
-token errado, deve dar **403**; a verificação real é a da Meta ao salvar o webhook (URL `https://<SERVER_NAME>/api/webhooks/whatsapp`).
+## 10. Teste do webhook HTTPS (WhatsApp) `[testado local contra backend que imita o contrato; NAO testado com a Meta]`
+A URL do webhook e **derivada** (nao ha variavel propria): `https://<SERVER_NAME>/api/webhooks/whatsapp`, ex.:
+`https://vastaflow.duckdns.org/api/webhooks/whatsapp`. `bash scripts/https-verify.sh` a imprime e confere, sem chamar a Meta:
+com `WHATSAPP_ENABLED=false` todo pedido ao webhook recebe **404**; ligado, um pedido **sem assinatura valida**
+(`X-Hub-Signature-256`) ou com token de verificacao errado recebe **403** — nunca 2xx. O Nginx repassa o corpo **bruto e intacto**
+(a assinatura HMAC e calculada sobre os bytes exatos; um byte alterado -> 403, provado no teste local). So depois de decidir numero,
+conta Meta e ligar as 5 variaveis `WHATSAPP_*` (ver `docs/whatsapp.md`) cole a URL no painel da Meta; a verificacao real e a dela
+ao salvar o webhook.
 
 ## 11. Backup e primeira restauração `[testado local no sistema de teste isolado; NÃO testado na VPS]`
 Siga `docs/backup-restauracao.md` (importar **só a chave pública**, `backup.env`, timer do systemd, primeira execução manual).
@@ -144,6 +172,15 @@ Antes de depender dele, ensaie-o na VPS com um backup real, num horário sem uso
 Nova VPS (seções 1–6, **sem** subir a aplicação) → trazer o último backup do destino externo → restaurar a configuração
 (`VF_CONFIG_OUT`, copiar `.env`/`infra/tls`/credenciais conscientemente) → `restore.sh` num projeto vazio → subir → seção 9.
 O DNS precisa apontar para o novo IP (TTL baixo ajuda).
+
+## Testes locais que ja existem (rodam sem VPS, so com Docker; nenhum toca a stack real)
+| Comando | O que prova |
+| --- | --- |
+| `bash infra/https/test-https.sh` | Nginx/TLS/HSTS/redirecionamento/bloqueios com o nome `vastaflow.duckdns.org`; webhook com assinatura HMAC preservada ponta a ponta; `https-verify.sh` contra a pilha |
+| `bash infra/https/test-acme.sh` | desafio **HTTP-01** completo contra o Pebble (servidor ACME de teste do Let's Encrypt): emissao, troca do certificado temporario, renovacao; e a recusa quando o DNS nao aponta |
+| `bash infra/duckdns/test-duckdns.sh` | atualizador do DuckDNS contra servidor falso: token fora do argv e da saida, entradas invalidas recusadas, sem redirecionamento |
+| `bash scripts/restore-test.sh` | backup cifrado, origem destruida, restauracao e uso pela API (docs/backup-restauracao.md) |
+Nenhum deles fala com o Let's Encrypt real, com o DuckDNS real ou com a Meta.
 
 ## 15. O que ainda NÃO está resolvido
 Observabilidade/alerta e verificação externa de uptime; teste de reboot da VPS; carga real; rotação de segredos definida;

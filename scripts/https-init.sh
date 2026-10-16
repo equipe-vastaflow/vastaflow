@@ -5,6 +5,8 @@
 #
 #   SERVER_NAME=app.exemplo.com.br LETSENCRYPT_EMAIL=voce@exemplo.com.br ./scripts/https-init.sh
 #   STAGING=1 ...        ensaio contra o ambiente de teste do Let's Encrypt (sem limite de taxa)
+#   ACME_SERVER=<url>    diretorio ACME alternativo (so para ensaio com um servidor de teste, ex.: Pebble)
+#   EXPECTED_PUBLIC_IP   confere se o DNS aponta para este IP antes de pedir o certificado
 #
 # Por que o passo do certificado temporario: o nginx nao sobe sem o certificado, e o certbot precisa do
 # nginx no ar para validar o dominio. Cria-se um certificado AUTOASSINADO de 1 dia, sobe-se o nginx,
@@ -42,6 +44,34 @@ case "$SERVER_NAME" in
     fi ;;
 esac
 
+# Subdominio gratuito DuckDNS (<nome>.duckdns.org): funciona igual a um dominio proprio, porque o desafio
+# usado e o HTTP-01 (porta 80), nao o DNS-01. O que muda e QUEM mantem o registro A: o DuckDNS, atualizado por
+# scripts/duckdns-update.sh. Nao ha curinga (*.duckdns.org) nesta configuracao: um nome, um certificado.
+case "$SERVER_NAME" in
+  *.duckdns.org)
+    label="${SERVER_NAME%.duckdns.org}"
+    if ! [[ "$label" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]]; then
+      echo "ERRO: subdominio DuckDNS invalido (use letras minusculas, digitos e hifen; um nivel so)." >&2; exit 2
+    fi
+    echo "DuckDNS detectado (${SERVER_NAME}): desafio HTTP-01 na porta 80; o DNS precisa apontar para esta VPS." ;;
+esac
+
+# O DNS TEM de apontar para esta VPS antes: o Let's Encrypt limita tentativas falhas por dominio.
+# SKIP_DNS_CHECK=1 so para ensaios locais; EXPECTED_PUBLIC_IP=<ip> confere o endereco exato.
+if [ "${SKIP_DNS_CHECK:-0}" != "1" ]; then
+  resolved="$(getent ahostsv4 "$SERVER_NAME" 2>/dev/null | awk '{print $1}' | sort -u | tr '
+' ' ' || true)"
+  if [ -z "${resolved// /}" ]; then
+    echo "ERRO: ${SERVER_NAME} ainda nao resolve no DNS. Aponte o registro A para esta VPS e espere propagar." >&2
+    exit 2
+  fi
+  if [ -n "${EXPECTED_PUBLIC_IP:-}" ] && ! grep -qw -- "$EXPECTED_PUBLIC_IP" <<<"$resolved"; then
+    echo "ERRO: ${SERVER_NAME} resolve para [${resolved}], nao para ${EXPECTED_PUBLIC_IP}." >&2
+    exit 2
+  fi
+  echo "DNS: ${SERVER_NAME} -> ${resolved}"
+fi
+
 CERT_VOLUME="vastaflow-letsencrypt"
 LIVE="/etc/letsencrypt/live/${SERVER_NAME}"
 
@@ -75,9 +105,10 @@ docker run --rm -v "${CERT_VOLUME}:/etc/letsencrypt" alpine:3.20 sh -c "
   --webroot -w /var/www/certbot \
   -d "${SERVER_NAME}" \
   --email "${LETSENCRYPT_EMAIL}" --agree-tos --no-eff-email --non-interactive \
-  ${STAGING:+--staging}
+  ${STAGING:+--staging} ${ACME_SERVER:+--server "$ACME_SERVER"}
 
 echo "4/4 Recarregando o nginx com o certificado real..."
 "${COMPOSE[@]}" exec -T nginx nginx -s reload
 "${COMPOSE[@]}" up -d certbot
-echo "Pronto. Teste: curl -sI https://${SERVER_NAME}/nginx-health  (a renovacao e automatica)"
+echo "Pronto. Teste: bash scripts/https-verify.sh   (a renovacao e automatica)"
+echo "URL do webhook do WhatsApp (para o painel da Meta, SO quando o WhatsApp for ligado): https://${SERVER_NAME}/api/webhooks/whatsapp"

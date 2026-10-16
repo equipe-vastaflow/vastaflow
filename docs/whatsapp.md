@@ -62,8 +62,9 @@ ver `telegram-n8n.md` secao 14). Os comandos, o RBAC, a auditoria e as respostas
 1. **Conta Meta Business** da empresa (verificacao do negocio, se a Meta exigir) e uma **WABA**.
 2. Um **app** da Meta com o produto WhatsApp; dele saem o **App Secret** e o **ID do numero**.
 3. Um **usuario de sistema** e um **token de acesso permanente** com `whatsapp_business_messaging`.
-4. **Webhook publico em HTTPS valido** apontando para `https://<dominio>/api/webhooks/whatsapp` — **hoje o Nginx so
-   escuta HTTP**; falta dominio, DNS e certificado (ver `prontidao-vps.md`). Campo "assinar": `messages`.
+4. **Webhook publico em HTTPS valido** apontando para `https://<SERVER_NAME>/api/webhooks/whatsapp` (ex.: `https://vastaflow.duckdns.org/...`).
+   O HTTPS esta **preparado** (`docker-compose.https.yml`, `docs/deploy-vps.md`) mas **nao no ar**: falta a VPS, o DNS e a emissao do
+   certificado. `bash scripts/https-verify.sh` imprime a URL e confere, sem chamar a Meta. Campo "assinar": `messages`.
 5. **O numero.** Nao se presume que o numero atual da cliente possa ser migrado:
    - um numero que esta no **app WhatsApp pessoal** nao pode ser usado na Cloud API sem sair do app;
    - o modo **coexistencia** (numero do **app WhatsApp Business** usado ao mesmo tempo na Cloud API) existe, mas

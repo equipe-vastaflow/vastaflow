@@ -1,0 +1,9 @@
+# Instalar em /etc/systemd/system/ (ajuste o caminho se o repositorio nao estiver em /opt/vastaflow).
+[Unit]
+Description=VastaFlow - atualiza o IP no DuckDNS
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/vastaflow/scripts/duckdns-update.sh

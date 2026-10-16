@@ -1,0 +1,10 @@
+# Instalar em /etc/systemd/system/ e ativar: systemctl enable --now vastaflow-duckdns.timer
+[Unit]
+Description=VastaFlow - agenda da atualizacao do DuckDNS
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=10min
+
+[Install]
+WantedBy=timers.target

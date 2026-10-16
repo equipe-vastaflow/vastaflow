@@ -17,7 +17,11 @@ export MSYS_NO_PATHCONV=1   # Git Bash no Windows nao pode reescrever caminhos d
 cd "$(dirname "$0")/../.."
 P="vf-https-test"
 NET="${P}-net"
-DOMAIN="teste.vastaflow.invalid"
+# Nome no formato DuckDNS: prova que o modelo nao exige dominio pago. Outro nome: DOMAIN=... bash test-https.sh
+DOMAIN="${DOMAIN:-vastaflow.duckdns.org}"
+# Segredos SINTETICOS do backend falso (imitam App Secret e token de verificacao do WhatsApp).
+WA_SECRET="segredo-sintetico-do-app-$(openssl rand -hex 8)"
+WA_VERIFY="token-sintetico-de-verificacao-$(openssl rand -hex 8)"
 NGINX_IMAGE="nginx:1.30.5-alpine"
 CURL_IMAGE="curlimages/curl:8.10.1"
 PASS=0; FAIL=0
@@ -60,16 +64,33 @@ docker run --rm -v "${P}-certs:/etc/letsencrypt" -v "${P}-webroot:/var/www/certb
 # Backend falso: responde JSON com o que viu. Alias de rede `backend`, porta 3000 (como no Compose).
 FAKE_BACKEND='
 const http = require("http");
+const crypto = require("crypto");
 http.createServer((q, r) => {
-  let n = 0;
-  q.on("data", (c) => { n += c.length; });
+  const chunks = [];
+  q.on("data", (c) => chunks.push(c));
   q.on("end", () => {
+    const body = Buffer.concat(chunks);
+    const url = new URL(q.url, "http://x");
+    let status = 200;
+    let sigOk = null;
+    if (url.pathname === "/webhooks/whatsapp") {
+      if (q.method === "POST") {
+        // Imita o contrato do backend real: HMAC-SHA256 do corpo BRUTO com o App Secret; sem assinatura valida = 403.
+        const want = "sha256=" + crypto.createHmac("sha256", process.env.WA_SECRET).update(body).digest("hex");
+        const got = String(q.headers["x-hub-signature-256"] || "");
+        sigOk = got.length === want.length && crypto.timingSafeEqual(Buffer.from(got), Buffer.from(want));
+        if (!sigOk) status = 403;
+      } else if (q.method === "GET") {
+        if (url.searchParams.get("hub.verify_token") !== process.env.WA_VERIFY) status = 403;
+      }
+    }
+    r.statusCode = status;
     r.setHeader("content-type", "application/json");
-    r.end(JSON.stringify({ method: q.method, url: q.url, bytes: n, host: q.headers.host,
+    r.end(JSON.stringify({ method: q.method, url: q.url, bytes: body.length, sigOk,
       xff: q.headers["x-forwarded-for"] || null, proto: q.headers["x-forwarded-proto"] || null }));
   });
 }).listen(3000);'
-docker run -d --name "${P}-backend" --network "$NET" --network-alias backend node:24.15.0-bookworm-slim node -e "$FAKE_BACKEND" >/dev/null
+docker run -d --name "${P}-backend" --network "$NET" --network-alias backend -e "WA_SECRET=${WA_SECRET}" -e "WA_VERIFY=${WA_VERIFY}" node:24.15.0-bookworm-slim node -e "$FAKE_BACKEND" >/dev/null
 
 # Como na imagem real: arquivos individuais (conf.d precisa continuar gravavel para o envsubst) e sem o
 # default.conf do nginx (o Dockerfile o remove).
@@ -134,18 +155,32 @@ check "/api/%73ervice (codificado) -> 404"  "404" "$(c "${R[@]}" -o /dev/null -w
 check "/api/health/readiness -> 403"        "403" "$(c "${R[@]}" -o /dev/null -w '%{http_code}' "${H}/api/health/readiness")"
 check "API comum chega ao backend sem o prefixo /api" '"url":"/auth/me"' "$(c "${R[@]}" "${H}/api/auth/me")"
 
-echo; echo "== webhook oficial do WhatsApp (unica rota de integracao publica)"
+echo; echo "== webhook oficial do WhatsApp (unica rota de integracao publica) - assinatura preservada ponta a ponta"
 BODY1K="$(head -c 1024 /dev/zero | tr '\0' 'a')"
-W="$(c "${R[@]}" -X POST -H 'X-Hub-Signature-256: sha256=abc' -H 'X-Forwarded-For: 6.6.6.6' --data "$BODY1K" "${H}/api/webhooks/whatsapp")"
-check "POST chega a /webhooks/whatsapp do backend" '"method":"POST","url":"/webhooks/whatsapp"' "$W"
-check "corpo passa INTACTO (1024 bytes)"    '"bytes":1024' "$W"
+sign() { printf '%s' "$1" | openssl dgst -sha256 -hmac "$WA_SECRET" | awk '{print "sha256="$NF}'; }
+SIG="$(sign "$BODY1K")"
+W="$(c "${R[@]}" -X POST -H "X-Hub-Signature-256: ${SIG}" -H 'X-Forwarded-For: 6.6.6.6' --data-binary "$BODY1K" "${H}/api/webhooks/whatsapp")"
+check "POST assinado chega a /webhooks/whatsapp do backend" '"method":"POST","url":"/webhooks/whatsapp"' "$W"
+check "o corpo chega INTACTO: a assinatura HMAC do corpo bruto confere no backend" '"sigOk":true' "$W"
+check "corpo de 1024 bytes sem alteracao"   '"bytes":1024' "$W"
 check "X-Forwarded-Proto = https"           '"proto":"https"' "$W"
 refute "X-Forwarded-For forjado pelo cliente NAO chega" "6[.]6[.]6[.]6" "$W"
-check "verificacao GET (hub.*) chega ao backend" '"url":"/webhooks/whatsapp[?]hub.mode=subscribe' "$(c "${R[@]}" "${H}/api/webhooks/whatsapp?hub.mode=subscribe&hub.verify_token=SEGREDO-NO-LOG&hub.challenge=123")"
+check "assinatura de OUTRO corpo -> 403 (corpo adulterado)" "403" "$(c "${R[@]}" -X POST -H "X-Hub-Signature-256: ${SIG}" --data-binary "${BODY1K}x" -o /dev/null -w '%{http_code}' "${H}/api/webhooks/whatsapp")"
+check "sem cabecalho de assinatura -> 403"  "403" "$(c "${R[@]}" -X POST --data-binary "$BODY1K" -o /dev/null -w '%{http_code}' "${H}/api/webhooks/whatsapp")"
+check "assinatura invalida -> 403"          "403" "$(c "${R[@]}" -X POST -H 'X-Hub-Signature-256: sha256=00' --data-binary "$BODY1K" -o /dev/null -w '%{http_code}' "${H}/api/webhooks/whatsapp")"
+check "verificacao GET com o token certo devolve 200" "200" "$(c "${R[@]}" -o /dev/null -w '%{http_code}' "${H}/api/webhooks/whatsapp?hub.mode=subscribe&hub.verify_token=${WA_VERIFY}&hub.challenge=123")"
+check "verificacao GET com token errado -> 403" "403" "$(c "${R[@]}" -o /dev/null -w '%{http_code}' "${H}/api/webhooks/whatsapp?hub.mode=subscribe&hub.verify_token=errado&hub.challenge=123")"
 check "corpo acima de 256 KB -> 413"       "413" "$(head -c 300000 /dev/zero | tr '\0' 'a' | c "${R[@]}" -X POST --data-binary @- -o /dev/null -w '%{http_code}' "${H}/api/webhooks/whatsapp")"
 LOGS="$(docker logs "${P}-https" 2>&1)"
-refute "token de verificacao NAO aparece no log de acesso" "SEGREDO-NO-LOG" "$LOGS"
+refute "token de verificacao NAO aparece no log de acesso" "${WA_VERIFY}" "$LOGS"
 refute "query string nao vai ao log" "hub[.]verify_token" "$LOGS"
+
+echo; echo "== scripts/https-verify.sh contra esta pilha (como sera rodado na VPS, so que com certificado autoassinado)"
+VERIFY_OUT="$(docker run --rm --network "$NET" -v "$PWD/scripts:/r/scripts:ro" alpine:3.20 sh -c "apk add -q --no-cache bash curl openssl >/dev/null && cd /r && SERVER_NAME=${DOMAIN} VERIFY_INSECURE=1 VERIFY_RESOLVE_IP=${HTTPS_IP} bash scripts/https-verify.sh" 2>&1)"
+VERIFY_RC=$?
+echo "$VERIFY_OUT" | sed 's/^/     | /'
+if [ "$VERIFY_RC" -eq 0 ]; then ok "https-verify.sh passou"; else bad "https-verify.sh falhou" "rc=${VERIFY_RC}"; fi
+check "https-verify imprime a URL do webhook em HTTPS" "https://${DOMAIN}/api/webhooks/whatsapp" "$VERIFY_OUT"
 
 echo; echo "== modo HTTP local continua igual (a refatoracao nao quebrou nada)"
 HH="$(c -D - -o /dev/null "http://${HTTP_IP}/")"
@@ -153,7 +188,7 @@ check "HTTP local serve a SPA"              "200" "$(c -o /dev/null -w '%{http_c
 refute "HSTS NAO e enviado em HTTP"         "strict-transport-security" "$HH"
 check "CSP presente tambem em HTTP"         "content-security-policy" "$HH"
 check "/api/service* -> 404 em HTTP"        "404" "$(c -o /dev/null -w '%{http_code}' "http://${HTTP_IP}/api/service/x")"
-check "webhook roteado em HTTP"             '"url":"/webhooks/whatsapp"' "$(c -X POST --data x "http://${HTTP_IP}/api/webhooks/whatsapp")"
+check "webhook roteado em HTTP (e SEM assinatura recusado pelo backend)" "403" "$(c -X POST --data x -o /dev/null -w '%{http_code}' "http://${HTTP_IP}/api/webhooks/whatsapp")"
 
 echo; echo "== sem portas publicadas no host"
 PORTS="$(docker port "${P}-https" 2>&1; docker port "${P}-http" 2>&1; docker port "${P}-backend" 2>&1)"

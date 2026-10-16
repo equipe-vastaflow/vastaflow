@@ -209,8 +209,117 @@ describe('Implantacao - backup e restauracao', () => {
     }
   });
 
+  describe('dominio gratuito DuckDNS e webhook HTTPS', () => {
+    const init = read('scripts/https-init.sh');
+    const dominio = ((): RegExp => {
+      const m = /\[\[ "\$SERVER_NAME" =~ (\^.+\$) \]\]/.exec(init);
+      if (m?.[1] === undefined) {
+        throw new Error('validacao de SERVER_NAME nao encontrada em https-init.sh');
+      }
+      return new RegExp(m[1]);
+    })();
+
+    it('https-init aceita um subdominio DuckDNS e recusa valores que nao sao dominio', () => {
+      for (const valido of ['vastaflow.duckdns.org', 'meu-app.duckdns.org', 'app.cliente.com.br']) {
+        expect(dominio.test(valido)).toBe(true);
+      }
+      for (const invalido of [
+        'https://vastaflow.duckdns.org',
+        'vastaflow.duckdns.org/',
+        'localhost',
+        'Vasta.duckdns.org',
+        'a b.com',
+        '',
+      ]) {
+        expect(dominio.test(invalido)).toBe(false);
+      }
+      // O bloqueio de nomes ficticios nao pode pegar o DuckDNS.
+      const bloqueados = /case "\$SERVER_NAME" in\s+(\*\.example\S*)/.exec(init)?.[1] ?? '';
+      expect(bloqueados).not.toMatch(/duckdns/);
+      expect(init).toContain('*.duckdns.org)');
+      expect(init).toMatch(/DNS TEM de apontar/);
+      expect(init).toContain('ainda nao resolve no DNS');
+    });
+
+    it('nenhum dominio e fixo: SERVER_NAME e obrigatorio no Compose HTTPS e vazio nos modelos', () => {
+      expect(read('docker-compose.https.yml')).toContain('${SERVER_NAME:?');
+      expect(semComentarios(read('.env.example'))).toMatch(/^SERVER_NAME=$/m);
+      expect(semComentarios(read('.env.example'))).toMatch(/^LETSENCRYPT_EMAIL=$/m);
+    });
+
+    it('duckdns-update: token por stdin (nunca no argv), so HTTPS, sem redirecionamento, sem eco', () => {
+      const script = semComentarios(read('scripts/duckdns-update.sh'));
+      expect(script).toMatch(/curl[^\n]*-K -/);
+      expect(script).toContain('--max-redirs 0');
+      expect(script).toContain('--proto');
+      expect(script).toContain('"=https"');
+      // O token so aparece na montagem da URL entregue ao curl por stdin.
+      const usos = script.split('\n').filter((linha) => linha.includes('DUCKDNS_TOKEN'));
+      for (const linha of usos) {
+        expect(linha).not.toMatch(/echo.*[$]\{?DUCKDNS_TOKEN|curl.*DUCKDNS_TOKEN/);
+      }
+      expect(script).not.toMatch(/set -x|xtrace/);
+    });
+
+    it('os modelos do DuckDNS vem vazios e o token nunca fica no .env do projeto', () => {
+      const modelo = semComentarios(read('infra/duckdns/duckdns.env.example'));
+      for (const chave of ['DUCKDNS_DOMAIN', 'DUCKDNS_TOKEN', 'DUCKDNS_IP']) {
+        expect(modelo).toMatch(new RegExp(`^${chave}=$`, 'm'));
+      }
+      expect(read('.env.example')).not.toMatch(/^DUCKDNS_TOKEN=/m);
+      expect(read('docker-compose.production.yml')).not.toMatch(/DUCKDNS/);
+      expect(read('docker-compose.https.yml')).not.toMatch(/DUCKDNS/);
+    });
+
+    it('a URL do webhook e derivada de SERVER_NAME, usa HTTPS e o verificador exige 403/404 sem assinatura', () => {
+      const verificador = semComentarios(read('scripts/https-verify.sh'));
+      expect(verificador).toContain('WEBHOOK_URL="https://${SERVER_NAME}/api/webhooks/whatsapp"');
+      expect(verificador).toMatch(/403\|404\)/);
+      expect(verificador).toContain('X-Hub-Signature-256');
+      expect(verificador).not.toMatch(/graph\.facebook|WHATSAPP_ACCESS_TOKEN|WHATSAPP_APP_SECRET/);
+      // Sem variavel propria da URL no backend: nao ha como divergir do dominio real.
+      expect(read('docker-compose.production.yml')).not.toMatch(
+        /WHATSAPP_PUBLIC|WHATSAPP_WEBHOOK_URL/,
+      );
+    });
+
+    it('o ACME HTTP-01 e atendido pelo webroot na :80 e o redirecionamento nao o captura', () => {
+      const modelo = semComentarios(read('infra/https/vastaflow-https.conf.template'));
+      const bloco80 = modelo.split('server {')[1] ?? '';
+      expect(bloco80).toContain('listen 80;');
+      expect(bloco80.indexOf('/.well-known/acme-challenge/')).toBeLessThan(
+        bloco80.indexOf('return 301'),
+      );
+      expect(bloco80).toContain('root /var/www/certbot');
+      expect(read('docker-compose.https.yml')).toContain("- '80:80'");
+    });
+
+    it('os testes locais de dominio/ACME/DuckDNS existem e sao reproduziveis', () => {
+      for (const arquivo of [
+        'infra/https/test-https.sh',
+        'infra/https/test-acme.sh',
+        'infra/https/pebble-config.json',
+        'infra/duckdns/test-duckdns.sh',
+      ]) {
+        expect(existsSync(join(ROOT, arquivo))).toBe(true);
+      }
+      const pebble = JSON.parse(read('infra/https/pebble-config.json')) as {
+        pebble: { httpPort: number };
+      };
+      expect(pebble.pebble.httpPort).toBe(80);
+      expect(read('infra/https/test-https.sh')).toContain('vastaflow.duckdns.org');
+    });
+  });
+
   it('os scripts existem e comecam com shebang bash', () => {
-    for (const script of ['backup.sh', 'restore.sh', 'restore-test.sh', 'https-init.sh']) {
+    for (const script of [
+      'backup.sh',
+      'restore.sh',
+      'restore-test.sh',
+      'https-init.sh',
+      'https-verify.sh',
+      'duckdns-update.sh',
+    ]) {
       const caminho = join(ROOT, 'scripts', script);
       expect(existsSync(caminho)).toBe(true);
       expect(readFileSync(caminho, 'utf8').startsWith('#!/usr/bin/env bash\n')).toBe(true);
