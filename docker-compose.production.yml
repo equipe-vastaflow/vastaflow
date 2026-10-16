@@ -266,6 +266,7 @@ services:
       WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
       WHATSAPP_GRAPH_API_VERSION: ${WHATSAPP_GRAPH_API_VERSION:-}
       WHATSAPP_API_BASE_URL: ${WHATSAPP_API_BASE_URL:-}
+      WHATSAPP_REPLY_TO_UNLINKED: ${WHATSAPP_REPLY_TO_UNLINKED:-false}
       # NFS-e Nacional. DESLIGADA por padrao (comandos /nfse* respondem "desligado"). Ligada, exige a
       # configuracao fiscal completa (sem padrao tributario). So o backend as recebe (nunca o n8n/frontend).
       # O certificado A1 (.pfx) NAO vai para a imagem: monte-o somente leitura FORA do Git quando existir

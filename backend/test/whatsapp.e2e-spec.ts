@@ -218,14 +218,16 @@ describe('WhatsApp - webhook da Cloud API (e2e)', () => {
   });
 
   describe('numero NAO vinculado', () => {
-    it('recebe aviso seguro NO MESMO numero e nada executa', async () => {
+    it('fica em SILENCIO (nada executa e nada e enviado), como um cliente comum da empresa', async () => {
       await entregar(payload('/financeiro')).expect(200);
+      await entregar(payload('Oi, tudo bem?')).expect(200);
 
-      expect(respostaPara(NUMERO)).toEqual([WHATSAPP_REPLIES.unlinked]);
+      // Padrao (WHATSAPP_REPLY_TO_UNLINKED=false): desconhecido nao recebe NADA, mas a tentativa e auditada.
+      expect(respostaPara(NUMERO)).toEqual([]);
     });
 
-    it('a resposta usa o token so no cabecalho', async () => {
-      await entregar(payload('/ajuda')).expect(200);
+    it('a resposta (ao comando explicito /vincular) usa o token so no cabecalho', async () => {
+      await entregar(payload('/vincular CODIGOINVALIDO')).expect(200);
 
       expect(enviadas[0]?.auth).toBe(`Bearer ${WA_ACCESS_TOKEN}`);
     });

@@ -48,6 +48,7 @@ ver `telegram-n8n.md` secao 14). Os comandos, o RBAC, a auditoria e as respostas
 | Idempotencia | indice unico `(phone_number_id, message_id)`; a Meta reentrega webhooks e o `wamid` executa **uma** vez (at-most-once) |
 | Abuso | 10 mensagens/min por numero; excesso descartado com um aviso por janela |
 | Destino | a resposta vai ao numero que escreveu; nao ha envio proativo nem template |
+| Desconhecidos | remetente sem vinculo recebe **silencio** (nada executa; tentativa auditada sem numero/texto). `WHATSAPP_REPLY_TO_UNLINKED=true` liga o aviso; `/vincular` sempre responde |
 | Rede | Graph oficial; `WHATSAPP_API_BASE_URL` so aceita hosts de teste (lista fechada) |
 | Borda | Nginx: `limit_req` proprio (20 r/s), corpo maximo 256 KB, log sem query string |
 
@@ -55,7 +56,7 @@ ver `telegram-n8n.md` secao 14). Os comandos, o RBAC, a auditoria e as respostas
 
 `WHATSAPP_ENABLED`, `WHATSAPP_WEBHOOK_TOKEN` (voce inventa; >=16), `WHATSAPP_APP_SECRET`, `WHATSAPP_ACCESS_TOKEN`,
 `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_GRAPH_API_VERSION` (**sem padrao no codigo**: confira a vigente na Meta),
-`WHATSAPP_API_BASE_URL` (so teste). Ligado sem alguma, o **boot e recusado**. Ver `.env.example`.
+`WHATSAPP_API_BASE_URL` (so teste), `WHATSAPP_REPLY_TO_UNLINKED` (padrao `false`). Ligado sem alguma das obrigatorias, o **boot e recusado**. Ver `.env.example`.
 
 ## 5. O que depende de voce / da Meta (nada disto foi feito)
 
@@ -67,9 +68,10 @@ ver `telegram-n8n.md` secao 14). Os comandos, o RBAC, a auditoria e as respostas
    certificado. `bash scripts/https-verify.sh` imprime a URL e confere, sem chamar a Meta. Campo "assinar": `messages`.
 5. **O numero.** Nao se presume que o numero atual da cliente possa ser migrado:
    - um numero que esta no **app WhatsApp pessoal** nao pode ser usado na Cloud API sem sair do app;
-   - o modo **coexistencia** (numero do **app WhatsApp Business** usado ao mesmo tempo na Cloud API) existe, mas
-     exige app Business em versao recente e onboarding por QR; a documentacao consultada **nao confirma** a
-     disponibilidade no Brasil nem as regras de verificacao (**lacuna: confirmar na documentacao oficial da Meta**);
+   - o modo **coexistencia** (numero do **app WhatsApp Business** usado ao mesmo tempo na Cloud API) existe, mas e **condicional**: so por
+     *Embedded Signup* de um **Solution Partner/Tech Provider**, com app >= 2.24.17, e **altera o uso do app** (listas de transmissao
+     somente leitura, dispositivos vinculados desconectados, etc.). **Brasil nao confirmado** oficialmente. Detalhes, fontes e o
+     procedimento mais curto e seguro (**numero novo dedicado ao bot**): `docs/whatsapp-ativacao.md`;
    - registrar um numero pela API e irreversivel o bastante para exigir decisao do titular: **nao** fazer sem ela;
    - alternativa segura para ensaiar: o **numero de teste** que a Meta fornece, ou um chip novo.
 6. **Janela de 24 h:** so se responde a quem escreveu (sem template). Notificacao proativa exige *templates*

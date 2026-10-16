@@ -65,6 +65,8 @@ import { WHATSAPP_PROCESSOR, WhatsappController } from './whatsapp.controller';
           router,
           audit,
           sender,
+          () => Date.now(),
+          () => config.get<boolean>('WHATSAPP_REPLY_TO_UNLINKED') === true,
         ),
     },
   ],

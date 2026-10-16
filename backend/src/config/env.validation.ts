@@ -510,6 +510,14 @@ export class EnvironmentVariables {
   @IsString()
   WHATSAPP_GRAPH_API_VERSION?: string;
 
+  /**
+   * Responder a quem NAO esta vinculado (e ao aviso de limite)? Padrao `false`: o bot fica em silencio com
+   * desconhecidos (essencial se o numero tambem atende clientes). `/vincular <codigo>` sempre responde.
+   */
+  @Transform(({ value }: TransformInput): boolean => value === 'true' || value === true)
+  @IsBoolean({ message: "WHATSAPP_REPLY_TO_UNLINKED deve ser 'true' ou 'false'" })
+  WHATSAPP_REPLY_TO_UNLINKED: boolean = false;
+
   /** SO TESTE: servidor Graph falso (hosts whatsapp-fake, localhost, 127.0.0.1). Vazio = Meta. */
   @Transform(optionalString)
   @IsOptional()

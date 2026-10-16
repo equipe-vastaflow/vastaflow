@@ -51,9 +51,11 @@ export type WhatsappOutcome =
  * 1. e do NOSSO numero? (outro `phone_number_id` e ignorado);
  * 2. e recente? (mais de 10 min e descartada sem executar: a Meta reentrega por dias);
  * 3. RESERVA no banco (indice unico): ja vista = `DUPLICATE`, nada executa;
- * 4. limite por remetente (10/min): excesso descartado, aviso uma vez por janela;
+ * 4. limite por remetente (10/min): excesso descartado; o aviso (uma vez por janela) so sai com
+ *    `replyToUnlinked`;
  * 5. `/vincular <codigo>`: prova de posse do numero (o codigo nao e logado nem auditado);
- * 6. identidade: o `wa_id` deve estar vinculado a usuario ATIVO (sem vinculo = `UNLINKED`, nada roda);
+ * 6. identidade: o `wa_id` deve estar vinculado a usuario ATIVO (sem vinculo = `UNLINKED`, nada roda e,
+ *    por padrao, NADA e respondido: ver `replyToUnlinked`);
  * 7. RBAC do Command Engine para ESSA pessoa;
  * 8. auditoria (`CHANNEL_MESSAGE`, sem texto/numero) e resposta pela Cloud API.
  *
@@ -73,6 +75,13 @@ export class WhatsappMessageProcessor {
     private readonly audit: AuditService,
     private readonly sender: WhatsappSender,
     private readonly now: () => number = (): number => Date.now(),
+    /**
+     * Responder a quem NAO esta vinculado (e o aviso de limite)? PADRAO NAO. Num numero que tambem atende
+     * clientes (coexistencia com o app WhatsApp Business) qualquer cliente que escrevesse receberia uma
+     * resposta automatica do bot. Mesmo num numero so do bot, nao ha por que responder a desconhecidos.
+     * `/vincular <codigo>` (comando explicito) SEMPRE recebe resposta.
+     */
+    private readonly replyToUnlinked: () => boolean = (): boolean => false,
   ) {}
 
   async process(message: InboundWhatsappText): Promise<WhatsappOutcome> {
@@ -105,7 +114,7 @@ export class WhatsappMessageProcessor {
     if (!decision.allowed) {
       await this.events.finish(event.id, WhatsappEventStatus.Concluido, 'RATE_LIMITED', null);
       this.logger.warn('WhatsApp: limite por remetente excedido; mensagem descartada');
-      if (decision.firstRejection) {
+      if (decision.firstRejection && this.replyToUnlinked()) {
         await this.reply(message.from, WHATSAPP_REPLIES.rateLimited);
       }
       return 'RATE_LIMITED';
@@ -125,7 +134,9 @@ export class WhatsappMessageProcessor {
     const user = await this.resolve(identity);
     if (user === null) {
       await this.finishAndAudit(event.id, 'UNLINKED', 'NAO_VINCULADO', null, null);
-      await this.reply(message.from, WHATSAPP_REPLIES.unlinked);
+      if (this.replyToUnlinked()) {
+        await this.reply(message.from, WHATSAPP_REPLIES.unlinked);
+      }
       return 'UNLINKED';
     }
 

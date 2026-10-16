@@ -42,6 +42,7 @@ function montar(
     user?: AuthenticatedUser | null;
     link?: LinkConfirmationOutcome;
     result?: { outcome: CommandOutcome; reply: string };
+    replyToUnlinked?: boolean;
   } = {},
 ): Montagem {
   const claim = jest.fn(() =>
@@ -70,6 +71,7 @@ function montar(
     { record } as unknown as AuditService,
     { sendText },
     () => AGORA,
+    () => opcoes.replyToUnlinked === true,
   );
   return { processor, claim, finish, resolve, tryConfirm, execute, record, sendText };
 }
@@ -114,13 +116,53 @@ describe('WhatsappMessageProcessor', () => {
     expect(bruto).not.toContain('Comandos disponiveis');
   });
 
-  it('numero NAO vinculado: UNLINKED, nada executa', async () => {
+  it('numero NAO vinculado: UNLINKED, nada executa e, por padrao, NADA e respondido (cliente da empresa nao recebe bot)', async () => {
     const m = montar({ user: null });
 
     expect(await m.processor.process(msg({ text: '/financeiro' }))).toBe('UNLINKED');
     expect(m.execute).not.toHaveBeenCalled();
-    expect(m.sendText).toHaveBeenCalledWith('5511999990000', WHATSAPP_REPLIES.unlinked);
+    expect(m.sendText).not.toHaveBeenCalled();
+    // A tentativa continua auditada (sem numero e sem texto).
+    expect(m.record).toHaveBeenCalledTimes(1);
     expect(m.record.mock.calls[0]?.[0] as Record<string, unknown>).not.toHaveProperty('usuarioId');
+  });
+
+  it('com WHATSAPP_REPLY_TO_UNLINKED=true o aviso de vinculo e enviado', async () => {
+    const m = montar({ user: null, replyToUnlinked: true });
+
+    expect(await m.processor.process(msg({ text: '/financeiro' }))).toBe('UNLINKED');
+    expect(m.execute).not.toHaveBeenCalled();
+    expect(m.sendText).toHaveBeenCalledWith('5511999990000', WHATSAPP_REPLIES.unlinked);
+  });
+
+  it('conversa comum de cliente (texto livre, saudacao, pergunta) de numero desconhecido: silencio total', async () => {
+    const m = montar({ user: null });
+
+    for (const [i, text] of [
+      'Oi, tudo bem?',
+      'Quanto custa o servico?',
+      '/ajuda',
+      'bom dia',
+    ].entries()) {
+      expect(await m.processor.process(msg({ text, messageId: `wamid.cliente${String(i)}` }))).toBe(
+        'UNLINKED',
+      );
+    }
+    expect(m.sendText).not.toHaveBeenCalled();
+    expect(m.execute).not.toHaveBeenCalled();
+  });
+
+  it('/vincular de numero desconhecido SEMPRE recebe resposta (comando explicito), mesmo no modo silencioso', async () => {
+    const aceito = montar({ user: null, link: LinkConfirmationOutcome.Confirmed });
+    expect(await aceito.processor.process(msg({ text: '/vincular ABCD1234' }))).toBe(
+      'LINK_CONFIRMED',
+    );
+    expect(aceito.sendText).toHaveBeenCalledTimes(1);
+    const recusado = montar({ user: null, link: LinkConfirmationOutcome.Rejected });
+    expect(await recusado.processor.process(msg({ text: '/vincular ABCD1234' }))).toBe(
+      'LINK_REJECTED',
+    );
+    expect(recusado.sendText).toHaveBeenCalledTimes(1);
   });
 
   it('RBAC: permissao negada vira DENIED com a resposta do motor', async () => {
@@ -219,7 +261,7 @@ describe('WhatsappMessageProcessor', () => {
       expect(ordem).toEqual(['claim', 'execute']);
     });
 
-    it('limite por remetente: 10 passam, o excesso e descartado com UM aviso; outro numero nao e afetado', async () => {
+    it('limite por remetente: 10 passam, o excesso e descartado (sem aviso por padrao); outro numero nao e afetado', async () => {
       const m = montar();
       const resultados: string[] = [];
       for (let i = 0; i < 13; i += 1) {
@@ -228,12 +270,25 @@ describe('WhatsappMessageProcessor', () => {
 
       expect(resultados.filter((r) => r === 'EXECUTED')).toHaveLength(10);
       expect(resultados.filter((r) => r === 'RATE_LIMITED')).toHaveLength(3);
+      // Padrao silencioso: o excesso e descartado sem aviso a ninguem.
       expect(
         m.sendText.mock.calls.filter(([, t]) => t === WHATSAPP_REPLIES.rateLimited),
-      ).toHaveLength(1);
+      ).toHaveLength(0);
       expect(
         await m.processor.process(msg({ messageId: 'wamid.outro', from: '5511888880000' })),
       ).toBe('EXECUTED');
+    });
+  });
+
+  describe('aviso de limite (so com WHATSAPP_REPLY_TO_UNLINKED=true)', () => {
+    it('envia UM aviso por janela', async () => {
+      const m = montar({ replyToUnlinked: true });
+      for (let i = 0; i < 13; i += 1) {
+        await m.processor.process(msg({ messageId: `wamid.aviso${String(i)}` }));
+      }
+      expect(
+        m.sendText.mock.calls.filter(([, t]) => t === WHATSAPP_REPLIES.rateLimited),
+      ).toHaveLength(1);
     });
   });
 
