@@ -1,0 +1,12 @@
+# Instalar em /etc/systemd/system/ e ativar: systemctl enable --now vastaflow-backup.timer
+[Unit]
+Description=VastaFlow - agenda do backup diario
+
+[Timer]
+# 03:30 no fuso do servidor (madrugada: menos uso). Persistent=true recupera uma execucao perdida (VPS desligada).
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target

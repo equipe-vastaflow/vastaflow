@@ -1,0 +1,117 @@
+# ===========================================================================
+# VastaFlow - stack DESCARTAVEL para o teste de restauracao (scripts/restore-test.sh).
+# ---------------------------------------------------------------------------
+# NADA aqui se liga a stack real: nomes de volume sem `name:` fixo (o Compose os prefixa com o projeto
+# `-p`), nenhuma porta publicada, rede propria, senhas SINTETICAS geradas a cada execucao (RT_*), e o
+# certificado TLS ficticio vem de um volume temporario. Mesma imagem e mesmas flags de producao.
+# ===========================================================================
+services:
+  mysql:
+    image: mysql:8.4.9
+    networks: [rt]
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --ssl-ca=/etc/mysql/tls/ca.pem
+      - --ssl-cert=/etc/mysql/tls/server-cert.pem
+      - --ssl-key=/etc/mysql/tls/server-key.pem
+      - --require-secure-transport=ON
+    environment:
+      MYSQL_ROOT_PASSWORD: ${RT_DB_ROOT_PASSWORD:?}
+      MYSQL_DATABASE: vastaflow_rt
+      MYSQL_USER: vf_rt
+      MYSQL_PASSWORD: ${RT_DB_PASSWORD:?}
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - rt-tls:/etc/mysql/tls:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'MYSQL_PWD="$$MYSQL_PASSWORD" mysql -h127.0.0.1 -u"$$MYSQL_USER" "$$MYSQL_DATABASE" -e "SELECT 1" >/dev/null']
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 90s
+
+  n8n-postgres:
+    image: postgres:18.6-alpine3.24
+    networks: [rt]
+    environment:
+      POSTGRES_DB: n8n_rt
+      POSTGRES_USER: n8n_rt
+      POSTGRES_PASSWORD: ${RT_PG_PASSWORD:?}
+    volumes:
+      - pg-data:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  migrate:
+    image: vastaflow-migrate:latest
+    restart: 'no'
+    networks: [rt]
+    depends_on:
+      mysql: { condition: service_healthy }
+    environment: &backend-env
+      NODE_ENV: production
+      DATABASE_TYPE: mysql
+      DATABASE_HOST: mysql
+      DATABASE_PORT: '3306'
+      DATABASE_NAME: vastaflow_rt
+      DATABASE_USER: vf_rt
+      DATABASE_PASSWORD: ${RT_DB_PASSWORD:?}
+      DATABASE_SSL: 'true'
+      DATABASE_SSL_CA_FILE: /etc/vastaflow/tls/ca.pem
+      DATABASE_SYNCHRONIZE: 'false'
+      SWAGGER_ENABLED: 'false'
+      JWT_SECRET: ${RT_JWT_SECRET:?}
+      DOCUMENT_STORAGE_PATH: /app/storage/documents
+      TELEGRAM_POLLING_ENABLED: 'false'
+    volumes:
+      - rt-tls:/etc/vastaflow/tls:ro
+    command: [node, node_modules/typeorm/cli.js, '-d', dist/database/data-source.js, 'migration:run']
+
+  backend:
+    image: vastaflow-backend:latest
+    networks: [rt]
+    depends_on:
+      mysql: { condition: service_healthy }
+    environment:
+      <<: *backend-env
+      PORT: '3000'
+      APP_NAME: vasta-flow
+      FRONTEND_ORIGIN: ''
+      # Usado SO na stack de ORIGEM, para o proprio backend criar o ADMIN sintetico (como em producao).
+      SEED_ADMIN_EMAIL: ${RT_SEED_ADMIN_EMAIL:-}
+      SEED_ADMIN_PASSWORD: ${RT_SEED_ADMIN_PASSWORD:-}
+      SEED_ADMIN_NAME: Admin Sintetico
+      # Tudo que fala com o mundo externo fica DESLIGADO.
+      TELEGRAM_BOT_TOKEN: ''
+      WHATSAPP_ENABLED: 'false'
+      PLANTAE_ENABLED: 'false'
+      NFSE_ENABLED: 'false'
+    volumes:
+      - rt-tls:/etc/vastaflow/tls:ro
+      - documents:/app/storage/documents
+    healthcheck:
+      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:3000/health/readiness').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+      start_period: 20s
+
+networks:
+  rt:
+    driver: bridge
+
+volumes:
+  mysql-data:
+  pg-data:
+  documents:
+  n8n-state:
+  # Certificado TLS ficticio, criado por scripts/restore-test.sh e descartado no fim. `external` porque
+  # os dois projetos (origem e destino) o compartilham.
+  rt-tls:
+    external: true
+    name: vf-restore-test-tls

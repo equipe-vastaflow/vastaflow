@@ -1,0 +1,52 @@
+# ===========================================================================
+# VastaFlow - ingress HTTPS (producao com dominio). MODELO: nada aqui presume dominio real.
+# ---------------------------------------------------------------------------
+# Renderizado pelo entrypoint do nginx (envsubst) a partir de `docker-compose.https.yml`; so a variavel
+# ${SERVER_NAME} e substituida (NGINX_ENVSUBST_FILTER), o resto do arquivo e copiado como esta.
+# O corpo das rotas e o MESMO do HTTP (snippets/vastaflow-app.conf): webhook do WhatsApp publico,
+# /api/service* e /api/health/readiness bloqueados, n8n/MySQL/PostgreSQL inexistentes para o ingress.
+# ===========================================================================
+
+# --- :80 - so desafio ACME (Let's Encrypt) e redirecionamento para HTTPS ---
+server {
+    listen 80;
+    server_name ${SERVER_NAME};
+    server_tokens off;
+    access_log /dev/stdout vastaflow_privacy;
+
+    # Validacao HTTP-01 do Let's Encrypt: arquivos gravados pelo certbot (webroot).
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+        default_type "text/plain";
+    }
+
+    # Healthcheck interno do container (sem redirecionar).
+    location = /nginx-health {
+        access_log off;
+        add_header Content-Type text/plain always;
+        return 200 "ok\n";
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# --- :443 - a aplicacao ---
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${SERVER_NAME};
+
+    ssl_certificate     /etc/letsencrypt/live/${SERVER_NAME}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${SERVER_NAME}/privkey.pem;
+
+    # TLS moderno apenas. Sem tickets: nao ha chave de ticket rotacionada entre reinicios.
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:vastaflow_tls:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+
+    include /etc/nginx/snippets/vastaflow-app.conf;
+}

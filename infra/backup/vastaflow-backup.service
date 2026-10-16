@@ -1,0 +1,14 @@
+# Instalar em /etc/systemd/system/ (ajuste WorkingDirectory/ExecStart para onde o repositorio estiver na VPS).
+[Unit]
+Description=VastaFlow - backup cifrado (MySQL, PostgreSQL do n8n, documentos, configuracao)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/vastaflow
+ExecStart=/bin/bash /opt/vastaflow/scripts/backup.sh
+# Falha alta e visivel: `systemctl status vastaflow-backup` e `journalctl -u vastaflow-backup`.
+Nice=10
+IOSchedulingClass=idle
+# O backup cria arquivos 0600/0700 por conta propria (umask 077).

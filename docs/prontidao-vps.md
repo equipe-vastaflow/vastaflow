@@ -16,10 +16,10 @@
 | TLS entre backend e MySQL | **provado local** | `require_secure_transport=1`, TLSv1.3, verificacao de identidade |
 | Migrations | **provado local** | `migrate` antes do backend; backend se recusa a subir com migration pendente |
 | Segredos | **parcial** | `.env` fora do Git; falta politica no servidor (permissao 600, quem acessa, rotacao) |
-| **HTTPS publico** | **NAO EXISTE** | Nginx escuta so `:80`. Sem dominio, DNS nem certificado. **Bloqueia o webhook da Meta** (exige HTTPS valido) e o login seguro |
-| **Backup externo** | **NAO EXISTE** | nenhum script; nenhum destino externo; ADR 0003 o declara requisito de go-live |
-| **Restauracao testada** | **NAO EXISTE** | nunca exercitada |
-| **Plano de atualizacao e rollback** | **NAO EXISTE** (esboco abaixo) | nunca ensaiado |
+| **HTTPS publico** | **PREPARADO, nao emitido** | `docker-compose.https.yml` + `infra/https/` + `scripts/https-init.sh`; configuracao Nginx/TLS/HSTS/webhook testada em ambiente isolado (`infra/https/test-https.sh`). **Falta**: dominio, DNS e a emissao real do certificado (Let's Encrypt). Bloqueia o webhook da Meta ate la |
+| **Backup** | **MECANISMO PRONTO; destino externo NAO escolhido** | `scripts/backup.sh` (cifrado com chave publica, consistente, retencao, agendamento systemd). **Falta**: escolher o destino externo (`docs/backup-restauracao.md` secao 6) e custodiar a chave privada |
+| **Restauracao testada** | **EXERCITADA em ambiente isolado** | `scripts/restore-test.sh` (dados sinteticos, origem destruida, destino novo, API conferida). **Falta**: restaurar um backup REAL da VPS fora dela |
+| **Plano de atualizacao e rollback** | **ESCRITO** (`docs/deploy-vps.md` secoes 12-14) | nao ensaiado na VPS |
 | Firewall / acesso SSH do host | **fora do repositorio** | a definir na VPS (so 80/443 + SSH restrito) |
 | Proteção do n8n | **parcial** | editor so em loopback (acesso por tunel SSH); webhook interno; sem execucao gravada alem de ~segundos; senha forte do dono |
 | Webhook publico do WhatsApp | **codigo e Nginx prontos**, HTTPS ausente | `docs/whatsapp.md` |

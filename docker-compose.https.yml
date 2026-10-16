@@ -1,0 +1,69 @@
+# ===========================================================================
+# VastaFlow - sobreposicao HTTPS (VPS com dominio). NAO e usada localmente.
+# ---------------------------------------------------------------------------
+# Uso (so na VPS, depois de apontar o DNS - ver docs/deploy-vps.md):
+#   docker compose -f docker-compose.production.yml -f docker-compose.https.yml up -d
+#
+# O que muda em relacao ao Compose de producao:
+#   - nginx publica 80 e 443 (as UNICAS portas publicas da stack) e le o modelo HTTPS;
+#   - certbot renova o certificado (a cada 12 h tenta; so renova perto de vencer) e o nginx
+#     recarrega a configuracao a cada 6 h para pegar o certificado novo, sem derrubar conexoes;
+#   - nada mais ganha porta: MySQL, PostgreSQL e backend continuam sem `ports:`, e o editor do n8n
+#     continua so em 127.0.0.1 (acesso por tunel SSH).
+#
+# Variaveis (no .env do servidor): SERVER_NAME (ex.: app.exemplo.com.br - FICTICIO ate haver dominio) e
+# LETSENCRYPT_EMAIL. O 1o certificado e emitido por `scripts/https-init.sh`.
+# ===========================================================================
+services:
+  nginx:
+    # `!override` troca a lista de portas inteira (sem isto o Compose SOMARIA 8080:80 do arquivo base).
+    ports: !override
+      - '80:80'
+      - '443:443'
+    environment:
+      SERVER_NAME: ${SERVER_NAME:?defina SERVER_NAME (dominio) no .env}
+      # So ${SERVER_NAME} e substituida no modelo; `$host`, `$scheme` etc. do nginx ficam intactos.
+      NGINX_ENVSUBST_FILTER: ^SERVER_NAME$$
+      NGINX_ENVSUBST_OUTPUT_DIR: /etc/nginx/conf.d
+    volumes:
+      - ./infra/https/vastaflow-https.conf.template:/etc/nginx/templates/10-https.conf.template:ro
+      # Anula o servidor HTTP completo da imagem: no modo HTTPS a :80 so redireciona (ver o modelo).
+      - ./infra/https/vastaflow-http-disabled.conf:/etc/nginx/conf.d/vastaflow.conf:ro
+      - letsencrypt:/etc/letsencrypt:ro
+      - certbot-webroot:/var/www/certbot:ro
+    # O entrypoint da imagem renderiza os modelos e depois executa este comando. O laço recarrega o
+    # nginx a cada 6 h (pega o certificado renovado); `exec` mantem o nginx como PID 1.
+    command:
+      - /bin/sh
+      - -c
+      - 'while :; do sleep 6h; nginx -s reload; done & exec nginx -g "daemon off;"'
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '-O', '-', 'http://127.0.0.1/nginx-health']
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  certbot:
+    image: certbot/certbot:v4.2.0
+    restart: unless-stopped
+    networks:
+      - edge
+    volumes:
+      - letsencrypt:/etc/letsencrypt
+      - certbot-webroot:/var/www/certbot
+    entrypoint:
+      - /bin/sh
+      - -c
+      - 'trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait $${!}; done'
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128m
+
+volumes:
+  letsencrypt:
+    name: vastaflow-letsencrypt
+  certbot-webroot:
+    name: vastaflow-certbot-webroot

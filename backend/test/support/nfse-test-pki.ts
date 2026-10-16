@@ -27,8 +27,10 @@ export function createTestPki(options: {
   const certificate = forge.pki.createCertificate();
   certificate.publicKey = forge.pki.setRsaPublicKey(privateKey.n, privateKey.e);
   certificate.serialNumber = '01';
-  certificate.validity.notBefore = options.notBefore ?? new Date(Date.now() - 86_400_000);
-  certificate.validity.notAfter = options.notAfter ?? new Date(Date.now() + 365 * 86_400_000);
+  // Janela larga e FIXA: os testes usam relogios simulados, e uma validade relativa a "agora" quebraria
+  // quando o relogio simulado ficasse antes do inicio dela.
+  certificate.validity.notBefore = options.notBefore ?? new Date('2020-01-01T00:00:00Z');
+  certificate.validity.notAfter = options.notAfter ?? new Date('2060-01-01T00:00:00Z');
   const subject = [
     { name: 'commonName', value: 'EMPRESA FICTICIA DE TESTE LTDA' },
     { name: 'organizationName', value: 'Teste Sem Validade Juridica' },

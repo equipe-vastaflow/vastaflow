@@ -95,3 +95,10 @@ desktop.ini
 *.sqlite3
 *.db
 dumps/
+
+# Backups, restauracoes e chaves gpg (nunca no repositorio)
+backups/
+restaurado-config-*/
+*.gpg
+*.asc
+*.pgdump
