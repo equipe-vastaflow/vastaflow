@@ -58,9 +58,10 @@ dc() { # dc <projeto> <args...>  - SO projetos descartaveis (vf-rt-*)
 
 cleanup() {
   set +e
-  # Destino REAL de teste (se houve): apaga a pasta de teste de verdade, sem lixeira.
+  # Destino REAL de teste (se houve): remove o que o teste criou.
   if [ "${RT_REAL_REMOTE:-0}" = "1" ] && [ -n "${BACKUP_REMOTE:-}" ]; then
-    env -u MSYS_NO_PATHCONV rclone purge "$BACKUP_REMOTE" --drive-use-trash=false >/dev/null 2>&1
+    # Apaga so o CONTEUDO criado pelo teste (sem lixeira) e mantem a pasta de teste para a proxima vez.
+    env -u MSYS_NO_PATHCONV rclone delete "$BACKUP_REMOTE" --rmdirs --drive-use-trash=false >/dev/null 2>&1
   fi
   dc "$SRC_P" down -v --remove-orphans >/dev/null 2>&1
   dc "$DST_P" down -v --remove-orphans >/dev/null 2>&1
@@ -139,21 +140,28 @@ if [ "${RT_REMOTE:-0}" = "1" ]; then
   # conta nenhuma. Prova o caminho envio -> conferencia -> download -> restauracao com os dados sinteticos.
   command -v rclone >/dev/null || { echo "ERRO: RT_REMOTE=1 exige rclone no PATH." >&2; exit 2; }
   wp() { if command -v cygpath >/dev/null; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
-  : > "$TMP/rclone-vazio.conf"
-  export RCLONE_CONFIG="$(wp "$TMP/rclone-vazio.conf")" RCLONE_CONFIG_RTREMOTE_TYPE=local
-  export BACKUP_REMOTE="rtremote:$(wp "$TMP")/destino-externo"
-  echo "  (copia externa simulada ligada: ${BACKUP_REMOTE%%:*}:<pasta temporaria>)"
   if [ -n "${RT_REMOTE_TARGET:-}" ]; then
-    # Destino REAL escolhido por voce (ex.: gdrive:vastaflow-teste-restauracao), com SO dados sinteticos. Trava: o
-    # nome da pasta precisa conter "teste", porque o teste APAGA essa pasta no fim (nunca a pasta de backups reais).
+    # Destino REAL escolhido por voce (ex.: gdrive:vastaflow-teste-restauracao), com SO dados sinteticos. Usa a SUA
+    # configuracao do rclone (nao a vazia). Travas: o nome da pasta precisa conter "teste", nunca pode ser a pasta de
+    # backups reais, e a pasta precisa estar VAZIA antes (o teste apaga ao final o que ele mesmo criou ali).
     case "$RT_REMOTE_TARGET" in
       *teste*) ;;
-      *) echo "ERRO: RT_REMOTE_TARGET precisa conter 'teste' no nome da pasta (ele e apagado ao final)." >&2; exit 2 ;;
+      *) echo "ERRO: RT_REMOTE_TARGET precisa conter 'teste' no nome da pasta." >&2; exit 2 ;;
     esac
     case "$RT_REMOTE_TARGET" in *vastaflow-backups*) echo "ERRO: RT_REMOTE_TARGET nao pode ser a pasta de backups reais." >&2; exit 2 ;; esac
+    if [ -n "$(env -u MSYS_NO_PATHCONV rclone lsf "$RT_REMOTE_TARGET" --recursive 2>/dev/null | head -n1)" ]; then
+      echo "ERRO: a pasta de teste nao esta vazia; recusado (o teste nao mexe em arquivos que nao sao dele)." >&2; exit 2
+    fi
     export BACKUP_REMOTE="$RT_REMOTE_TARGET"
     RT_REAL_REMOTE=1
-    echo "  (destino REAL de teste: ${BACKUP_REMOTE%%:*}:...; so dados sinteticos; a pasta sera apagada no fim)"
+    echo "  (destino REAL de teste: ${BACKUP_REMOTE%%:*}:<pasta de teste>; so dados sinteticos; o conteudo criado sera apagado no fim)"
+  else
+    # Copia EXTERNA simulada: remoto rclone do tipo `local` (pasta temporaria), com configuracao VAZIA: nenhuma conta
+    # real e alcancavel por engano.
+    : > "$TMP/rclone-vazio.conf"
+    export RCLONE_CONFIG="$(wp "$TMP/rclone-vazio.conf")" RCLONE_CONFIG_RTREMOTE_TYPE=local
+    export BACKUP_REMOTE="rtremote:$(wp "$TMP")/destino-externo"
+    echo "  (copia externa simulada ligada: ${BACKUP_REMOTE%%:*}:<pasta temporaria>)"
   fi
 fi
 GNUPGHOME="$PUB_HOME" bash scripts/backup.sh | sed 's/^/  | /'
