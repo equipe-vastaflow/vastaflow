@@ -406,6 +406,19 @@ describe('Implantacao - backup e restauracao', () => {
       expect(read('docs/backup-google-drive.md')).toContain('drive.file');
     });
 
+    it('o ensaio de recuperacao da chave GPG usa so dados ficticios, nunca passa frase-senha em argumento e nao toca no chaveiro do usuario', () => {
+      const drill = semComentarios(read('scripts/gpg-recovery-drill.sh'));
+      expect(drill).toContain('--passphrase-file');
+      expect(drill).not.toMatch(/--passphrase[ =]/);
+      expect(drill).toContain('--homedir');
+      expect(drill).toContain('verify-real');
+      expect(drill).toContain('SECRET_TEXT="texto-ficticio-');
+      expect(drill).toContain('gpg-agent');
+      for (const linha of drill.split('\n').filter((l) => l.includes('export-secret-keys'))) {
+        expect(linha).toContain('"$TMP/');
+      }
+    });
+
     it('o teste de restauracao nunca herda o destino real do ambiente e so apaga pastas de teste', () => {
       const teste = read('scripts/restore-test.sh');
       expect(teste).toContain('unset BACKUP_REMOTE');

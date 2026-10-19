@@ -53,7 +53,8 @@ comprimidos em um ano; o n8n tende a ficar estável (a retenção de execuções
   Consequência: **não troque o `client_id`** depois de começar (os arquivos antigos deixariam de ser visíveis ao novo cliente); guarde-o no cofre de senhas.
 - **Credenciais OAuth próprias** (a documentação atual do rclone trata o client_id compartilhado como em aposentadoria em 2026).
 - **Publicar o app OAuth ("Em produção")**: no modo "Testing" a documentação do rclone avisa que "any grants will expire after a week" — o backup
-  pararia sozinho depois de 7 dias. O Google mostrará o aviso "app não verificado" ao autorizar; é esperado para uso próprio.
+  pararia sozinho depois de 7 dias. O `drive.file` é classificado pelo Google como escopo **não sensível** (confira na tela de escopos), então a publicação
+  normalmente dispensa verificação; se aparecer o aviso "app não verificado" ao autorizar, é esperado para uso próprio.
 - **Nada de segredo no chat ou no Git:** o arquivo real `rclone.conf` (com `client_secret` e o token) existe **só** na VPS, modo 600, e está no `.gitignore`.
   O modelo sem segredos é `infra/backup/rclone.conf.example`. O token do bot de alerta e a chave do heartbeat ficam em `/etc/vastaflow/backup.env` (600).
 - **Conta Google:** ative verificação em duas etapas; considere uma conta **dedicada** (mais fácil de proteger e de transferir à cliente). Dados de
@@ -77,6 +78,65 @@ gpg --gen-revoke <FINGERPRINT> > backup-revogacao.asc                         # 
   privada, decifre um arquivo de teste e confira. O `scripts/restore-test.sh` faz essa prova com uma chave descartável.
 - Na VPS: `gpg --import backup-publica.asc` (só a pública) e `BACKUP_GPG_RECIPIENT=<FINGERPRINT>` no `backup.env`. Depois **apague** os `.asc` da VPS.
 - A chave tem validade (5 anos): coloque o lembrete no calendário; ao renovar, mantenha a antiga enquanto houver backups cifrados com ela.
+
+### 5.1 Passo a passo no Windows (Etapa 1) — o que VOCÊ executa; nada foi gerado nem enviado
+**Ferramentas neste computador (verificado em 2026-10-19):** `gpg` 2.4.9 (vem com o Git for Windows) com `pinentry` gráfico — **ok**; chaveiro padrão **vazio**.
+`rclone` — **não instalado**. Instalação pelo método oficial (rclone.org/install): baixe o zip "Intel/AMD 64-bit" em **downloads.rclone.org**, confira o hash
+com o `SHA256SUMS` da *mesma versão* (`https://downloads.rclone.org/vX.Y.Z/SHA256SUMS`; `certutil -hashfile rclone-vX.Y.Z-windows-amd64.zip SHA256` no PowerShell),
+extraia `rclone.exe` para `C:\Tools\rclone` e adicione a pasta ao PATH. (`winget install Rclone.Rclone` também existe; Chocolatey/Scoop são de terceiros e podem estar desatualizados.)
+Depois: `rclone version`.
+
+**A. Gerar a chave (no Git Bash, FORA da pasta do repositório; a frase-senha você digita na janela do pinentry, nunca no chat):**
+```bash
+mkdir -p ~/vastaflow-chaves && cd ~/vastaflow-chaves && chmod 700 .
+gpg --quick-generate-key "backup-vastaflow <seu-email>" rsa4096 encr 5y     # abre a janela da FRASE-SENHA: use uma frase longa e única
+gpg --list-keys --fingerprint backup-vastaflow                                # copie a IMPRESSAO DIGITAL (40 hex) - ela NAO e segredo
+FPR=<cole-a-impressao-digital>
+gpg --armor --export "$FPR" > backup-publica.asc                              # vai para a VPS
+gpg --armor --export-secret-keys "$FPR" > backup-privada.asc                  # PRIVADA (pede a frase-senha)
+gpg --gen-revoke "$FPR" > backup-revogacao.asc                                # certificado de revogacao (interativo: responda y, 0, linha vazia, y)
+```
+**B. Guardar em dois lugares independentes (nenhum deles é o Google Drive dos backups):**
+1. **Cofre de senhas** (Bitwarden/1Password/KeePassXC...): anexar `backup-privada.asc` e `backup-revogacao.asc` e guardar a **frase-senha** em um campo separado.
+2. **Pendrive offline** guardado fisicamente (de preferência cifrado, p.ex. BitLocker To Go) com `backup-privada.asc` + `backup-revogacao.asc`; a frase-senha anotada
+   **em papel**, em local diferente do pendrive.
+Depois de guardar, **apague** `backup-privada.asc`/`backup-revogacao.asc` do computador (e esvazie a lixeira); a chave também fica no chaveiro do gpg: para uso
+cotidiano ela não é necessária, e pode ser removida com `gpg --delete-secret-keys "$FPR"` depois de provada a recuperação.
+
+**C. Provar a recuperação (sem dado real):**
+```bash
+bash scripts/gpg-recovery-drill.sh                                     # ensaio com chave DESCARTAVEL: 18 verificacoes (ja executado: PASS)
+bash scripts/gpg-recovery-drill.sh verify-real "$FPR" /caminho/do/backup-privada.asc /caminho/do/backup-publica.asc
+```
+O `verify-real` importa **o arquivo de backup** da sua chave numa pasta temporária limpa, cifra e decifra um **texto fictício** (a janela pede a frase-senha) e
+confere que a impressão digital bate e que a pública não carrega chave privada. Rode-o **com a cópia do cofre e com a cópia do pendrive** — são duas provas.
+Só imprime ok/FALHA. Se qualquer uma falhar, **não** use essa chave para backups.
+
+**D. Na VPS (depois que ela existir):** `gpg --import backup-publica.asc` (só a pública) e `BACKUP_GPG_RECIPIENT=<impressão digital>` no `backup.env`.
+
+### 5.2 Google Cloud + OAuth do Drive (`drive.file`) — passo a passo (nada foi criado)
+Os nomes de menu do Google mudam; se algo não bater, procure o equivalente. Faça tudo logado na **conta Google que guardará os backups**.
+1. Abra **console.cloud.google.com** → seletor de projeto → **Novo projeto** → nome `vastaflow-backup` → Criar. (Não é necessário cartão; o Drive API é gratuito.)
+2. Menu **APIs e serviços → Biblioteca** → pesquise **Google Drive API** → **Ativar**.
+3. Menu **Google Auth Platform** (antes "Tela de consentimento OAuth") → **Começar**: nome do app `VastaFlow Backup`; e-mail de suporte (o seu); **Público = Externo**; e-mail de contato; aceitar a política → Criar.
+4. **Acesso a dados (Escopos)** → **Adicionar ou remover escopos** → marque **`.../auth/drive.file`** ("ver, editar, criar e excluir apenas os arquivos do Google Drive que você usa com este app") → Salvar.
+   **Não** adicione `.../auth/drive` (acesso total).
+5. **Público (Audience)** → **Publicar app** → confirmar *"Em produção"*. (Se ficar em *Teste*, o token expira em 7 dias e o backup para sozinho.)
+6. **Clientes** → **Criar cliente** → tipo **App para computador (Desktop app)** → nome `rclone-vastaflow` → Criar. Aparecem o **ID do cliente** e a **chave secreta**:
+   copie **direto para o cofre de senhas**. **Não** baixe nem guarde o JSON dentro do repositório, do Drive dos backups ou do chat.
+7. Anote no cofre: nome do projeto, o e-mail da conta e a data. **Não troque o cliente depois** (arquivos criados com `drive.file` pertencem àquele cliente).
+
+### 5.3 rclone no Windows — só para REFERÊNCIA; **NÃO execute antes de me autorizar**
+```text
+rclone config                  # n) New remote | name: gdrive | Storage: drive (digite "drive")
+  client_id:      <cole do cofre>      client_secret: <cole do cofre>
+  scope:          3  (drive.file - "Files created by rclone")
+  service_account_file: (vazio)   Edit advanced config: n   Use auto config: y   (abre o navegador em 127.0.0.1:53682)
+  -> entre na conta Google certa e autorize; Configure as Shared Drive: n; y (manter); q
+rclone mkdir gdrive:vastaflow-teste-autenticacao && rclone lsd gdrive: && rclone rmdir gdrive:vastaflow-teste-autenticacao
+rclone config file             # mostra onde ficou o rclone.conf (token = SEGREDO: nunca cole em chat, nunca versione)
+```
+Nada disso foi feito. O `rclone.conf` será levado à VPS por `scp` (modo 600) quando houver VPS.
 
 ## 6. Configuração necessária (resumo)
 | Onde | O quê |
