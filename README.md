@@ -622,6 +622,7 @@ Respostas de erro 5xx nao expoem a causa: devolvem mensagem generica e um
 - [docs/whatsapp.md](docs/whatsapp.md) - WhatsApp (Cloud API oficial da Meta): webhook assinado direto ao backend, vinculo, RBAC e o que depende da conta Meta (desenvolvido e testado com simulacao; **nao validado com a Meta**)
 - [docs/whatsapp-ativacao.md](docs/whatsapp-ativacao.md) - ativacao do WhatsApp oficial: coexistencia (condicional), caminhos para a Rizola, procedimento e conferencia do codigo
 - [docs/deploy-vps.md](docs/deploy-vps.md) - roteiro de implantacao na VPS (HTTPS, firewall, atualizacao, rollback); preparado, nao executado
+- [docs/backup-google-drive.md](docs/backup-google-drive.md) - backup externo no Google Drive (rclone + GPG): tamanho, retencao, alertas, chave de recuperacao e checklist de ativacao
 - [docs/backup-restauracao.md](docs/backup-restauracao.md) - backup cifrado, destino externo (decisao pendente) e teste de restauracao
 - [docs/nfse.md](docs/nfse.md) - NFS-e Nacional: implementada e testada com simulacao, **desligada e nao validada na Sefin**; contratos oficiais, comandos, estados e o que falta (certificado, empresa, municipio)
 - [docs/prontidao-vps.md](docs/prontidao-vps.md) - o que esta provado, o que falta (HTTPS, backup, restauracao, rollback) antes da VPS

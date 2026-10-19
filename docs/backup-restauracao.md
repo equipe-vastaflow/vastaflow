@@ -29,7 +29,7 @@ há certificado ainda.
 - **Senhas fora da linha de comando:** os dumps usam variáveis que o próprio contêiner já tem (teste estático impede regressão).
 - **Integridade:** `SHA256SUMS` dos arquivos cifrados; o `restore.sh` confere antes de tocar em qualquer coisa. Adulterar 1 byte é
   recusado (provado).
-- **Retenção local:** `BACKUP_RETENTION_DAYS` (14) preservando sempre os `BACKUP_KEEP_MIN` (3) mais recentes. **Remota:** `BACKUP_REMOTE_RETENTION_DAYS` (30).
+- **Retenção local:** `BACKUP_RETENTION_DAYS` (14) preservando sempre os `BACKUP_KEEP_MIN` (3) mais recentes (e nunca um backup com envio externo pendente). **Remota:** 7 diários + 4 semanais + 3 mensais, mais um orçamento de bytes — ver `docs/backup-google-drive.md`.
 - **Travas do restore:** exige confirmar o projeto-alvo por nome, recusa a produção sem `SOBRESCREVER-PRODUCAO`, recusa alvo com dados
   sem `VF_RESTORE_FORCE=1`, e **nunca** sobrescreve a configuração existente (vai para uma pasta nova).
 
@@ -80,7 +80,8 @@ pela API real e senhas aleatórias de uso único. Resultado: **24 verificações
 externo (`rclone`); a execução na VPS/Linux (o script roda no host em que for chamado); a restauração do projeto real `vastaflow`;
 volumes grandes (documentos reais) e tempo de restauração; a consistência cruzada banco × documentos sob escrita concorrente.
 
-## 6. Destino externo — DECISÃO SUA (nada foi contratado)
+## 6. Destino externo — provisório decidido: Google Drive (`docs/backup-google-drive.md`); alternativas abaixo mantidas como referência
+> **Decisão atual:** Google Drive via `rclone`, escopo `drive.file`, tudo cifrado com gpg antes do envio. Preparado e testado só com dados fictícios e sem Google; **nada foi autenticado nem enviado**. Procedimento, política de retenção e checklist de ativação: [`backup-google-drive.md`](backup-google-drive.md).
 O `backup.sh` já copia e **verifica** (`rclone check`) para qualquer destino do `rclone`; falta escolher. Como os arquivos já saem
 **cifrados**, o provedor do destino não lê o conteúdo. Alternativas:
 

@@ -1,0 +1,8 @@
+# Instalar em /etc/systemd/system/. Disparado por OnFailure= do vastaflow-backup.service e do vigia.
+[Unit]
+Description=VastaFlow - alerta de falha do backup
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/vastaflow
+ExecStart=/bin/bash /opt/vastaflow/scripts/backup-alert.sh --se-nao-recente 900 FALHA "o servico de backup falhou (veja: journalctl -u vastaflow-backup)"

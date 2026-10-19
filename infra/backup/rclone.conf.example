@@ -1,0 +1,16 @@
+# ===========================================================================
+# VastaFlow - MODELO da configuracao do rclone para o Google Drive. NAO e o arquivo real.
+# O real e criado pelo `rclone config` e mora SO em ~/.config/rclone/rclone.conf do usuario que roda o backup
+# (modo 600), dentro da VPS. Ele contem client_secret e o TOKEN OAuth: segredos. NUNCA no Git, no chat nem no backup.
+# Passo a passo: docs/backup-google-drive.md
+# ===========================================================================
+[gdrive]
+type = drive
+# Credenciais OAuth PROPRIAS (criadas por voce no Google Cloud Console). Nao use as do rclone: elas estao sendo aposentadas.
+client_id = SEU_CLIENT_ID.apps.googleusercontent.com
+client_secret = SEU_CLIENT_SECRET
+# drive.file: o rclone so enxerga os arquivos/pastas que ELE mesmo criou. Mesmo com o token vazado, o resto do seu
+# Drive (fotos, documentos) fica inacessivel. A pasta de backups e criada pelo proprio rclone (BACKUP_REMOTE=gdrive:vastaflow-backups).
+scope = drive.file
+# Preenchido pelo `rclone config` / `rclone authorize` (JSON com refresh_token). Nunca cole aqui o que aparecer no chat.
+token =

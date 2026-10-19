@@ -102,3 +102,4 @@ restaurado-config-*/
 *.gpg
 *.asc
 *.pgdump
+rclone.conf

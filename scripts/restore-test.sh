@@ -13,6 +13,8 @@
 #   5. DESTROI a stack de origem (down -v do projeto descartavel);
 #   6. sobe uma stack nova e VAZIA (vf-rt-dst) e restaura com scripts/restore.sh, depois de provar que as
 #      travas (alvo nao confirmado, producao, alvo nao vazio) recusam;
+#   (RT_REMOTE=1: o passo 2 tambem envia ao destino externo SIMULADO, apaga a copia local e o passo 6 restaura do que foi BAIXADO;
+#    RT_REMOTE_TARGET=<remoto:pasta-teste>: usa um destino REAL, so com sua autorizacao, so com dados sinteticos.)
 #   7. liga o backend sobre os dados restaurados e confere, pela API, login do ADMIN, lancamentos, saldo e o
 #      documento (hash identico); confere PostgreSQL, estado do n8n e configuracao.
 #
@@ -25,6 +27,8 @@ export MSYS_NO_PATHCONV=1
 umask 077
 
 cd "$(dirname "$0")/.."
+# O teste NUNCA herda o destino externo do ambiente (BACKUP_REMOTE real): so o que ele mesmo define (RT_REMOTE*).
+unset BACKUP_REMOTE BACKUP_ALERT_TELEGRAM_BOT_TOKEN BACKUP_ALERT_TELEGRAM_CHAT_ID BACKUP_HEARTBEAT_URL
 REPO="$PWD"
 SRC_P="vf-rt-src"
 DST_P="vf-rt-dst"
@@ -54,6 +58,10 @@ dc() { # dc <projeto> <args...>  - SO projetos descartaveis (vf-rt-*)
 
 cleanup() {
   set +e
+  # Destino REAL de teste (se houve): apaga a pasta de teste de verdade, sem lixeira.
+  if [ "${RT_REAL_REMOTE:-0}" = "1" ] && [ -n "${BACKUP_REMOTE:-}" ]; then
+    env -u MSYS_NO_PATHCONV rclone purge "$BACKUP_REMOTE" --drive-use-trash=false >/dev/null 2>&1
+  fi
   dc "$SRC_P" down -v --remove-orphans >/dev/null 2>&1
   dc "$DST_P" down -v --remove-orphans >/dev/null 2>&1
   # Volumes criados a mao (nao pertencem ao Compose, entao o `down -v` nao os remove).
@@ -126,9 +134,39 @@ echo; echo "== 2. Backup (so a chave PUBLICA no chaveiro)"
 export BACKUP_ENV_FILE="$TMP/nao-existe.env" BACKUP_GPG_RECIPIENT="$FPR" BACKUP_DIR="$TMP/backups" BACKUP_RETENTION_DAYS=14
 export VF_COMPOSE="docker compose -p ${SRC_P} -f ${COMPOSE_FILE}" VF_DOCUMENTS_VOLUME="${SRC_P}_documents" VF_N8N_STATE_VOLUME="${SRC_P}_n8n-state"
 export VF_CONFIG_PATHS="$TMP/config-sintetica/.env $TMP/config-sintetica/infra/tls"
+if [ "${RT_REMOTE:-0}" = "1" ]; then
+  # Copia EXTERNA simulada: um remoto rclone do tipo `local` (pasta temporaria), sem arquivo de configuracao e sem
+  # conta nenhuma. Prova o caminho envio -> conferencia -> download -> restauracao com os dados sinteticos.
+  command -v rclone >/dev/null || { echo "ERRO: RT_REMOTE=1 exige rclone no PATH." >&2; exit 2; }
+  wp() { if command -v cygpath >/dev/null; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
+  : > "$TMP/rclone-vazio.conf"
+  export RCLONE_CONFIG="$(wp "$TMP/rclone-vazio.conf")" RCLONE_CONFIG_RTREMOTE_TYPE=local
+  export BACKUP_REMOTE="rtremote:$(wp "$TMP")/destino-externo"
+  echo "  (copia externa simulada ligada: ${BACKUP_REMOTE%%:*}:<pasta temporaria>)"
+  if [ -n "${RT_REMOTE_TARGET:-}" ]; then
+    # Destino REAL escolhido por voce (ex.: gdrive:vastaflow-teste-restauracao), com SO dados sinteticos. Trava: o
+    # nome da pasta precisa conter "teste", porque o teste APAGA essa pasta no fim (nunca a pasta de backups reais).
+    case "$RT_REMOTE_TARGET" in
+      *teste*) ;;
+      *) echo "ERRO: RT_REMOTE_TARGET precisa conter 'teste' no nome da pasta (ele e apagado ao final)." >&2; exit 2 ;;
+    esac
+    case "$RT_REMOTE_TARGET" in *vastaflow-backups*) echo "ERRO: RT_REMOTE_TARGET nao pode ser a pasta de backups reais." >&2; exit 2 ;; esac
+    export BACKUP_REMOTE="$RT_REMOTE_TARGET"
+    RT_REAL_REMOTE=1
+    echo "  (destino REAL de teste: ${BACKUP_REMOTE%%:*}:...; so dados sinteticos; a pasta sera apagada no fim)"
+  fi
+fi
 GNUPGHOME="$PUB_HOME" bash scripts/backup.sh | sed 's/^/  | /'
 BK="$(find "$TMP/backups" -maxdepth 1 -type d -name '20*Z' | head -n1)"
 [ -n "$BK" ] || { echo "ERRO: backup nao gerado"; exit 1; }
+if [ "${RT_REMOTE:-0}" = "1" ]; then
+  STAMP_DIR="$(basename "$BK")"
+  expect_ok "o backup chegou ao destino externo, conferido" "rclone lsf '$BACKUP_REMOTE/$STAMP_DIR' | grep -q SHA256SUMS && (cd '$BK' && sha256sum -c SHA256SUMS --quiet)"
+  rm -rf "$BK"
+  echo "  copia LOCAL apagada: a restauracao usara SO o que foi baixado do destino externo"
+  bash scripts/backup-fetch.sh "$STAMP_DIR" "$TMP/baixado" | sed 's/^/  | /'
+  BK="$TMP/baixado"
+fi
 ls -l "$BK" | awk 'NR>1 {printf "  | %-28s %s bytes\n", $9, $5}'
 
 echo; echo "== 3. O backup e opaco e protegido"

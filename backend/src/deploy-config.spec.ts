@@ -152,10 +152,10 @@ describe('Implantacao - backup e restauracao', () => {
     expect(restore).toContain('--decrypt');
   });
 
-  it('retencao local preserva um minimo e a copia externa e verificada', () => {
+  it('retencao local preserva um minimo e nao apaga backup com envio externo pendente', () => {
     expect(backup).toContain('BACKUP_KEEP_MIN');
-    expect(backup).toContain('rclone check');
-    expect(backup).toContain('--checksum');
+    expect(backup).toContain('pending_marker');
+    expect(backup).toMatch(/continue.*preservar/);
   });
 
   it('restore: integridade, alvo confirmado, producao protegida, alvo vazio e configuracao nunca por cima', () => {
@@ -308,6 +308,109 @@ describe('Implantacao - backup e restauracao', () => {
       };
       expect(pebble.pebble.httpPort).toBe(80);
       expect(read('infra/https/test-https.sh')).toContain('vastaflow.duckdns.org');
+    });
+  });
+
+  describe('copia externa (Google Drive via rclone), alertas e vigia', () => {
+    const lib = semComentarios(read('scripts/lib/backup-remote.sh'));
+    const backupSh = semComentarios(read('scripts/backup.sh'));
+    const alerta = semComentarios(read('scripts/backup-alert.sh'));
+
+    it('so envia pasta JA cifrada, confere o envio e so poda DEPOIS de conferir', () => {
+      expect(lib).toContain('rc check');
+      expect(lib).toContain('--one-way');
+      const upload = backupSh.indexOf('upload_snapshot "$DEST"');
+      const poda = backupSh.indexOf('prune_remote "$STAMP"');
+      expect(upload).toBeGreaterThan(0);
+      expect(poda).toBeGreaterThan(upload);
+      // A poda esta dentro do ramo de sucesso do envio, nunca fora.
+      expect(backupSh.slice(upload, poda)).toMatch(/then/);
+      expect(backupSh).toContain('gpg');
+      expect(backupSh.indexOf('mv "$WORK" "$DEST"')).toBeLessThan(upload);
+    });
+
+    it('falha de envio preserva o backup local, marca pendencia, alerta e sai com codigo proprio', () => {
+      expect(backupSh).toContain('touch "$(pending_marker "$STAMP")"');
+      expect(backupSh).toMatch(/alert FALHA/);
+      expect(backupSh).toContain('EXIT_CODE=5');
+      expect(backupSh).toContain('retry_pending_uploads');
+      expect(backupSh).toContain('preflight_remote');
+    });
+
+    it('remocoes no Drive nao vao para a lixeira (que ocupa a cota) e nunca ha rclone cleanup', () => {
+      for (const linha of lib.split('\n').filter((l) => l.includes('purge'))) {
+        expect(linha).toContain('--drive-use-trash=false');
+      }
+      const textos = [
+        lib,
+        backupSh,
+        alerta,
+        semComentarios(read('scripts/backup-watchdog.sh')),
+        semComentarios(read('scripts/backup-fetch.sh')),
+      ];
+      for (const texto of textos) {
+        expect(texto).not.toMatch(/(rclone|[ ]rc)[ ][^\n]*cleanup([ ]|$)/);
+      }
+    });
+
+    it('checa espaco do destino e do disco local ANTES de gravar, e respeita o orcamento de bytes', () => {
+      expect(lib).toContain('BACKUP_REMOTE_MIN_FREE_BYTES');
+      expect(lib).toContain('BACKUP_REMOTE_MAX_BYTES');
+      expect(lib).toContain('rc about');
+      expect(lib).toMatch(/sem_espaco_no_destino/);
+      expect(backupSh).toContain('BACKUP_LOCAL_MIN_FREE_BYTES');
+      expect(backupSh.indexOf('df -Pk')).toBeLessThan(backupSh.indexOf('[1/5] MySQL'));
+    });
+
+    it('a poda recusa apagar se nao consegue listar e nunca toca no recem-enviado nem abaixo do minimo', () => {
+      expect(lib).toContain('nao consegui listar o destino');
+      expect(lib).toContain('[ "$s" = "$just" ] && continue');
+      expect(lib).toMatch(/BACKUP_KEEP_MIN/);
+    });
+
+    it('o alerta nunca passa token em argumento de comando e nunca derruba quem o chama', () => {
+      expect(alerta).toMatch(/curl[^\n]*-K -/);
+      for (const linha of alerta.split('\n').filter((l) => l.includes('curl'))) {
+        expect(linha).not.toMatch(/BOT_TOKEN|HEARTBEAT_URL/);
+      }
+      expect(alerta.trim().endsWith('exit 0')).toBe(true);
+      expect(alerta).toContain('--max-redirs 0');
+      expect(alerta).toContain('--proto');
+    });
+
+    it('as unidades do systemd: falha aciona alerta, vigia diario, agendas persistentes', () => {
+      expect(read('infra/backup/vastaflow-backup.service')).toContain(
+        'OnFailure=vastaflow-backup-alert.service',
+      );
+      expect(read('infra/backup/vastaflow-backup-alert.service')).toContain('--se-nao-recente');
+      expect(read('infra/backup/vastaflow-backup-watchdog.timer')).toContain('Persistent=true');
+      expect(read('infra/backup/vastaflow-backup.timer')).toContain('Persistent=true');
+    });
+
+    it('modelos do rclone e do backup: escopo minimo, sem segredo, destino do Drive documentado', () => {
+      const rclone = read('infra/backup/rclone.conf.example');
+      expect(rclone).toMatch(/^scope = drive[.]file$/m);
+      expect(rclone).toMatch(/^token =$/m);
+      expect(rclone).toContain('SEU_CLIENT_SECRET');
+      const modelo = semComentarios(read('infra/backup/backup.env.example'));
+      for (const chave of [
+        'BACKUP_ALERT_TELEGRAM_BOT_TOKEN',
+        'BACKUP_ALERT_TELEGRAM_CHAT_ID',
+        'BACKUP_HEARTBEAT_URL',
+        'BACKUP_REMOTE',
+      ]) {
+        expect(modelo).toMatch(new RegExp(`^${chave}=$`, 'm'));
+      }
+      expect(modelo).toContain('BACKUP_REMOTE_MAX_BYTES=8589934592');
+      expect(read('.gitignore').split(/\r?\n/)).toContain('rclone.conf');
+      expect(read('docs/backup-google-drive.md')).toContain('drive.file');
+    });
+
+    it('o teste de restauracao nunca herda o destino real do ambiente e so apaga pastas de teste', () => {
+      const teste = read('scripts/restore-test.sh');
+      expect(teste).toContain('unset BACKUP_REMOTE');
+      expect(teste).toContain('*teste*)');
+      expect(teste).toContain('nao pode ser a pasta de backups reais');
     });
   });
 

@@ -10,7 +10,7 @@
 | --- | --- | --- | --- |
 | 1 | **Dominio** e quem controla o DNS | **inicial (decidido): subdominio gratuito DuckDNS**, ex.: `vastaflow.duckdns.org` (secao 5.1); depois, dominio da cliente (`app.<dominio>`) | o webhook da Meta exige HTTPS valido; o Let's Encrypt so emite para nome que resolva para a VPS |
 | 2 | **Plano da VPS** | KVM 4 (decisão anterior) | os limites de recurso do Compose foram medidos num Docker Desktop de 3,8 GB, **não** na VPS |
-| 3 | **Destino do backup externo** | ver `docs/backup-restauracao.md`, seção 6 | sem ele um backup só protege de erro humano, não de perder a VPS |
+| 3 | **Destino do backup externo** | **provisório decidido: Google Drive** (`docs/backup-google-drive.md`); depois, armazenamento de objetos de outro provedor | sem ele um backup só protege de erro humano, não de perder a VPS |
 | 4 | **Quem guarda a chave privada do backup** | dono do projeto + 1 cópia em cofre | sem ela **não existe restauração** |
 | 5 | **Quem opera** a VPS (SSH, atualização, restauração) | — | rotação de segredos e resposta a incidente |
 

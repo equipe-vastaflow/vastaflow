@@ -14,10 +14,16 @@
 #     nunca o contrario (ver docs/backup-restauracao.md, "limites").
 #   - Senhas nunca vao em argumento de linha de comando: os dumps usam as variaveis que o proprio
 #     container ja tem (MYSQL_ROOT_PASSWORD, POSTGRES_PASSWORD).
-#   - Retencao local por dias (sempre preserva os N mais recentes) e copia externa opcional via rclone.
+#   - Retencao local por dias (sempre preserva os N mais recentes) e copia externa opcional via rclone
+#     (scripts/lib/backup-remote.sh): confere espaco ANTES, envia, CONFERE o envio (hash), repete envios que
+#     falharam e poda o destino por faixas (7 diarios + 4 semanais + 3 mensais) e por orcamento de bytes.
+#   - Falha de envio NUNCA perde o backup local: ele fica com marcador `.upload-pendente`, e o alerta sai
+#     (scripts/backup-alert.sh). Codigos de saida: 0 ok; 2 configuracao; 3 trava; 4 dump falhou;
+#     5 backup LOCAL ok mas a copia externa falhou (envio pendente); 6 sem espaco no disco local.
 #
-# VARIAVEIS (backup.env): BACKUP_GPG_RECIPIENT (obrigatoria), BACKUP_DIR, BACKUP_RETENTION_DAYS,
-#   BACKUP_KEEP_MIN, BACKUP_REMOTE (ex.: destino:vastaflow-backups), BACKUP_REMOTE_RETENTION_DAYS.
+# VARIAVEIS (backup.env): BACKUP_GPG_RECIPIENT (obrigatoria), BACKUP_DIR, BACKUP_RETENTION_DAYS, BACKUP_KEEP_MIN,
+#   BACKUP_REMOTE (ex.: gdrive:vastaflow-backups), BACKUP_REMOTE_MAX_BYTES, BACKUP_REMOTE_MIN_FREE_BYTES,
+#   BACKUP_KEEP_DAILY/WEEKLY/MONTHLY, BACKUP_LOCAL_MIN_FREE_BYTES, BACKUP_ALERT_SIZE_BYTES e as de alerta (backup-alert.sh).
 # Para testes/ensaios: VF_COMPOSE, VF_DOCUMENTS_VOLUME, VF_N8N_STATE_VOLUME, VF_CONFIG_PATHS.
 # ===========================================================================
 set -euo pipefail
@@ -35,15 +41,16 @@ fi
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/vastaflow}"
 RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-14}"
 KEEP_MIN="${BACKUP_KEEP_MIN:-3}"
-REMOTE_RETENTION_DAYS="${BACKUP_REMOTE_RETENTION_DAYS:-30}"
+LOCAL_MIN_FREE="${BACKUP_LOCAL_MIN_FREE_BYTES:-2147483648}"
+ALERT_SIZE="${BACKUP_ALERT_SIZE_BYTES:-524288000}"
 DOCS_VOLUME="${VF_DOCUMENTS_VOLUME:-vastaflow-documents}"
 N8N_VOLUME="${VF_N8N_STATE_VOLUME:-vastaflow-n8n-state}"
 HELPER_IMAGE="${VF_HELPER_IMAGE:-alpine:3.20}"
 read -r -a COMPOSE <<<"${VF_COMPOSE:-docker compose -f docker-compose.production.yml}"
 read -r -a CONFIG_PATHS <<<"${VF_CONFIG_PATHS:-.env infra/tls infra/service-auth}"
 
-case "$RETENTION_DAYS$KEEP_MIN$REMOTE_RETENTION_DAYS" in
-  *[!0-9]*) echo "ERRO: BACKUP_RETENTION_DAYS, BACKUP_KEEP_MIN e BACKUP_REMOTE_RETENTION_DAYS devem ser inteiros." >&2; exit 2 ;;
+case "$RETENTION_DAYS$KEEP_MIN$LOCAL_MIN_FREE$ALERT_SIZE" in
+  *[!0-9]*) echo "ERRO: BACKUP_RETENTION_DAYS, BACKUP_KEEP_MIN, BACKUP_LOCAL_MIN_FREE_BYTES e BACKUP_ALERT_SIZE_BYTES devem ser inteiros." >&2; exit 2 ;;
 esac
 command -v gpg >/dev/null || { echo "ERRO: gpg nao encontrado (apt install gnupg)." >&2; exit 2; }
 gpg --batch --list-keys "$BACKUP_GPG_RECIPIENT" >/dev/null 2>&1 \
@@ -51,6 +58,10 @@ gpg --batch --list-keys "$BACKUP_GPG_RECIPIENT" >/dev/null 2>&1 \
 
 mkdir -p "$BACKUP_DIR"
 chmod 700 "$BACKUP_DIR"
+
+# shellcheck source=lib/backup-remote.sh
+. "$(dirname "$0")/lib/backup-remote.sh"
+alert() { bash "$(dirname "$0")/backup-alert.sh" "$@" >/dev/null 2>&1 || true; }
 
 # Trava contra execucoes simultaneas (mkdir e atomico e portavel).
 LOCK="${BACKUP_DIR}/.lock"
@@ -68,6 +79,16 @@ WORK="${DEST}.parcial"
 cleanup() { rmdir "$LOCK" 2>/dev/null || true; rm -rf "$WORK"; }
 trap cleanup EXIT
 mkdir -p "$WORK"
+
+# Espaco no disco LOCAL: o backup precisa de ~2x o ultimo + folga. Falhar cedo e alto e melhor que um dump truncado.
+last_local="$(find "$BACKUP_DIR" -maxdepth 1 -type d -name '20??????T??????Z' | sort | tail -n1)"
+last_size=0; [ -n "$last_local" ] && last_size="$(dir_bytes "$last_local")"
+free_kb="$(df -Pk "$BACKUP_DIR" | awk 'NR==2 {print $4}')"
+if [ -n "$free_kb" ] && [ $((free_kb * 1024)) -lt $((2 * last_size + LOCAL_MIN_FREE)) ]; then
+  echo "ERRO: pouco espaco livre no disco local ($((free_kb / 1024)) MB). Backup nao iniciado." >&2
+  alert FALHA "disco local com pouco espaco (${BACKUP_DIR}); backup nao executado"
+  exit 6
+fi
 
 encrypt_to() {
   gpg --batch --yes --quiet --trust-model always --cipher-algo AES256 --compress-algo none \
@@ -134,23 +155,53 @@ idx=0
 for d in "${ALL[@]}"; do
   idx=$((idx + 1))
   [ "$idx" -le "$KEEP_MIN" ] && continue
+  if [ -f "$(pending_marker "$(basename "$d")")" ]; then continue; fi   # envio externo pendente: preservar
   if [ -n "$(find "$d" -maxdepth 0 -mtime +"$RETENTION_DAYS" 2>/dev/null)" ]; then
     rm -rf -- "$d"; echo "      retencao: removido $(basename "$d")"
   fi
 done
 
-# Copia externa (opcional). O destino e escolha do dono do projeto (docs/backup-restauracao.md).
+# Tamanho incomum: aviso (um crescimento brusco costuma ser documentos novos ou erro de dump).
+SIZE="$(dir_bytes "$DEST")"
+if [ "$SIZE" -gt "$ALERT_SIZE" ]; then
+  alert AVISO "backup grande: $((SIZE / 1048576)) MB (limite de aviso $((ALERT_SIZE / 1048576)) MB); revise a politica de retencao"
+fi
+
+# Copia externa (opcional, mas OBRIGATORIA antes do go-live). O destino e escolha do dono do projeto.
+EXIT_CODE=0
 if [ -n "${BACKUP_REMOTE:-}" ]; then
-  command -v rclone >/dev/null || { echo "ERRO: BACKUP_REMOTE definido mas rclone nao esta instalado." >&2; exit 5; }
-  echo "Copiando para o destino externo..."
-  rclone copy "$DEST" "${BACKUP_REMOTE}/${STAMP}" --checksum --quiet
-  rclone check "$DEST" "${BACKUP_REMOTE}/${STAMP}" --one-way --quiet
-  rclone delete "$BACKUP_REMOTE" --min-age "${REMOTE_RETENTION_DAYS}d" --quiet || true
-  rclone rmdirs "$BACKUP_REMOTE" --leave-root --quiet || true
-  echo "Destino externo verificado (rclone check)."
+  command -v rclone >/dev/null || { echo "ERRO: BACKUP_REMOTE definido mas rclone nao esta instalado." >&2; touch "$(pending_marker "$STAMP")"; alert FALHA "rclone ausente; backup local ok, envio pendente"; exit 5; }
+  echo "Copia externa (${BACKUP_REMOTE%%:*}:...)..."
+  REMOTE_NOTE=""
+  if ! preflight_remote "$SIZE"; then
+    echo "ERRO: destino externo nao esta pronto (${REMOTE_PROBLEM}). Backup local preservado; envio PENDENTE." >&2
+    touch "$(pending_marker "$STAMP")"
+    alert FALHA "copia externa nao enviada: ${REMOTE_PROBLEM}. Backup local ${STAMP} preservado (envio pendente)"
+    EXIT_CODE=5
+  else
+    [ -z "$REMOTE_NOTE" ] || echo "      aviso: ${REMOTE_NOTE}"
+    # Primeiro os envios antigos que ficaram pendentes; depois o de agora.
+    retry_pending_uploads || EXIT_CODE=5
+    if upload_snapshot "$DEST"; then
+      rm -f "$(pending_marker "$STAMP")"
+      echo "      enviado e conferido (rclone check): ${STAMP}"
+      # So PODA depois de o envio novo estar conferido; o recem-enviado nunca e removido.
+      prune_remote "$STAMP" || true
+      if [ "${REMOTE_PRUNE_NOTE:-}" = "orcamento" ]; then
+        alert AVISO "retencao do destino reduzida pelo orcamento de bytes; considere aumentar o espaco ou rever o conteudo do backup"
+      fi
+    else
+      echo "ERRO: envio ao destino externo falhou ou nao conferiu. Backup local preservado; envio PENDENTE." >&2
+      touch "$(pending_marker "$STAMP")"
+      alert FALHA "envio ao destino externo falhou (backup local ${STAMP} preservado; sera reenviado na proxima execucao)"
+      EXIT_CODE=5
+    fi
+  fi
 else
   echo "AVISO: BACKUP_REMOTE nao definido: este backup existe SO neste servidor (nao protege contra perda da VPS)."
 fi
 
 echo "BACKUP OK: ${DEST}"
-du -sh "$DEST" 2>/dev/null | cut -f1 | sed 's/^/tamanho: /'
+echo "tamanho: $((SIZE / 1024)) KB"
+if [ "$EXIT_CODE" -eq 0 ]; then alert OK "backup ${STAMP} concluido ($((SIZE / 1024)) KB${BACKUP_REMOTE:+, copia externa conferida})"; fi
+exit "$EXIT_CODE"

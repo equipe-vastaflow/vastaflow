@@ -1,0 +1,10 @@
+# Instalar em /etc/systemd/system/. Vigia diario: o backup rodou? chegou ao destino? ha espaco? ha envio pendente?
+[Unit]
+Description=VastaFlow - vigia do backup
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/vastaflow
+ExecStart=/bin/bash /opt/vastaflow/scripts/backup-watchdog.sh

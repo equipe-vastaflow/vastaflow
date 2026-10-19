@@ -1,0 +1,11 @@
+# Instalar em /etc/systemd/system/ e ativar: systemctl enable --now vastaflow-backup-watchdog.timer
+[Unit]
+Description=VastaFlow - agenda do vigia do backup
+
+[Timer]
+# 09:00: bem depois do backup das 03:30, para pegar o que atrasou ou falhou sem aviso.
+OnCalendar=*-*-* 09:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
