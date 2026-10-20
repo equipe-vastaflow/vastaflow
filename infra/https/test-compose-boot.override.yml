@@ -1,0 +1,15 @@
+# SOMENTE para infra/https/test-compose-boot.sh. Sobrepoe, por cima de docker-compose.production.yml +
+# docker-compose.https.yml, so o que isola o teste da stack real: imagem ja construida, nenhuma porta no host e
+# volumes com nome proprio (os nomes fixos de producao NUNCA sao usados aqui). O `command`, o `environment`, os
+# `volumes` do modelo e o `healthcheck` do nginx continuam sendo OS DE docker-compose.https.yml.
+services:
+  nginx:
+    image: vf-boot-test-nginx:latest
+    build: !reset null
+    ports: !reset []
+
+volumes:
+  letsencrypt:
+    name: vf-boot-test-letsencrypt
+  certbot-webroot:
+    name: vf-boot-test-webroot

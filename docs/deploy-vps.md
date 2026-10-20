@@ -109,6 +109,25 @@ liga o contêiner `certbot`, que tenta renovar a cada 12 h; o nginx recarrega a 
 (`frontend/nginx/conf.d/02-hsts.conf`); suba para 1 ano só depois de dias de operação estável; (3) um único host serve app e `/api`
 (a separação em três subdomínios do ADR 0003 **não** foi implementada: o editor do n8n continua fora da internet).
 
+### 6.1 Se o nginx ficar `unhealthy` / `Connection refused` na :80 (bug do primeiro boot, CORRIGIDO)
+**Causa:** o `/docker-entrypoint.sh` da imagem nginx so renderiza os modelos (envsubst) quando o primeiro argumento do comando e `nginx`.
+Com `command: [/bin/sh, -c, ...]` ele pulava tudo: `10-https.conf` nao era gerado, o nginx subia sem nenhum `server` e nada escutava na :80
+(o healthcheck falhava e o desafio HTTP-01 do Let's Encrypt tambem). Hoje o `command` chama `exec /docker-entrypoint.sh nginx ...`.
+**Aplicar a correcao numa VPS que ja subiu, SEM tocar nos dados** (so o contêiner do nginx e recriado; MySQL, PostgreSQL, n8n e backend nao reiniciam;
+os volumes nao sao mexidos; **nunca** use `down -v`):
+```bash
+cd /opt/vastaflow && git pull --ff-only                       # ou: git fetch --tags && git checkout <tag-com-a-correcao>
+export COMPOSE="docker compose -f docker-compose.production.yml -f docker-compose.https.yml"
+$COMPOSE config -q                                            # valida o arquivo
+$COMPOSE up -d --no-deps --force-recreate nginx               # recria SO o nginx
+$COMPOSE ps nginx                                             # aguarde "healthy"
+$COMPOSE exec -T nginx ls /etc/nginx/conf.d                   # deve listar 10-https.conf
+curl -sI http://<SERVER_NAME>/ | head -n1                     # 301 (e nao "Connection refused")
+```
+Depois, **so se o 301 apareceu**, emita o certificado: `bash scripts/https-init.sh` (ele agora **recusa** pedir o certificado enquanto o nginx nao
+responder na :80). O Let's Encrypt limita validacoes que falham (por hostname, por hora): se as tentativas anteriores falharam, **espere cerca de 1 hora**
+ou ensaie antes com `STAGING=1 bash scripts/https-init.sh`. Por fim, `bash scripts/https-verify.sh`.
+
 ## 7. Migrations `[testado local]`
 O serviço `migrate` roda `migration:run` **antes** do backend e o backend se recusa a subir com migration pendente.
 Confirme: `$COMPOSE logs migrate | tail` ("No migrations are pending" ou "executed successfully"; exit 0).
@@ -176,6 +195,7 @@ O DNS precisa apontar para o novo IP (TTL baixo ajuda).
 ## Testes locais que ja existem (rodam sem VPS, so com Docker; nenhum toca a stack real)
 | Comando | O que prova |
 | --- | --- |
+| `bash infra/https/test-compose-boot.sh` | **regressao do primeiro boot**: sobe o servico `nginx` pelos arquivos de Compose REAIS e confere que o entrypoint gera o `10-https.conf`, que o healthcheck fica `healthy`, :80/:443/HSTS/ACME/reload; inclui o controle negativo do comando antigo |
 | `bash infra/https/test-https.sh` | Nginx/TLS/HSTS/redirecionamento/bloqueios com o nome `vastaflow.duckdns.org`; webhook com assinatura HMAC preservada ponta a ponta; `https-verify.sh` contra a pilha |
 | `bash infra/https/test-acme.sh` | desafio **HTTP-01** completo contra o Pebble (servidor ACME de teste do Let's Encrypt): emissao, troca do certificado temporario, renovacao; e a recusa quando o DNS nao aponta |
 | `bash infra/duckdns/test-duckdns.sh` | atualizador do DuckDNS contra servidor falso: token fora do argv e da saida, entradas invalidas recusadas, sem redirecionamento |

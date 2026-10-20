@@ -97,6 +97,23 @@ docker run --rm -v "${CERT_VOLUME}:/etc/letsencrypt" alpine:3.20 sh -c "
 echo "2/4 Subindo o nginx..."
 "${COMPOSE[@]}" up -d nginx
 
+# O nginx precisa estar SERVINDO a :80 ANTES de pedir o certificado: o Let's Encrypt limita tentativas falhas por
+# dominio, e uma validacao feita com o nginx fora do ar so gasta tentativas. Falha cedo, com diagnostico, sem certbot.
+ready=0
+for _ in $(seq 1 30); do
+  if "${COMPOSE[@]}" exec -T nginx wget -q -O - http://127.0.0.1/nginx-health 2>/dev/null | grep -q ok; then ready=1; break; fi
+  sleep 2
+done
+if [ "$ready" -ne 1 ]; then
+  echo "ERRO: o nginx nao responde na porta 80 dentro do container. NAO vou pedir o certificado (gastaria tentativas do Let's Encrypt)." >&2
+  echo "--- /etc/nginx/conf.d (deve conter 10-https.conf):" >&2
+  "${COMPOSE[@]}" exec -T nginx ls /etc/nginx/conf.d >&2 || true
+  echo "--- ultimas linhas do log do nginx:" >&2
+  "${COMPOSE[@]}" logs --tail 15 nginx >&2 || true
+  exit 3
+fi
+echo "      nginx servindo a :80 (10-https.conf gerado)."
+
 echo "3/4 Emitindo o certificado real${STAGING:+ (STAGING: nao e confiavel pelos navegadores)}..."
 docker run --rm -v "${CERT_VOLUME}:/etc/letsencrypt" alpine:3.20 sh -c "
   rm -rf '/etc/letsencrypt/live/${SERVER_NAME}' '/etc/letsencrypt/archive/${SERVER_NAME}' \

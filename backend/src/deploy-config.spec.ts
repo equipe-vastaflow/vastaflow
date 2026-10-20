@@ -99,6 +99,27 @@ describe('Implantacao - superficie de rede', () => {
     expect(mapa).toMatch(/https\s+"max-age=86400";/);
   });
 
+  it('o command do nginx HTTPS passa pelo entrypoint COM "nginx" como primeiro argumento (senao o envsubst nao roda)', () => {
+    const yaml = semComentarios(read('docker-compose.https.yml'));
+    // O /docker-entrypoint.sh da imagem so renderiza os modelos quando $1 e `nginx`/`nginx-debug`.
+    expect(yaml).toContain('exec /docker-entrypoint.sh nginx -g');
+    expect(yaml).not.toMatch(/exec nginx -g/);
+    expect(yaml).toContain('nginx -s reload');
+    // O https-init recusa pedir o certificado se o nginx nao serve a :80 (nao gasta tentativas do Let's Encrypt).
+    const init = semComentarios(read('scripts/https-init.sh'));
+    expect(init.indexOf('nginx-health')).toBeGreaterThan(0);
+    expect(init.indexOf('nginx-health')).toBeLessThan(init.indexOf('certonly'));
+    expect(init).toContain('NAO vou pedir o certificado');
+    // O teste de regressao com o Compose real existe e traz o controle negativo do comando antigo.
+    const teste = read('infra/https/test-compose-boot.sh');
+    expect(teste).toContain('docker-compose.https.yml');
+    expect(teste).toContain('CONTROLE NEGATIVO');
+    expect(teste).toContain('10-https.conf');
+    expect(read('infra/https/test-compose-boot.override.yml')).toContain('ports: !reset []');
+    // Valores sinteticos: nenhum segredo real no fixture.
+    expect(read('infra/https/test-boot.env')).not.toMatch(/(PASSWORD|SECRET|KEY)=(?!ficticio)/);
+  });
+
   it('o certbot nao ganha porta e o certificado fica em volume, nao em arquivo do repositorio', () => {
     const yaml = read('docker-compose.https.yml');
     expect(yaml).toContain('vastaflow-letsencrypt');

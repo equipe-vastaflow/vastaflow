@@ -31,12 +31,17 @@ services:
       - ./infra/https/vastaflow-http-disabled.conf:/etc/nginx/conf.d/vastaflow.conf:ro
       - letsencrypt:/etc/letsencrypt:ro
       - certbot-webroot:/var/www/certbot:ro
-    # O entrypoint da imagem renderiza os modelos e depois executa este comando. O laço recarrega o
-    # nginx a cada 6 h (pega o certificado renovado); `exec` mantem o nginx como PID 1.
+    # ATENCAO (bug do primeiro boot, corrigido): o /docker-entrypoint.sh da imagem so renderiza os modelos
+    # (envsubst) e ajusta o nginx quando o PRIMEIRO argumento e literalmente `nginx` (ou `nginx-debug`). Com
+    # `command: [/bin/sh, -c, ...]` o primeiro argumento e `/bin/sh`: o entrypoint PULA tudo, o
+    # 10-https.conf nunca e gerado, o nginx sobe sem nenhum `server` e nada escuta na :80 (healthcheck
+    # "connection refused" e o desafio ACME do Let's Encrypt falha). Por isso o `exec` abaixo chama
+    # `/docker-entrypoint.sh nginx ...` de novo, agora com `nginx` como $1. O laco recarrega o nginx a cada 6 h
+    # (pega o certificado renovado). Coberto por infra/https/test-compose-boot.sh.
     command:
       - /bin/sh
       - -c
-      - 'while :; do sleep 6h; nginx -s reload; done & exec nginx -g "daemon off;"'
+      - 'while :; do sleep 6h; nginx -s reload; done & exec /docker-entrypoint.sh nginx -g "daemon off;"'
     healthcheck:
       test: ['CMD', 'wget', '-q', '-O', '-', 'http://127.0.0.1/nginx-health']
       interval: 15s
