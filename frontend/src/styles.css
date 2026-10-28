@@ -839,21 +839,6 @@ label.button:has(+ input:disabled) {
   padding: 0.05rem 0.3rem;
 }
 
-.policy-pending {
-  background: var(--warn-text);
-  color: var(--surface);
-  border-radius: 4px;
-  padding: 0.05rem 0.3rem;
-  font-weight: 600;
-}
-
-.policy-draft {
-  background: var(--danger-bg);
-  color: var(--danger-text);
-  border-radius: 8px;
-  padding: 0.6rem 0.8rem;
-}
-
 @media (min-width: 720px) {
   .policy-page {
     padding: 2rem 1rem;

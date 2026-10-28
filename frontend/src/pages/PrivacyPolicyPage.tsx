@@ -1,21 +1,11 @@
 import type { ReactNode } from "react";
 
 /**
- * Trecho que depende de confirmacao da empresa. Fica visivel e marcado de proposito: o texto NAO e
- * definitivo enquanto houver algum `Pending` na pagina. Ao confirmar, troque o `Pending` pelo valor real.
- */
-function Pending({ children }: { children: ReactNode }): ReactNode {
-  return (
-    <mark className="policy-pending" data-pending="true">
-      [A CONFIRMAR: {children}]
-    </mark>
-  );
-}
-
-/**
  * Politica de Privacidade publica (exigida pela Meta para o app do WhatsApp Business).
  * Rota fora do `ProtectedRoute`: nao exige login e nao faz nenhuma chamada a API.
- * Descreve apenas o tratamento realmente implementado; o que depende da empresa esta em `Pending`.
+ * Descreve apenas o tratamento realmente implementado. Tres pontos seguem em validacao juridica (bases
+ * legais, retencao e transferencia internacional) e estao ditos como tal no texto; o registro interno
+ * da aprovacao e dessas pendencias fica em `docs/politica-privacidade-revisao.md`.
  */
 export function PrivacyPolicyPage(): ReactNode {
   return (
@@ -25,14 +15,11 @@ export function PrivacyPolicyPage(): ReactNode {
           <p className="brand">VastaFlow</p>
           <h1>Política de Privacidade</h1>
           <p className="muted">
-            Última atualização: <Pending>data de vigência</Pending>
+            Data de vigência: 28/10/2026. Texto aprovado em 28/10/2026 por
+            Rizola, responsável indicada pela Vasta para o contato sobre
+            privacidade.
           </p>
         </header>
-
-        <p className="policy-draft" role="note">
-          Versão em revisão: os trechos destacados como “A CONFIRMAR” dependem
-          de confirmação da empresa e este texto ainda não é definitivo.
-        </p>
 
         <section>
           <h2>1. Quem somos</h2>
@@ -46,11 +33,10 @@ export function PrivacyPolicyPage(): ReactNode {
             LGPD).
           </p>
           <ul>
+            <li>CNPJ: 07.131.218/0001-24</li>
             <li>
-              CNPJ: <Pending>CNPJ da empresa</Pending>
-            </li>
-            <li>
-              Endereço: <Pending>endereço da sede</Pending>
+              Endereço: Estrada Municipal de Morada Nova de Minas, Zona Rural,
+              Morada Nova de Minas/MG, CEP 35.628-000, Brasil
             </li>
           </ul>
           <p>
@@ -65,17 +51,14 @@ export function PrivacyPolicyPage(): ReactNode {
           <h2>2. A quem o sistema se destina</h2>
           <p>
             O VastaFlow não é um serviço aberto ao público. O acesso é restrito
-            a pessoas cadastradas pela Vasta (usuários do sistema). O assistente
-            só atende quem teve o seu número do WhatsApp (ou conta do Telegram)
-            previamente vinculado a um usuário.
+            a pessoas cadastradas pela Vasta (usuários do sistema), que são
+            sócios e funcionários. O assistente só atende quem teve o seu número
+            do WhatsApp (ou conta do Telegram) previamente vinculado a um
+            usuário.
           </p>
           <p>
-            Categorias de titulares:{" "}
-            <Pending>
-              confirmar quem são os titulares (por exemplo, colaboradores,
-              gestores e terceiros cujos dados sejam lançados no sistema)
-            </Pending>
-            .
+            Além dos usuários, os documentos e lançamentos do sistema podem
+            conter dados pessoais de clientes, fornecedores e colaboradores.
           </p>
         </section>
 
@@ -122,8 +105,9 @@ export function PrivacyPolicyPage(): ReactNode {
             <li>
               Os registros de controle de cada evento recebido guardam apenas
               dados técnicos (identificadores, situação e resultado do
-              processamento). O <strong>texto das mensagens não é gravado</strong>{" "}
-              nesses registros nem nos registros de auditoria.
+              processamento). O{" "}
+              <strong>texto das mensagens não é gravado</strong> nesses
+              registros nem nos registros de auditoria.
             </li>
             <li>
               O identificador do número do remetente (<code>wa_id</code>) pode
@@ -154,12 +138,10 @@ export function PrivacyPolicyPage(): ReactNode {
             <li>Notificações internas destinadas ao próprio usuário.</li>
           </ul>
           <p>
-            Dados de terceiros:{" "}
-            <Pending>
-              confirmar se lançamentos e documentos contêm dados pessoais de
-              clientes, fornecedores ou outras pessoas, e quais
-            </Pending>
-            .
+            Dados de terceiros: descrições, observações e documentos lançados no
+            sistema podem conter dados pessoais de clientes, fornecedores e
+            colaboradores, conforme o conteúdo inserido pelos usuários. O
+            sistema não possui campos específicos para esses dados.
           </p>
           <p>
             Recursos de emissão de nota fiscal de serviço (NFS-e) e de consulta
@@ -182,13 +164,11 @@ export function PrivacyPolicyPage(): ReactNode {
               usuários vinculados.
             </li>
             <li>Manter trilha de auditoria e a segurança do sistema.</li>
-            <li>
-              Gerar cópias de segurança para recuperação em caso de falha.
-            </li>
           </ul>
           <p>
-            Bases legais (art. 7º da LGPD):{" "}
-            <Pending>confirmar a base legal de cada finalidade</Pending>.
+            Bases legais (art. 7º da LGPD): a indicação da base legal específica
+            de cada finalidade ainda está em validação jurídica e não é
+            apresentada nesta versão.
           </p>
         </section>
 
@@ -221,20 +201,20 @@ export function PrivacyPolicyPage(): ReactNode {
             </li>
             <li>
               Hostinger, como provedora terceirizada de hospedagem do servidor
-              (VPS) em que o sistema funciona. País do datacenter:{" "}
-              <Pending>confirmar o país do datacenter</Pending>.
+              (VPS) em que o sistema funciona. Localização do datacenter:
+              Campinas, São Paulo, Brasil.
             </li>
             <li>
-              Armazenamento externo das cópias de segurança: o sistema possui
-              rotina de cópia criptografada com envio ao Google Drive, mas a
-              operação efetiva em produção{" "}
-              <Pending>
-                confirmar se a rotina está ativa e qual serviço e conta de
-                destino serão usados
-              </Pending>
-              .
+              Cópia de segurança externa (Google Drive): a decisão foi adiada.
+              Esta política não descreve esse envio como em operação e será
+              atualizada antes de qualquer adoção.
             </li>
           </ul>
+          <p>
+            Os serviços da Hostinger, da Meta e do Telegram são conhecidos e
+            utilizados pela Vasta. A Meta e o Telegram podem tratar dados fora
+            do Brasil, conforme as suas próprias políticas.
+          </p>
           <p>
             O sistema usa o n8n para orquestrar o fluxo do Telegram. O conteúdo
             transitório das mensagens do Telegram fica registrado nele por
@@ -242,13 +222,10 @@ export function PrivacyPolicyPage(): ReactNode {
             limpeza existente.
           </p>
           <p>
-            Transferência internacional:{" "}
-            <Pending>
-              confirmar se há transferência internacional de dados (Meta,
-              Telegram e outros) e as garantias aplicáveis, conforme o art. 33
-              da LGPD
-            </Pending>
-            .
+            Transferência internacional: a análise jurídica sobre eventual
+            transferência internacional de dados (Meta, Telegram, Hostinger e
+            outros) e as garantias aplicáveis, conforme o art. 33 da LGPD, ainda
+            não foi concluída. O uso desses serviços não substitui essa análise.
           </p>
         </section>
 
@@ -256,19 +233,21 @@ export function PrivacyPolicyPage(): ReactNode {
           <h2>7. Armazenamento e retenção</h2>
           <p>
             Os dados são guardados em banco de dados e em área privada do
-            servidor (VPS) contratado junto à Hostinger.
+            servidor (VPS) contratado junto à Hostinger, cujo datacenter fica em
+            Campinas, São Paulo, Brasil.
           </p>
           <p>
-            Prazos de retenção:{" "}
-            <Pending>
-              definir por quanto tempo cada categoria de dado é mantida e quando
-              é eliminada ou anonimizada
-            </Pending>
-            .
+            Não existem prazos internos de retenção definidos. A conservação dos
+            dados considera as finalidades do tratamento e eventuais obrigações
+            legais aplicáveis. A validação jurídica das obrigações de retenção e
+            a definição dos prazos internos ainda estão pendentes.
           </p>
           <p>
-            Cópias de segurança:{" "}
-            <Pending>confirmar prazo de guarda e local das cópias</Pending>.
+            Desligamento de pessoas: usuários desligados podem ser desativados,
+            o que impede o acesso, mas os dados continuam armazenados. A
+            exclusão definitiva não é automática e não está implementada
+            atualmente. A Vasta pretende excluir esses cadastros quando a lei
+            permitir e for tecnicamente possível.
           </p>
         </section>
 
@@ -288,9 +267,8 @@ export function PrivacyPolicyPage(): ReactNode {
             <li>Documentos em área privada, sem acesso público direto.</li>
           </ul>
           <p>
-            Cópias de segurança criptografadas estão implementadas no sistema,
-            mas a sua operação efetiva em produção{" "}
-            <Pending>confirmar antes de listá-las como medida adotada</Pending>.
+            O sistema possui rotina de cópia de segurança criptografada, mas ela
+            não é apresentada aqui como medida em operação.
           </p>
           <p>
             Nenhum sistema é totalmente imune a falhas; em caso de incidente de
@@ -321,15 +299,24 @@ export function PrivacyPolicyPage(): ReactNode {
           <h2>10. Contato sobre privacidade</h2>
           <ul>
             <li>
-              Encarregado pelo tratamento de dados (DPO):{" "}
-              <Pending>nome ou setor responsável</Pending>
+              Responsável indicada pela Vasta para o contato sobre privacidade:
+              Rizola. Esta indicação não designa formalmente a função de
+              encarregada pelo tratamento de dados (DPO).
             </li>
             <li>
-              E-mail para solicitações:{" "}
-              <Pending>e-mail de privacidade da empresa</Pending>
+              WhatsApp comercial para solicitações relacionadas à proteção de
+              dados pessoais (privacidade): +55 31 9886-1100 —{" "}
+              <a
+                href="https://wa.me/553198861100"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                abrir conversa no WhatsApp
+              </a>
             </li>
             <li>
-              Prazo de resposta: <Pending>prazo interno de atendimento</Pending>
+              Prazo de resposta: as solicitações serão atendidas observando os
+              prazos previstos na legislação aplicável.
             </li>
           </ul>
           <p>
@@ -341,8 +328,10 @@ export function PrivacyPolicyPage(): ReactNode {
         <section>
           <h2>11. Alterações desta política</h2>
           <p>
-            Esta política pode ser atualizada. A data da última atualização
-            consta no início da página.
+            Esta política pode ser atualizada, em especial quando forem
+            concluídas a validação jurídica das bases legais, das obrigações de
+            retenção e da transferência internacional de dados. A data de
+            vigência consta no início da página.
           </p>
         </section>
       </article>

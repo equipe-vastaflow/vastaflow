@@ -291,15 +291,16 @@ describe('rota publica /privacidade', () => {
     });
   });
 
-  it('cobre os temas exigidos e sinaliza o que falta confirmar', () => {
+  it('cobre os temas exigidos e nao expoe marcadores internos nem aviso de revisao', () => {
     mockApi({});
     renderAt('/privacidade');
     for (const name of [/Quem somos/, /Dados pessoais tratados/, /WhatsApp e Meta/, /Segurança/, /Seus direitos/, /Contato sobre privacidade/]) {
       expect(screen.getByRole('heading', { name })).toBeInTheDocument();
     }
     expect(screen.getByText(/Vasta Participações Empreendimentos e Agropecuária Ltda\./)).toBeInTheDocument();
-    expect(document.querySelectorAll('[data-pending="true"]').length).toBeGreaterThan(0);
-    expect(screen.getByRole('note')).toHaveTextContent('não é definitivo');
+    expect(document.querySelectorAll('[data-pending="true"]')).toHaveLength(0);
+    expect(screen.queryByRole('note')).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/A CONFIRMAR|Versão em revisão|não é definitivo/);
   });
 });
 
@@ -316,5 +317,102 @@ describe('/privacidade: descricao fiel ao estado operacional', () => {
     expect(text).toMatch(/Conexão protegida por HTTPS/);
     const medidas = screen.getByRole('heading', { name: /Segurança/ }).parentElement?.querySelector('ul');
     expect(medidas?.textContent).not.toMatch(/Cópias de segurança/);
+  });
+});
+
+describe('/privacidade: dados confirmados pela empresa', () => {
+  it('traz CNPJ, endereco, titulares, vigencia aprovada e responsavel pelo contato', () => {
+    mockApi({});
+    renderAt('/privacidade');
+    const text = document.body.textContent ?? '';
+    expect(text).toContain('07.131.218/0001-24');
+    expect(text).toContain('Estrada Municipal de Morada Nova de Minas, Zona Rural');
+    expect(text).toContain('CEP 35.628-000');
+    expect(text).toMatch(/sócios e funcionários/);
+    expect(text).toMatch(/clientes, fornecedores e colaboradores/);
+    expect(text).toMatch(/Data de vigência: 28\/10\/2026/);
+    expect(text).toMatch(/aprovado em 28\/10\/2026 por Rizola/);
+    expect(text).not.toMatch(/vigência proposta|condicionada/);
+    expect(text).toMatch(/Responsável indicada pela Vasta para o contato sobre privacidade: Rizola/);
+  });
+
+  it('nao inventa e-mail e declara, sem marcador, as tres pendencias juridicas abertas', () => {
+    mockApi({});
+    renderAt('/privacidade');
+    const text = document.body.textContent ?? '';
+    expect(text).not.toMatch(/@/);
+    expect(text).toMatch(/base legal específica de cada finalidade ainda está em validação jurídica/);
+    expect(text).toMatch(/validação jurídica das obrigações de retenção e a definição dos prazos internos ainda estão pendentes/);
+    expect(text).toMatch(/análise jurídica sobre eventual transferência internacional[\s\S]{0,200}ainda não foi concluída/);
+    expect(text).not.toMatch(/A CONFIRMAR/);
+  });
+
+  it('nao apresenta exclusao automatica, backup externo nem resposta do WhatsApp como operacionais', () => {
+    mockApi({});
+    renderAt('/privacidade');
+    const text = document.body.textContent ?? '';
+    expect(text).toMatch(/A exclusão definitiva não é automática e não está implementada atualmente/);
+    expect(text).toMatch(/Google Drive\): a decisão foi adiada/);
+    expect(text).toMatch(/não é apresentada aqui como medida em operação/);
+    expect(text).toMatch(/ainda não foram comprovadas em operação/);
+  });
+});
+
+describe('/privacidade: canal de contato por WhatsApp', () => {
+  it('mostra o numero e o link wa.me, identificados como canal de protecao de dados', () => {
+    mockApi({});
+    renderAt('/privacidade');
+    const section = screen.getByRole('heading', { name: /Contato sobre privacidade/ }).parentElement;
+    expect(section).toHaveTextContent('+55 31 9886-1100');
+    expect(section).toHaveTextContent(/solicitações relacionadas à proteção de dados pessoais/);
+    const link = screen.getByRole('link', { name: 'abrir conversa no WhatsApp' });
+    expect(link).toHaveAttribute('href', 'https://wa.me/553198861100');
+    expect(link).toHaveAttribute('rel', expect.stringContaining('noopener'));
+    expect(link).toHaveAttribute('rel', expect.stringContaining('noreferrer'));
+  });
+
+  it('contato: sem marcadores, sem DPO formal e sem prazo fixo inventado', () => {
+    mockApi({});
+    renderAt('/privacidade');
+    const section = screen.getByRole('heading', { name: /Contato sobre privacidade/ }).parentElement;
+    expect(section?.querySelectorAll('[data-pending="true"]')).toHaveLength(0);
+    expect(section).toHaveTextContent(/não designa formalmente a função de encarregada/);
+    expect(section).toHaveTextContent(/prazos previstos na legislação aplicável/);
+    expect(section?.textContent).not.toMatch(/[0-9]+ *(dias|horas)/);
+  });
+});
+
+describe('/privacidade: redacoes provisorias', () => {
+  it('retencao, desligados, terceiros e transferencia usam a redacao verdadeira', () => {
+    mockApi({});
+    renderAt('/privacidade');
+    const text = document.body.textContent ?? '';
+    expect(text).toMatch(/Não existem prazos internos de retenção definidos/);
+    expect(text).toMatch(/finalidades do tratamento e eventuais obrigações legais aplicáveis/);
+    expect(text).toMatch(/usuários desligados podem ser desativados/);
+    expect(text).toMatch(/conforme o conteúdo inserido pelos usuários/);
+    expect(text).toMatch(/A Meta e o Telegram podem tratar dados fora do Brasil/);
+    expect(text).toMatch(/ainda não foi concluída/);
+  });
+
+  it('nao atribui base legal nem apresenta as pendencias juridicas como resolvidas', () => {
+    mockApi({});
+    renderAt('/privacidade');
+    const text = document.body.textContent ?? '';
+    expect(text).not.toMatch(/legítimo interesse|execução de contrato|consentimento do titular como base|Estados Unidos|Lituânia/i);
+    expect(text).toMatch(/não é apresentada nesta versão/);
+    expect(text).toMatch(/quando forem concluídas a validação jurídica das bases legais/);
+  });
+});
+
+describe('/privacidade: datacenter confirmado', () => {
+  it('informa Campinas/SP/Brasil na hospedagem e no armazenamento, sem marcador', () => {
+    mockApi({});
+    renderAt('/privacidade');
+    const text = document.body.textContent ?? '';
+    expect(text).toMatch(/Localização do datacenter: Campinas, São Paulo, Brasil/);
+    expect(text).toMatch(/datacenter fica em Campinas, São Paulo, Brasil/);
+    expect(text).not.toMatch(/País do datacenter/);
+    expect(document.querySelectorAll('[data-pending="true"]')).toHaveLength(0);
   });
 });
