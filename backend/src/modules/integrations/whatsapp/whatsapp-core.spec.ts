@@ -306,6 +306,28 @@ describe('WhatsappApiClient', () => {
     expect(`${(rede as Error).message}`).not.toMatch(/EAAG|graph/);
   });
 
+  it.each([
+    ['codigo numerico', '{"error":{"message":"SEGREDO-META","code":190,"fbtrace_id":"ABC"}}', 190],
+    ['codigo como texto', '{"error":{"code":"190"}}', undefined],
+    ['codigo fracionado', '{"error":{"code":1.5}}', undefined],
+    ['codigo negativo', '{"error":{"code":-1}}', undefined],
+    ['sem error', '{"outro":1}', undefined],
+    ['corpo nao e JSON', '<html>SEGREDO-META</html>', undefined],
+    ['corpo vazio', '', undefined],
+  ])('HTTP 400 (%s): guarda so o status e o codigo inteiro', async (_nome, corpo, codigo) => {
+    fetchMock.mockResolvedValue(new Response(corpo, { status: 400 }));
+    const erro = (await new WhatsappApiClient(config())
+      .sendText('5511999990000', 'x')
+      .catch((e: unknown) => e)) as WhatsappApiError;
+
+    expect(erro.kind).toBe('http');
+    expect(erro.httpStatus).toBe(400);
+    expect(erro.graphCode).toBe(codigo);
+    expect(`${erro.message} ${JSON.stringify(erro)}`).not.toMatch(
+      /SEGREDO-META|fbtrace|ABC|EAAG|graph\.facebook|5511999990000/,
+    );
+  });
+
   it('redirect nao e seguido', async () => {
     fetchMock.mockResolvedValue(
       new Response(null, { status: 302, headers: { Location: 'http://evil.example' } }),

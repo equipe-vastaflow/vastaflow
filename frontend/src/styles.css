@@ -792,3 +792,74 @@ label.button:has(+ input:disabled) {
   opacity: 0.6;
   cursor: not-allowed;
 }
+
+/* Politica de Privacidade (publica) */
+.policy-page {
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.policy-card {
+  width: 100%;
+  max-width: 820px;
+  height: fit-content;
+  padding: 1.25rem;
+}
+
+.policy-header {
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 1rem;
+  padding-bottom: 0.75rem;
+}
+
+.policy-header p {
+  margin: 0;
+}
+
+.policy-card h2 {
+  margin: 1.5rem 0 0.5rem;
+  font-size: 1.15rem;
+}
+
+.policy-card h3 {
+  margin: 1rem 0 0.35rem;
+  font-size: 1rem;
+}
+
+.policy-card p,
+.policy-card li {
+  overflow-wrap: anywhere;
+}
+
+.policy-card code {
+  background: var(--bg);
+  border-radius: 4px;
+  padding: 0.05rem 0.3rem;
+}
+
+.policy-pending {
+  background: var(--warn-text);
+  color: var(--surface);
+  border-radius: 4px;
+  padding: 0.05rem 0.3rem;
+  font-weight: 600;
+}
+
+.policy-draft {
+  background: var(--danger-bg);
+  color: var(--danger-text);
+  border-radius: 8px;
+  padding: 0.6rem 0.8rem;
+}
+
+@media (min-width: 720px) {
+  .policy-page {
+    padding: 2rem 1rem;
+  }
+
+  .policy-card {
+    padding: 2rem 2.25rem;
+  }
+}

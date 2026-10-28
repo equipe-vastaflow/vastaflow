@@ -12,6 +12,7 @@ import { FinanceEntryFormPage } from './pages/finance/FinanceEntryFormPage';
 import { FinancePage } from './pages/finance/FinancePage';
 import { FinanceReportsPage } from './pages/finance/FinanceReportsPage';
 import { LoginPage } from './pages/LoginPage';
+import { PrivacyPolicyPage } from './pages/PrivacyPolicyPage';
 import { ProfilePage } from './pages/profile/ProfilePage';
 import { NotificationsPage } from './pages/notifications/NotificationsPage';
 import { SettingsPage } from './pages/settings/SettingsPage';
@@ -27,6 +28,9 @@ export function App(): ReactNode {
     <NotificationsProvider>
       <Routes>
       <Route path="/login" element={<LoginPage />} />
+
+      {/* Publica, fora do `ProtectedRoute`: exigida pela Meta (app do WhatsApp). */}
+      <Route path="/privacidade" element={<PrivacyPolicyPage />} />
 
       <Route element={<ProtectedRoute />}>
         <Route path="/dashboard" element={<DashboardPage />} />

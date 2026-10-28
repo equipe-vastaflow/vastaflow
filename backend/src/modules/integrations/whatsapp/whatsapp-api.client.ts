@@ -15,6 +15,8 @@ export class WhatsappApiError extends Error {
   constructor(
     readonly kind: WhatsappFailure,
     readonly httpStatus?: number,
+    /** `error.code` da Graph API (numero inteiro). Nunca a mensagem nem outro campo da resposta. */
+    readonly graphCode?: number,
   ) {
     super(`WhatsApp falhou: ${kind}${httpStatus === undefined ? '' : ` ${String(httpStatus)}`}`);
     this.name = 'WhatsappApiError';
@@ -82,7 +84,24 @@ export class WhatsappApiClient implements WhatsappSender {
       throw new WhatsappApiError('redirect', response.status);
     }
     if (!response.ok) {
-      throw new WhatsappApiError('http', response.status);
+      throw new WhatsappApiError('http', response.status, await readGraphErrorCode(response));
     }
+  }
+}
+
+/**
+ * Extrai SO o `error.code` (inteiro) do corpo de erro da Graph API, para diagnostico. O resto da
+ * resposta (mensagem, `fbtrace_id`, detalhes) e descartado. Corpo ilegivel ou fora do formato: `undefined`.
+ */
+async function readGraphErrorCode(response: Response): Promise<number | undefined> {
+  try {
+    const body: unknown = await response.json();
+    const error =
+      typeof body === 'object' && body !== null ? (body as { error?: unknown }).error : null;
+    const code =
+      typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : null;
+    return typeof code === 'number' && Number.isSafeInteger(code) && code >= 0 ? code : undefined;
+  } catch {
+    return undefined;
   }
 }

@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { AuditAction } from '../../audit/audit-action.enum';
 import type { AuditService } from '../../audit/audit.service';
 import type { AuthenticatedUser } from '../../auth/auth.types';
@@ -298,6 +299,37 @@ describe('WhatsappMessageProcessor', () => {
       m.sendText.mockRejectedValue(new WhatsappApiError('http', 500));
 
       expect(await m.processor.process(msg())).toBe('EXECUTED');
+    });
+
+    it('envio falha: o log traz so categoria, status e codigo numerico da Graph API', async () => {
+      const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      try {
+        const m = montar();
+        m.sendText.mockRejectedValue(
+          Object.assign(new WhatsappApiError('http', 401, 190), { message: 'SEGREDO-EAAG' }),
+        );
+        await m.processor.process(msg({ text: '/ajuda CODIGO-SECRETO' }));
+
+        const linhas = warn.mock.calls.map(([texto]) => String(texto));
+        expect(linhas).toContain('WhatsApp: resposta nao enviada (http, status 401, codigo 190)');
+        expect(linhas.join(' ')).not.toMatch(/SEGREDO|EAAG|5511999990000|CODIGO-SECRETO|\/ajuda/);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('envio falha sem codigo da Meta: o log mostra so a categoria e o status', async () => {
+      const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      try {
+        const m = montar();
+        m.sendText.mockRejectedValue(new WhatsappApiError('http', 500));
+        await m.processor.process(msg());
+        expect(warn.mock.calls.map(([t]) => String(t))).toContain(
+          'WhatsApp: resposta nao enviada (http, status 500)',
+        );
+      } finally {
+        warn.mockRestore();
+      }
     });
 
     it('banco fora ao reservar: FAILED, nada executa', async () => {

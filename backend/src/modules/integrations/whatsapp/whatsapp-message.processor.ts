@@ -218,10 +218,27 @@ export class WhatsappMessageProcessor {
     try {
       await this.sender.sendText(to, text);
     } catch (error) {
-      const kind = error instanceof WhatsappApiError ? error.kind : 'desconhecido';
-      this.logger.warn(`WhatsApp: resposta nao enviada (${kind})`);
+      this.logger.warn(`WhatsApp: resposta nao enviada (${describeSendFailure(error)})`);
     }
   }
+}
+
+/**
+ * Motivo do envio que falhou, so com valores numericos e a categoria fixa: `http, status 400,
+ * codigo 190`. Nunca mensagem da Meta, URL, token, destinatario ou texto.
+ */
+function describeSendFailure(error: unknown): string {
+  if (!(error instanceof WhatsappApiError)) {
+    return 'desconhecido';
+  }
+  const parts: string[] = [error.kind];
+  if (error.httpStatus !== undefined) {
+    parts.push(`status ${String(error.httpStatus)}`);
+  }
+  if (error.graphCode !== undefined) {
+    parts.push(`codigo ${String(error.graphCode)}`);
+  }
+  return parts.join(', ');
 }
 
 function linkReply(outcome: LinkConfirmationOutcome): string {

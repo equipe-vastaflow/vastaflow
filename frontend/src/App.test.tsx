@@ -271,3 +271,50 @@ describe('formatRemaining', () => {
     expect(formatRemaining(ms)).toBe(expected);
   });
 });
+
+describe('rota publica /privacidade', () => {
+  it('abre sem login, sem chamar a API e sem redirecionar', () => {
+    const fetchMock = mockApi({});
+    renderAt('/privacidade');
+    expect(screen.getByRole('heading', { name: 'Política de Privacidade', level: 1 })).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText('Senha')).not.toBeInTheDocument();
+  });
+
+  it('abre mesmo com sessao expirada guardada', async () => {
+    mockApi({ 'GET /auth/me': { status: 401 } });
+    storeSession(Date.now() - 1000);
+    renderAt('/privacidade');
+    expect(screen.getByRole('heading', { name: 'Política de Privacidade', level: 1 })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByLabelText('Senha')).not.toBeInTheDocument();
+    });
+  });
+
+  it('cobre os temas exigidos e sinaliza o que falta confirmar', () => {
+    mockApi({});
+    renderAt('/privacidade');
+    for (const name of [/Quem somos/, /Dados pessoais tratados/, /WhatsApp e Meta/, /Segurança/, /Seus direitos/, /Contato sobre privacidade/]) {
+      expect(screen.getByRole('heading', { name })).toBeInTheDocument();
+    }
+    expect(screen.getByText(/Vasta Participações Empreendimentos e Agropecuária Ltda\./)).toBeInTheDocument();
+    expect(document.querySelectorAll('[data-pending="true"]').length).toBeGreaterThan(0);
+    expect(screen.getByRole('note')).toHaveTextContent('não é definitivo');
+  });
+});
+
+describe('/privacidade: descricao fiel ao estado operacional', () => {
+  it('nao apresenta backup nem respostas do WhatsApp como comprovados e cita Hostinger, wa_id e n8n', () => {
+    mockApi({});
+    renderAt('/privacidade');
+    const text = document.body.textContent ?? '';
+    expect(text).toMatch(/Hostinger, como provedora terceirizada/);
+    expect(text).toMatch(/ainda não foram comprovadas em operação/);
+    expect(text).toMatch(/wa_id/);
+    expect(text).toMatch(/por alguns minutos antes de ser apagado/);
+    expect(text).not.toMatch(/removido em segundos/);
+    expect(text).toMatch(/Conexão protegida por HTTPS/);
+    const medidas = screen.getByRole('heading', { name: /Segurança/ }).parentElement?.querySelector('ul');
+    expect(medidas?.textContent).not.toMatch(/Cópias de segurança/);
+  });
+});
