@@ -11,12 +11,20 @@ import { WHATSAPP_TEXT_MAX } from './whatsapp-payload';
 export type WhatsappFailure =
   'not-configured' | 'invalid-request' | 'timeout' | 'network' | 'redirect' | 'http';
 
+/** Valores de `error.type` aceitos no log. Texto livre da Meta nunca entra: o que nao estiver aqui vira `outro`. */
+export const GRAPH_ERROR_TYPES = ['OAuthException', 'GraphMethodException'] as const;
+export type GraphErrorType = (typeof GRAPH_ERROR_TYPES)[number] | 'outro';
+
 export class WhatsappApiError extends Error {
   constructor(
     readonly kind: WhatsappFailure,
     readonly httpStatus?: number,
     /** `error.code` da Graph API (numero inteiro). Nunca a mensagem nem outro campo da resposta. */
     readonly graphCode?: number,
+    /** `error.error_subcode` (numero inteiro, opcional na Graph API). */
+    readonly graphSubcode?: number,
+    /** `error.type` so se estiver na lista fechada `GRAPH_ERROR_TYPES`; qualquer outro valor vira `outro`. */
+    readonly graphType?: GraphErrorType,
   ) {
     super(`WhatsApp falhou: ${kind}${httpStatus === undefined ? '' : ` ${String(httpStatus)}`}`);
     this.name = 'WhatsappApiError';
@@ -84,24 +92,39 @@ export class WhatsappApiClient implements WhatsappSender {
       throw new WhatsappApiError('redirect', response.status);
     }
     if (!response.ok) {
-      throw new WhatsappApiError('http', response.status, await readGraphErrorCode(response));
+      const detail = await readGraphError(response);
+      throw new WhatsappApiError('http', response.status, detail.code, detail.subcode, detail.type);
     }
   }
 }
 
+function safeInteger(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+}
+
 /**
- * Extrai SO o `error.code` (inteiro) do corpo de erro da Graph API, para diagnostico. O resto da
- * resposta (mensagem, `fbtrace_id`, detalhes) e descartado. Corpo ilegivel ou fora do formato: `undefined`.
+ * Extrai do corpo de erro da Graph API SO `error.code` e `error.error_subcode` (inteiros) e `error.type`
+ * (lista fechada), para diagnostico. O resto (mensagem, `error_data`, `fbtrace_id`) e descartado. Corpo
+ * ilegivel ou fora do formato: campos `undefined`.
  */
-async function readGraphErrorCode(response: Response): Promise<number | undefined> {
+async function readGraphError(
+  response: Response,
+): Promise<{ code?: number; subcode?: number; type?: GraphErrorType }> {
   try {
     const body: unknown = await response.json();
     const error =
       typeof body === 'object' && body !== null ? (body as { error?: unknown }).error : null;
-    const code =
-      typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : null;
-    return typeof code === 'number' && Number.isSafeInteger(code) && code >= 0 ? code : undefined;
+    if (typeof error !== 'object' || error === null) {
+      return {};
+    }
+    const { code, error_subcode: subcode, type } = error as Record<string, unknown>;
+    const known = GRAPH_ERROR_TYPES.find((t) => t === type);
+    return {
+      code: safeInteger(code),
+      subcode: safeInteger(subcode),
+      type: typeof type === 'string' ? (known ?? 'outro') : undefined,
+    };
   } catch {
-    return undefined;
+    return {};
   }
 }

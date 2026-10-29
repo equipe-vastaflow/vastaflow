@@ -225,7 +225,7 @@ export class WhatsappMessageProcessor {
 
 /**
  * Motivo do envio que falhou, so com valores numericos e a categoria fixa: `http, status 400,
- * codigo 190`. Nunca mensagem da Meta, URL, token, destinatario ou texto.
+ * codigo 10, subcodigo 33, tipo OAuthException`. Nunca mensagem da Meta, URL, token, destinatario ou texto.
  */
 function describeSendFailure(error: unknown): string {
   if (!(error instanceof WhatsappApiError)) {
@@ -237,6 +237,12 @@ function describeSendFailure(error: unknown): string {
   }
   if (error.graphCode !== undefined) {
     parts.push(`codigo ${String(error.graphCode)}`);
+  }
+  if (error.graphSubcode !== undefined) {
+    parts.push(`subcodigo ${String(error.graphSubcode)}`);
+  }
+  if (error.graphType !== undefined) {
+    parts.push(`tipo ${error.graphType}`);
   }
   return parts.join(', ');
 }

@@ -318,6 +318,27 @@ describe('WhatsappMessageProcessor', () => {
       }
     });
 
+    it('envio falha: o log inclui subcodigo e tipo, sem dados pessoais', async () => {
+      const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      try {
+        const m = montar();
+        m.sendText.mockRejectedValue(
+          Object.assign(new WhatsappApiError('http', 400, 10, 2018, 'OAuthException'), {
+            message: 'SEGREDO-EAAG',
+          }),
+        );
+        await m.processor.process(msg({ text: '/ajuda CODIGO-SECRETO' }));
+
+        const linhas = warn.mock.calls.map(([texto]) => String(texto));
+        expect(linhas).toContain(
+          'WhatsApp: resposta nao enviada (http, status 400, codigo 10, subcodigo 2018, tipo OAuthException)',
+        );
+        expect(linhas.join(' ')).not.toMatch(/SEGREDO|EAAG|5511999990000|CODIGO-SECRETO|\/ajuda/);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
     it('envio falha sem codigo da Meta: o log mostra so a categoria e o status', async () => {
       const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
       try {

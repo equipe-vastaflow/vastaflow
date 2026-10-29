@@ -328,6 +328,70 @@ describe('WhatsappApiClient', () => {
     );
   });
 
+  it.each([
+    [
+      'codigo, subcodigo e tipo conhecido',
+      '{"error":{"message":"SEGREDO-META","type":"OAuthException","code":10,"error_subcode":2018,"fbtrace_id":"ABC"}}',
+      { code: 10, subcode: 2018, type: 'OAuthException' },
+    ],
+    [
+      'sem subcodigo',
+      '{"error":{"type":"OAuthException","code":10}}',
+      { code: 10, subcode: undefined, type: 'OAuthException' },
+    ],
+    [
+      'subcodigo como texto',
+      '{"error":{"code":10,"error_subcode":"2018"}}',
+      { code: 10, subcode: undefined, type: undefined },
+    ],
+    [
+      'subcodigo fracionado',
+      '{"error":{"code":10,"error_subcode":1.5}}',
+      { code: 10, subcode: undefined, type: undefined },
+    ],
+    [
+      'subcodigo negativo',
+      '{"error":{"code":10,"error_subcode":-1}}',
+      { code: 10, subcode: undefined, type: undefined },
+    ],
+    [
+      'subcodigo gigante',
+      '{"error":{"code":10,"error_subcode":1e300}}',
+      { code: 10, subcode: undefined, type: undefined },
+    ],
+    [
+      'tipo desconhecido vira outro (texto livre nao passa)',
+      '{"error":{"code":10,"type":"SEGREDO-META 5511999990000"}}',
+      { code: 10, subcode: undefined, type: 'outro' },
+    ],
+    [
+      'tipo nao e texto',
+      '{"error":{"code":10,"type":{"a":"SEGREDO-META"}}}',
+      { code: 10, subcode: undefined, type: undefined },
+    ],
+    [
+      'error nao e objeto',
+      '{"error":"SEGREDO-META"}',
+      { code: undefined, subcode: undefined, type: undefined },
+    ],
+  ])(
+    'HTTP 400 (%s): guarda so inteiros e tipo da lista fechada',
+    async (_nome, corpo, esperado) => {
+      fetchMock.mockResolvedValue(new Response(corpo, { status: 400 }));
+      const erro = (await new WhatsappApiClient(config())
+        .sendText('5511999990000', 'x')
+        .catch((e: unknown) => e)) as WhatsappApiError;
+
+      expect(erro.httpStatus).toBe(400);
+      expect(erro.graphCode).toBe(esperado.code);
+      expect(erro.graphSubcode).toBe(esperado.subcode);
+      expect(erro.graphType).toBe(esperado.type);
+      expect(`${erro.message} ${JSON.stringify(erro)}`).not.toMatch(
+        /SEGREDO-META|fbtrace|ABC|EAAG|graph\.facebook|5511999990000/,
+      );
+    },
+  );
+
   it('redirect nao e seguido', async () => {
     fetchMock.mockResolvedValue(
       new Response(null, { status: 302, headers: { Location: 'http://evil.example' } }),
