@@ -13,10 +13,19 @@ import {
   hashText,
   parseNfseArgs,
   summarizeInput,
+  todayInBrasilia,
+  validateTomadorEndereco,
   type NfseEmissionInput,
 } from './nfse-dps';
 import { NfseEmission, NfseEmissionStatus } from './nfse-emission.entity';
 import type { NfseEmissionsRepository } from './nfse-emissions.repository';
+import {
+  buildFiscalSnapshot,
+  selectProfile,
+  type NfseFiscalSnapshot,
+  type ParsedProfiles,
+} from './nfse-fiscal-profile';
+import { loadFiscalProfiles } from './nfse-fiscal-profile.loader';
 import { resolveNfseSettings, type NfseEnv, type NfseSettings } from './nfse-settings';
 import { signDps } from './nfse-signer';
 import { buildDpsXml } from './nfse-xml.builder';
@@ -69,7 +78,18 @@ export interface NfseServiceOptions {
     certificate: NfseCertificate | null,
   ) => NfseTransport;
   readonly loadCertificate?: (settings: NfseSettings) => NfseCertificate;
+  /** Leitura dos perfis fiscais (testes injetam um falso; em producao e o arquivo configurado). */
+  readonly loadProfiles?: (settings: NfseSettings) => ParsedProfiles;
   readonly inlineWaitMs?: number;
+}
+
+/**
+ * Dados do pedido que o texto do comando ainda NAO carrega. O comando Telegram nao os informa nesta versao;
+ * sem eles, uma emissao que depende deles (endereco do tomador) e recusada.
+ */
+export interface NfseRequestExtras {
+  /** Endereco nacional do tomador; validado por validateTomadorEndereco. */
+  readonly tomadorEndereco?: unknown;
 }
 
 export type RequestResult =
@@ -162,6 +182,7 @@ export class NfseService {
   private readonly randomCode: () => string;
   private readonly transportFactory: NonNullable<NfseServiceOptions['transport']>;
   private readonly certificateLoader: NonNullable<NfseServiceOptions['loadCertificate']>;
+  private readonly profileLoader: NonNullable<NfseServiceOptions['loadProfiles']>;
   private readonly inlineWaitMs: number;
   /** Certificado aberto uma vez por processo (ver `docs/nfse.md`: rotacao exige reiniciar o backend). */
   private certificateCache: { readonly key: string; readonly certificate: NfseCertificate } | null =
@@ -191,6 +212,12 @@ export class NfseService {
       options.loadCertificate ??
       ((settings): NfseCertificate =>
         loadNfseCertificate(settings.certPfxPath, settings.certPfxPassword, this.now()));
+    this.profileLoader =
+      options.loadProfiles ??
+      ((settings): ParsedProfiles =>
+        settings.perfisFiscaisPath === null
+          ? { perfis: [], problems: ['sem arquivo de perfis fiscais'] }
+          : loadFiscalProfiles(settings.perfisFiscaisPath));
     this.inlineWaitMs = options.inlineWaitMs ?? INLINE_WAIT_MS;
   }
 
@@ -218,6 +245,7 @@ export class NfseService {
       'NFSE_DPS_SERIE',
       'NFSE_VALOR_MAXIMO',
       'NFSE_CONFIRMATION_TTL_MINUTES',
+      'NFSE_PERFIS_FISCAIS_PATH',
     ] as const) {
       env[key] = this.config.get<unknown>(key);
     }
@@ -229,7 +257,82 @@ export class NfseService {
   // 1. Pedido
   // ---------------------------------------------------------------------------------------------
 
-  async request(usuarioId: string, canal: string, rawArgs: string): Promise<RequestResult> {
+  /**
+   * Nao optante: resolve o PERFIL FISCAL APROVADO do servico e o instantaneo desta emissao (codigos, IBS/CBS,
+   * retencoes e total de tributos). Sem perfil completo, valido e aprovado nao ha emissao: o pedido e recusado.
+   * ME/EPP e MEI seguem sem perfil, como antes.
+   */
+  private resolveFiscalInput(
+    settings: NfseSettings,
+    input: NfseEmissionInput,
+    extras: NfseRequestExtras,
+  ):
+    | { readonly ok: true; readonly input: NfseEmissionInput }
+    | { readonly ok: false; readonly errors: readonly string[] } {
+    if (settings.opSimpNac !== 1) {
+      return { ok: true, input };
+    }
+    let loaded: ParsedProfiles;
+    try {
+      loaded = this.profileLoader(settings);
+    } catch {
+      return { ok: false, errors: ['perfis fiscais indisponiveis'] };
+    }
+    // Arquivo com qualquer problema NAO e usado (fail-closed): rascunho malformado nao libera nada.
+    if (loaded.problems.length > 0) {
+      return { ok: false, errors: ['perfis fiscais indisponiveis ou invalidos'] };
+    }
+    const selected = selectProfile(loaded.perfis, input.servico, todayInBrasilia(this.now()));
+    if (!selected.ok) {
+      return { ok: false, errors: [selected.error] };
+    }
+    const snapshot = buildFiscalSnapshot(selected.profile, input);
+    if (!snapshot.ok) {
+      return { ok: false, errors: snapshot.errors };
+    }
+    let tomadorEndereco = null;
+    if (snapshot.snapshot.exigeEnderecoTomador) {
+      if (extras.tomadorEndereco === undefined) {
+        return { ok: false, errors: ['endereco do tomador: obrigatorio para este servico'] };
+      }
+      const address = validateTomadorEndereco(extras.tomadorEndereco);
+      if (!address.ok) {
+        return { ok: false, errors: address.errors };
+      }
+      tomadorEndereco = address.endereco;
+    }
+    return { ok: true, input: { ...input, tomadorEndereco, fiscal: snapshot.snapshot } };
+  }
+
+  /** O perfil gravado no pedido ainda e o vigente, aprovado e integro? (revogacao e alteracao valem na hora) */
+  private fiscalStillValid(
+    settings: NfseSettings,
+    input: NfseEmissionInput,
+    fiscal: NfseFiscalSnapshot,
+  ): boolean {
+    try {
+      const loaded = this.profileLoader(settings);
+      if (loaded.problems.length > 0) {
+        return false;
+      }
+      const selected = selectProfile(loaded.perfis, input.servico, todayInBrasilia(this.now()));
+      return (
+        selected.ok &&
+        selected.profile.id === fiscal.perfil.id &&
+        selected.profile.versao === fiscal.perfil.versao &&
+        selected.profile.aprovacao.conteudoSha256 === fiscal.perfil.conteudoSha256
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  async request(
+    usuarioId: string,
+    canal: string,
+    rawArgs: string,
+    extras: NfseRequestExtras = {},
+  ): Promise<RequestResult> {
     const settings = this.settings();
     if (typeof settings === 'string') {
       return { kind: settings };
@@ -238,14 +341,20 @@ export class NfseService {
     if (!parsed.ok) {
       return { kind: 'invalid', errors: [parsed.error] };
     }
-    const built = buildNfseInput(parsed.fields, settings, this.now());
-    if (!built.ok) {
-      return { kind: 'invalid', errors: built.errors };
+    const base = buildNfseInput(parsed.fields, settings, this.now());
+    if (!base.ok) {
+      return { kind: 'invalid', errors: base.errors };
     }
+    const fiscal = this.resolveFiscalInput(settings, base.input, extras);
+    if (!fiscal.ok) {
+      return { kind: 'invalid', errors: fiscal.errors };
+    }
+    const built = { ok: true as const, input: fiscal.input };
     if (!this.requestAttempts.take(usuarioId).allowed) {
       return { kind: 'invalid', errors: ['muitos pedidos em pouco tempo; aguarde um minuto'] };
     }
 
+    const layout = layoutForAmbiente(settings.ambiente).id;
     const code = this.randomCode();
     const expiresAt = new Date(this.now().getTime() + settings.confirmationTtlMs);
     // Um pedido novo substitui o anterior ainda nao confirmado: so existe UM codigo valido por pessoa.
@@ -259,7 +368,7 @@ export class NfseService {
       confirmHash: this.confirmationHash(usuarioId, code),
       confirmExpiresAt: expiresAt,
       identify: (numero) => {
-        const dps = buildDpsXml(built.input, settings, numero, this.now());
+        const dps = buildDpsXml(built.input, settings, numero, this.now(), layout);
         return {
           dpsId: dps.dpsId,
           resumoHash: hashText(
@@ -270,8 +379,7 @@ export class NfseService {
     });
 
     // Falha de leiaute e defeito NOSSO: detectada ja no pedido, antes de a pessoa confirmar.
-    const dps = buildDpsXml(built.input, settings, row.numeroDps, this.now());
-    const layout = layoutForAmbiente(settings.ambiente).id;
+    const dps = buildDpsXml(built.input, settings, row.numeroDps, this.now(), layout);
     const xsd = await validateDpsXml(dps.xml, layout);
     if (!xsd.valid) {
       await this.repository.expire(row.id);
@@ -437,12 +545,18 @@ export class NfseService {
         });
       }
 
-      const dps = buildDpsXml(input, settings, row.numeroDps, this.now());
+      const layout = layoutForAmbiente(settings.ambiente).id;
+      // Revogar ou alterar o perfil depois do pedido vale na hora: o que foi confirmado deixa de ser emitivel.
+      if (input.fiscal != null && !this.fiscalStillValid(settings, input, input.fiscal)) {
+        return await finish(NfseEmissionStatus.NaoEnviada, {
+          erroCodigo: 'perfil_fiscal_indisponivel',
+        });
+      }
+      const dps = buildDpsXml(input, settings, row.numeroDps, this.now(), layout);
       if (dps.dpsId !== row.dpsId) {
         // A configuracao mudou depois do pedido: o que foi confirmado nao e mais o que seria emitido.
         return await finish(NfseEmissionStatus.NaoEnviada, { erroCodigo: 'configuracao_alterada' });
       }
-      const layout = layoutForAmbiente(settings.ambiente).id;
       if (!(await validateDpsXml(dps.xml, layout)).valid) {
         return await finish(NfseEmissionStatus.NaoEnviada, { erroCodigo: 'xsd_invalido' });
       }

@@ -52,9 +52,38 @@ describe('NFS-e - configuracao', () => {
     }
   });
 
-  it('nao optante do Simples (exige IBS/CBS, nao implementado) bloqueia a ativacao', () => {
+  it('nao optante do Simples sem o arquivo de perfis fiscais aprovados: bloqueia a ativacao', () => {
     const problems = validateNfseSettings({ ...VALID, NFSE_OPCAO_SIMPLES: '1' });
-    expect(problems.join(' ')).toMatch(/IBS\/CBS/);
+    expect(problems.join(' ')).toMatch(/NFSE_PERFIS_FISCAIS_PATH/);
+    expect(problems.join(' ')).toMatch(/sem perfil fiscal aprovado nao se emite/);
+  });
+
+  it('nao optante com o arquivo de perfis configurado: a ativacao e liberada (a aprovacao e conferida na emissao)', () => {
+    const env = {
+      ...VALID,
+      NFSE_OPCAO_SIMPLES: '1',
+      NFSE_PERFIS_FISCAIS_PATH: '/run/secrets/perfis.json',
+    };
+    expect(validateNfseSettings(env)).toEqual([]);
+    const result = resolveNfseSettings(env);
+    expect(result.ok && result.settings.perfisFiscaisPath).toBe('/run/secrets/perfis.json');
+    expect(result.ok && result.settings.opSimpNac).toBe(1);
+  });
+
+  it('o arquivo de perfis so vale para nao optante (nao e aceito com ME/EPP nem MEI)', () => {
+    for (const opcao of ['2', '3']) {
+      const problems = validateNfseSettings({
+        ...VALID,
+        NFSE_OPCAO_SIMPLES: opcao,
+        NFSE_PERFIS_FISCAIS_PATH: '/run/secrets/perfis.json',
+      });
+      expect(problems.join(' ')).toMatch(/so se aplica a empresa nao optante/);
+    }
+  });
+
+  it('ME/EPP: o resultado nao traz arquivo de perfis (comportamento anterior preservado)', () => {
+    const result = resolveNfseSettings(VALID);
+    expect(result.ok && result.settings.perfisFiscaisPath).toBeNull();
   });
 
   it('inscricao municipal e razao social respeitam os limites do leiaute', () => {

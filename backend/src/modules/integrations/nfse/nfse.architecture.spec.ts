@@ -141,4 +141,27 @@ describe('Arquitetura da NFS-e', () => {
       );
     },
   );
+
+  it('nenhum codigo fiscal (servico, NBS, CST, classificacao, operacao) esta embutido no codigo: so em perfil externo aprovado', () => {
+    for (const { arquivo, codigo } of NFSE) {
+      // Literais de 6 ou 9 digitos sao o formato de cTribNac, cClassTrib, cIndOp e cNBS. Em codigo de producao
+      // so haveria um se alguem fixasse um padrao tributario: a regra do projeto e nunca ter padrao.
+      expect({
+        arquivo,
+        literais: semComentarios(codigo).match(/['"]\d{6}['"]|['"]\d{9}['"]/g) ?? [],
+      }).toEqual({ arquivo, literais: [] });
+    }
+  });
+
+  it('o arquivo de perfis fiscais vem so da configuracao e nunca do repositorio', () => {
+    expect(readdirSync(__dirname).filter((nome) => /perfis?.*\.json$/i.test(nome))).toEqual([]);
+    const compose = readFileSync(join(REPO_ROOT, 'docker-compose.production.yml'), 'utf8');
+    expect(compose).toContain('NFSE_PERFIS_FISCAIS_PATH: ${NFSE_PERFIS_FISCAIS_PATH:-}');
+    // O caminho do arquivo so e lido na configuracao e no servico (mesma regra do certificado).
+    expect(fonte('nfse-settings.ts')).toContain('perfisFiscaisPath');
+  });
+
+  it('o comando do Telegram nao conhece perfis fiscais nem o endereco do tomador (esta etapa nao o altera)', () => {
+    expect(fonte('nfse.commands.ts')).not.toMatch(/perfil|fiscal|tomadorEndereco|Extras/i);
+  });
 });

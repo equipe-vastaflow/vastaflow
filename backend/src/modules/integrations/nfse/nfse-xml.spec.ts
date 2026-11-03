@@ -59,7 +59,7 @@ describe('NFS-e - identificador e data', () => {
 
 describe('NFS-e - DPS contra o esquema OFICIAL v1.01', () => {
   it('ME/EPP com tomador CPF: valida', async () => {
-    const { xml } = buildDpsXml(input(), SETTINGS, 7, NOW);
+    const { xml } = buildDpsXml(input(), SETTINGS, 7, NOW, 'producao-2026-02');
     expect(await validateDpsXml(xml, 'producao-2026-02')).toEqual({ valid: true, errors: [] });
   });
 
@@ -74,7 +74,7 @@ describe('NFS-e - DPS contra o esquema OFICIAL v1.01', () => {
     if (!built.ok) {
       throw new Error(built.errors.join(','));
     }
-    const { xml } = buildDpsXml(built.input, settings, 1, NOW);
+    const { xml } = buildDpsXml(built.input, settings, 1, NOW, 'producao-2026-02');
     expect(xml).toContain('<CNPJ>11222333000181</CNPJ><xNome>');
     expect(xml).toContain('<indTotTrib>0</indTotTrib>');
     expect(xml).toContain('<pAliq>2.50</pAliq>');
@@ -89,13 +89,17 @@ describe('NFS-e - DPS contra o esquema OFICIAL v1.01', () => {
       throw new Error(built.errors.join(','));
     }
     expect(
-      (await validateDpsXml(buildDpsXml(built.input, settings, 1, NOW).xml, 'producao-2026-02'))
-        .valid,
+      (
+        await validateDpsXml(
+          buildDpsXml(built.input, settings, 1, NOW, 'producao-2026-02').xml,
+          'producao-2026-02',
+        )
+      ).valid,
     ).toBe(true);
   });
 
   it('o numero e a serie saem sem zeros a esquerda onde o esquema pede, e o Id com zeros', () => {
-    const { xml } = buildDpsXml(input(), SETTINGS, 7, NOW);
+    const { xml } = buildDpsXml(input(), SETTINGS, 7, NOW, 'producao-2026-02');
     expect(xml).toContain('<serie>1</serie><nDPS>7</nDPS>');
     expect(xml).toContain('Id="DPS310620021122233300018100001000000000000007"');
   });
@@ -105,7 +109,7 @@ describe('NFS-e - DPS contra o esquema OFICIAL v1.01', () => {
       desc: '</xDescServ></cServ></serv><valores><vServPrest><vServ>0.01</vServ></vServPrest></valores><!-- &x; ]]>',
       nome: 'A</xNome><CPF>00000000000</CPF>"\'<b>',
     });
-    const { xml } = buildDpsXml(hostile, SETTINGS, 1, NOW);
+    const { xml } = buildDpsXml(hostile, SETTINGS, 1, NOW, 'producao-2026-02');
     expect(await validateDpsXml(xml, 'producao-2026-02')).toEqual({ valid: true, errors: [] });
     // O valor do servico continua o informado, e existe UM so elemento de cada.
     expect(xml.match(/<vServ>/g)).toHaveLength(1);
@@ -120,6 +124,7 @@ describe('NFS-e - DPS contra o esquema OFICIAL v1.01', () => {
       SETTINGS,
       1,
       NOW,
+      'producao-2026-02',
     );
     expect(
       xml.startsWith(
@@ -130,7 +135,7 @@ describe('NFS-e - DPS contra o esquema OFICIAL v1.01', () => {
   });
 
   it('o esquema REJEITA o que viola o leiaute (o validador e a rede de seguranca)', async () => {
-    const { xml } = buildDpsXml(input(), SETTINGS, 7, NOW);
+    const { xml } = buildDpsXml(input(), SETTINGS, 7, NOW, 'producao-2026-02');
     const cases: Array<[string, string]> = [
       ['ambiente invalido', xml.replace('<tpAmb>2</tpAmb>', '<tpAmb>3</tpAmb>')],
       ['CPF com 10 digitos', xml.replace('<CPF>52998224725</CPF>', '<CPF>5299822472</CPF>')],
@@ -159,7 +164,13 @@ describe('NFS-e - DPS contra o esquema OFICIAL v1.01', () => {
   });
 
   it('as mensagens do validador citam o esquema, nao os dados da pessoa', async () => {
-    const { xml } = buildDpsXml(input({ nome: 'NOME-SIGILOSO-123' }), SETTINGS, 7, NOW);
+    const { xml } = buildDpsXml(
+      input({ nome: 'NOME-SIGILOSO-123' }),
+      SETTINGS,
+      7,
+      NOW,
+      'producao-2026-02',
+    );
     const result = await validateDpsXml(
       xml.replace('<tpAmb>2</tpAmb>', '<tpAmb>3</tpAmb>'),
       'producao-2026-02',

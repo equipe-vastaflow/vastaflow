@@ -28,7 +28,7 @@ APIs do **ADN** para distribuição/compartilhamento (municípios), e a NFS-e **
 | 1 | Método de emissão | **Confirmado**: `POST /nfse` (Sefin Nacional), síncrono; recebe a DPS XML assinada, devolve a NFS-e (XML) ou a rejeição | Manual §1.3 |
 | 2 | Campos obrigatórios da DPS | **Confirmado** | XSD v1.01 + Anexo I (`TCInfDPS`: tpAmb, dhEmi, verAplic, serie, nDPS, dCompet, tpEmit, cLocEmi, prest, serv, valores) |
 | 3 | Requisitos de Belo Horizonte | **PENDENTE**: o convênio e os parâmetros do município (`GET /parametros_municipais/{cod}/convenio`, alíquotas, `cTribMun`, regimes) só são lidos com certificado. Regra E0037 exige o município conveniado e ativo | Manual §1.1; Anexo I |
-| 4 | Regras fiscais 2026 | **Confirmado** os layouts; IBS/CBS: declarável a partir da competência 01/01/2026, **opcional só para optantes do Simples até 2027** (não optante = grupo exigido: **não implementado**, a ativação é bloqueada) | Anexo I |
+| 4 | Regras fiscais 2026 | **Confirmado** os layouts; IBS/CBS: declarável a partir da competência 01/01/2026, **opcional só para optantes do Simples até 2027** (não optante = grupo exigido: **estrutura implementada na etapa 2, com perfil fiscal aprovado pela contadora**; ver [`nfse-perfis-fiscais.md`](nfse-perfis-fiscais.md)) | Anexo I |
 | 5 | Autenticação da API | **Confirmado**: certificado digital ICP-Brasil do transmissor (mTLS). Regras E1200–E1209: versão 3, não-CA, KeyUsage "autenticação cliente", cadeia ICP-Brasil, extensão CNPJ/CPF (OID 2.16.76.1.3.3 / .1) | Anexo I, RN_RECEPCAO_DPS |
 | 6 | Assinatura XML | **Parcial**: assinatura da DPS é **obrigatória** na API, com o certificado do emitente (E0714–E0718). **O algoritmo não é fixado** nos documentos obtidos: escolha do projeto = RSA-SHA256, C14N inclusiva, enveloped, `Reference` em `#Id` de `infDPS`. **A confirmar** em produção restrita | Anexo I |
 | 7 | Ambientes | **Confirmado**: produção restrita e produção; `tpAmb` 1 = produção, 2 = homologação. Hosts da documentação: `sefin.producaorestrita.nfse.gov.br/API/SefinNacional` e `sefin.nfse.gov.br/SefinNacional`; o caminho-base de chamada foi **derivado** do endereço do Swagger e não foi testado | página "APIs" |
@@ -112,7 +112,7 @@ reconferido antes de assinar. Um novo `/nfse` cancela o pedido pendente anterior
 
 ## 6. Segurança operacional
 
-- **Desligada por padrão**; ligada exige configuração completa (o boot é recusado) e **bloqueia** optante não-Simples.
+- **Desligada por padrão**; ligada exige configuração completa (o boot é recusado). Não optante exige `NFSE_PERFIS_FISCAIS_PATH` e só emite com **perfil fiscal completo e aprovado** ([`nfse-perfis-fiscais.md`](nfse-perfis-fiscais.md)).
 - **Permissões próprias** `nfse:emit` / `nfse:read`: nenhum perfil as tem por padrão, **OPERADOR inclusive**; só o ADMIN
   (que passa em qualquer verificação). Conceder é decisão explícita da cliente.
 - Certificado: `.pfx` fora do Git e da imagem, montado somente leitura; senha só no `.env` do servidor; aberto **em memória**,
@@ -136,8 +136,9 @@ reconferido antes de assinar. Um novo `/nfse` cancela o pedido pendente anterior
 
 1. **Certificado digital A1 (ICP-Brasil, e-CNPJ)** da Vasta Participações, e a senha, em canal seguro (nunca no chat).
 2. **Dados do prestador**: CNPJ, inscrição municipal (BH), razão social, regime (MEI, ME/EPP ou não optante), regime especial.
-   **Não optante exige o grupo IBS/CBS, ainda não implementado**: se a empresa não é do Simples, é preciso definir a classificação
-   tributária (`cClassTrib`), a NBS e usar a Calculadora oficial — decisão fiscal, não código.
+   **Não optante exige o grupo IBS/CBS**: a estrutura existe (etapa 2), mas o conteúdo é **decisão fiscal da contadora** — cada
+   serviço precisa de um **perfil fiscal aprovado** (`cTribNac`, `cTribMun`, NBS, CST, `cClassTrib`, `cIndOp`, retenções
+   federais, total de tributos). O sistema não traz perfil nenhum. A Calculadora oficial não é consultada pelo VastaFlow.
 3. **Belo Horizonte**: confirmar com a Prefeitura/contador que o município é **conveniado e ativo** no padrão nacional e o
    que o convênio exige (alíquotas, `cTribMun`, regime, retenções). Hoje não verificável sem certificado.
 4. **Códigos de serviço** (tributação nacional) usados pela cliente e a regra de ISS/retenção de cada um.
@@ -156,7 +157,8 @@ Rollback: `NFSE_ENABLED=false` e recriar o backend (a tabela e o histórico perm
 
 ## 10. Limitações
 
-Sem cancelamento (`/nfse_cancelar`), sem substituição, sem imunidade/exportação, sem IBS/CBS (logo, sem não optante), sem
+Sem cancelamento (`/nfse_cancelar`), sem substituição, sem imunidade/exportação, sem Calculadora do IBS/CBS (o não optante
+emite só com perfil fiscal aprovado e o comando do Telegram ainda não coleta o endereço do tomador), sem CNPJ alfanumérico, sem
 DANFSe/PDF, sem envio de arquivo por chat, sem retentativa automática (de propósito), Oracle nunca executado, mTLS e TLS
 com a Sefin real nunca exercitados (os testes usam servidor em loopback), `NT 005` (previsto para 2026) pode alterar o leiaute,
 e a rotação do certificado exige reiniciar o backend (o certificado é aberto uma vez por processo).

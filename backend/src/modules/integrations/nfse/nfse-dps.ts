@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import type { NfseFiscalSnapshot } from './nfse-fiscal-profile';
 import { moneyToCents, normalizeMoney, type NfseSettings } from './nfse-settings';
 
 /**
@@ -27,6 +28,28 @@ export interface NfseEmissionInput {
   readonly totTribSimples: string | null;
   /** `dCompet`, AAAA-MM-DD. */
   readonly competencia: string;
+  /**
+   * Endereco nacional do tomador (`toma/end`). So existe quando o perfil fiscal o exige (nao optante).
+   * Ausente em registros anteriores a esta versao: tratar `undefined` como `null`.
+   */
+  readonly tomadorEndereco?: NfseTomadorEndereco | null;
+  /**
+   * Perfil fiscal ja resolvido para ESTA emissao (nao optante: `cTribMun`, `cNBS`, retencoes federais, total
+   * de tributos e IBS/CBS). `null`/ausente para ME/EPP, que segue o fluxo sem perfil.
+   */
+  readonly fiscal?: NfseFiscalSnapshot | null;
+}
+
+/** Endereco nacional do tomador (leiaute `TCEndereco` com `endNac`). */
+export interface NfseTomadorEndereco {
+  /** Codigo IBGE do municipio, 7 digitos. */
+  readonly cMun: string;
+  /** CEP, 8 digitos. */
+  readonly cep: string;
+  readonly logradouro: string;
+  readonly numero: string;
+  readonly complemento: string | null;
+  readonly bairro: string;
 }
 
 export const DESCRIPTION_MAX = 2000;
@@ -325,7 +348,115 @@ export function summarizeInput(
     `ISSQN: ${TRIB_LABEL[input.tribIssqn]}, ${RET_LABEL[input.tpRetIssqn]}${input.aliquota === null ? ', aliquota do municipio' : `, aliquota ${input.aliquota.replace('.', ',')}%`}`,
     `Local da prestacao (IBGE): ${input.localPrestacao}`,
     `Competencia: ${input.competencia.split('-').reverse().join('/')}`,
+    ...fiscalSummaryLines(input),
   ].join('\n');
+}
+
+const ADDRESS_KEYS = ['cMun', 'cep', 'logradouro', 'numero', 'complemento', 'bairro'];
+
+export type AddressResult =
+  | { readonly ok: true; readonly endereco: NfseTomadorEndereco }
+  | { readonly ok: false; readonly errors: readonly string[] };
+
+/**
+ * Valida o endereco do tomador, como chega de fora (nada e presumido; so os limites do esquema:
+ * logradouro ate 255, numero e bairro ate 60, complemento opcional). Mensagens citam so o NOME do campo.
+ */
+export function validateTomadorEndereco(raw: unknown): AddressResult {
+  const errors: string[] = [];
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    return { ok: false, errors: ['endereco do tomador: formato invalido'] };
+  }
+  const data = raw as Record<string, unknown>;
+  for (const key of Object.keys(data)) {
+    if (!ADDRESS_KEYS.includes(key)) {
+      errors.push(`endereco do tomador: campo desconhecido ${key}`);
+    }
+  }
+  const text = (key: string, max: number, optional = false): string | null => {
+    const value = data[key];
+    if (optional && (value === undefined || value === null || value === '')) {
+      return null;
+    }
+    if (
+      typeof value !== 'string' ||
+      value.trim() === '' ||
+      value.length > max ||
+      CONTROL.test(value)
+    ) {
+      errors.push(`endereco do tomador: ${key} invalido`);
+      return null;
+    }
+    return value.trim();
+  };
+  const digits = (key: string, length: number): string => {
+    const value = data[key];
+    if (typeof value !== 'string' || !new RegExp(`^\\d{${String(length)}}$`).test(value)) {
+      errors.push(`endereco do tomador: ${key} deve ter ${String(length)} digitos`);
+      return '';
+    }
+    return value;
+  };
+  const cMun = digits('cMun', 7);
+  const cep = digits('cep', 8);
+  const logradouro = text('logradouro', 255);
+  const numero = text('numero', 60);
+  const complemento = text('complemento', 156, true);
+  const bairro = text('bairro', 60);
+  if (errors.length > 0 || logradouro === null || numero === null || bairro === null) {
+    return { ok: false, errors };
+  }
+  return { ok: true, endereco: { cMun, cep, logradouro, numero, complemento, bairro } };
+}
+
+/** Referencia curta (8 hex) de um conteudo: amarra ao hash do resumo o que o resumo nao mostra por inteiro. */
+export function shortRef(value: unknown): string {
+  return createHash('sha256').update(JSON.stringify(value), 'utf8').digest('hex').slice(0, 8);
+}
+
+const brDate = (iso: string): string => iso.split('-').reverse().join('/');
+
+/** Linhas do resumo para uma emissao com perfil fiscal (nao optante). Vazio para ME/EPP. */
+function fiscalSummaryLines(input: NfseEmissionInput): string[] {
+  const fiscal = input.fiscal;
+  if (fiscal === null || fiscal === undefined) {
+    return [];
+  }
+  const ib = fiscal.ibscbs;
+  const lines = [
+    `Perfil fiscal: ${fiscal.perfil.id} v${String(fiscal.perfil.versao)} (aprovado por ${fiscal.perfil.aprovadoPor} em ${brDate(fiscal.perfil.aprovadoEm)}; ref. ${fiscal.perfil.conteudoSha256.slice(0, 8)})`,
+    `Codigos: cTribNac ${input.servico}, cTribMun ${fiscal.cTribMun ?? '-'}, NBS ${fiscal.cNBS}`,
+    `IBS/CBS: CST ${ib.cst}, cClassTrib ${ib.cClassTrib}, cIndOp ${ib.cIndOp}, indDest ${String(ib.indDest)}${ib.tpOper === null ? '' : `, tpOper ${String(ib.tpOper)}`}${ib.tpEnteGov === null ? '' : `, tpEnteGov ${String(ib.tpEnteGov)}`}`,
+  ];
+  const fed = fiscal.tribFed;
+  const parts: string[] = [];
+  if (fed?.piscofins) {
+    parts.push(`PIS/COFINS CST ${fed.piscofins.cst}`);
+  }
+  for (const [label, value] of [
+    ['IRRF', fed?.vRetIRRF],
+    ['CSLL', fed?.vRetCSLL],
+    ['CP', fed?.vRetCP],
+  ] as const) {
+    if (value !== null && value !== undefined) {
+      parts.push(`${label} ${formatBrl(value)}`);
+    }
+  }
+  lines.push(`Tributos federais: ${parts.length === 0 ? 'sem retencao' : parts.join(', ')}`);
+  const tot = fiscal.totTrib;
+  const totText =
+    tot.tipo === 'indicador'
+      ? 'nao informado'
+      : tot.tipo === 'percentuais'
+        ? `federal ${tot.fed}%, estadual ${tot.est}%, municipal ${tot.mun}%`
+        : `federal ${formatBrl(tot.fed)}, estadual ${formatBrl(tot.est)}, municipal ${formatBrl(tot.mun)}`;
+  lines.push(`Total aproximado de tributos: ${totText}`);
+  if (input.tomadorEndereco !== null && input.tomadorEndereco !== undefined) {
+    lines.push(
+      `Endereco do tomador: municipio ${input.tomadorEndereco.cMun} (ref. ${shortRef(input.tomadorEndereco)})`,
+    );
+  }
+  return lines;
 }
 
 export function hashText(value: string): string {

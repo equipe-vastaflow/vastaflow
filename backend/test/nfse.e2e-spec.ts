@@ -145,7 +145,7 @@ describe('NFS-e (e2e)', () => {
     const jwt = await freshAdmin();
     const created = await execute(jwt, `/nfse ${ARGS}`);
     expect(created.success).toBe(true);
-    expect(created.reply).toContain('PRODUCAO');
+    expect(created.reply).toContain('HOMOLOGACAO');
     expect(created.reply).toContain('R$ 1.500,50');
     expect(created.reply).not.toContain(TOMADOR_CPF);
     const match = /\/nfse_confirmar (\d+) ([A-Z2-9]{8})/.exec(created.reply);
@@ -164,10 +164,10 @@ describe('NFS-e (e2e)', () => {
     const sent = JSON.parse(calls[0]?.body ?? '{}') as { dpsXmlGZipB64: string };
     const dps = gunzipSync(Buffer.from(sent.dpsXmlGZipB64, 'base64')).toString('utf8');
     expect(done.reply).toContain(chaveOf(dpsIdIn(dps)));
-    expect((await validateDpsXml(dps, 'producao-2026-02')).errors).toEqual([]);
+    expect((await validateDpsXml(dps, 'restrita-2026-10')).errors).toEqual([]);
     expect(verifyDpsSignature(dps, NFSE_TEST_CERTIFICATE_PEM)).toBe(true);
     expect(dps).toContain(`<CNPJ>${NFSE_PRESTADOR_CNPJ}</CNPJ>`);
-    expect(dps).toContain('<tpAmb>1</tpAmb>');
+    expect(dps).toContain('<tpAmb>2</tpAmb>');
 
     // Repetir a confirmacao (update duplicado, usuario insistindo) nao envia de novo.
     const again = await execute(jwt, `/nfse_confirmar ${numero} ${code}`);

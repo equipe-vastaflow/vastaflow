@@ -292,6 +292,8 @@ services:
       NFSE_DPS_SERIE: ${NFSE_DPS_SERIE:-}
       NFSE_VALOR_MAXIMO: ${NFSE_VALOR_MAXIMO:-}
       NFSE_CONFIRMATION_TTL_MINUTES: ${NFSE_CONFIRMATION_TTL_MINUTES:-}
+      # Perfis fiscais aprovados (so nao optante). Arquivo FORA do Git, montado somente leitura.
+      NFSE_PERFIS_FISCAIS_PATH: ${NFSE_PERFIS_FISCAIS_PATH:-}
     volumes:
       - *ca-mount
       # DIRETORIO, nao arquivo, e somente leitura. Diretorio porque o CLI

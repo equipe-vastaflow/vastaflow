@@ -112,7 +112,7 @@ function dpsDoGeradorAtual(): string {
   if (!built.ok) {
     throw new Error(built.errors.join(','));
   }
-  return buildDpsXml(built.input, SETTINGS, 7, NOW).xml;
+  return buildDpsXml(built.input, SETTINGS, 7, NOW, 'producao-2026-02').xml;
 }
 
 /** O que muda no leiaute da restrita: `finNFSe` passa a ser obrigatorio direto em `infDPS`. */

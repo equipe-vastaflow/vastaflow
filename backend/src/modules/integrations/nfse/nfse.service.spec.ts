@@ -1,11 +1,19 @@
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { DataSource } from 'typeorm';
+import {
+  approvedProfile,
+  SYNTHETIC_ADDRESS,
+  SYNTHETIC_SERVICE,
+  syntheticDraft,
+} from '../../../../test/support/nfse-profile-fixtures';
 import { createTestPki, type TestPki } from '../../../../test/support/nfse-test-pki';
 import { AuditAction, AuditModuleName } from '../../audit/audit-action.enum';
 import { NfseTransportError, type NfseTransport } from './nfse-api.client';
 import { NfseCertificateError, openPfx, type NfseCertificate } from './nfse-certificate';
 import { NfseEmission, NfseEmissionStatus } from './nfse-emission.entity';
 import { NfseEmissionsRepository } from './nfse-emissions.repository';
+import type { ParsedProfiles } from './nfse-fiscal-profile';
+import { buildDpsXml } from './nfse-xml.builder';
 import { verifyDpsSignature } from './nfse-signer';
 import { NfseService, STALE_SENDING_MS, type AuditWriter } from './nfse.service';
 
@@ -22,10 +30,7 @@ const authorizedBody = (chave = CHAVE): string =>
 
 const CONFIG = {
   NFSE_ENABLED: true,
-  // O gerador de DPS ainda so produz o leiaute de PRODUCAO (etapa 1 do versionamento): o fluxo e exercitado
-  // com esse leiaute, contra servidor de TESTE (nada sai pela rede). A restrita (leiaute de 20/10/2026)
-  // entra aqui quando o builder for adaptado.
-  NFSE_AMBIENTE: 'producao',
+  NFSE_AMBIENTE: 'restrita',
   // Servidor de teste: o transporte e injetado, nada sai pela rede.
   NFSE_API_BASE_URL: 'http://nfse-fake:9',
   NFSE_CERT_PFX_PATH: '/run/secrets/ficticio.pfx',
@@ -62,6 +67,8 @@ class Harness {
   codeSeq = 0;
   readonly service: NfseService;
   readonly emissions: NfseEmissionsRepository;
+  /** Perfis fiscais que o servico enxerga (so o nao optante os usa). */
+  profiles: ParsedProfiles = { perfis: [], problems: [] };
 
   constructor(
     readonly dataSource: DataSource,
@@ -100,6 +107,7 @@ class Harness {
           }
           return this.certificate;
         },
+        loadProfiles: () => this.profiles,
         inlineWaitMs,
       },
     );
@@ -163,7 +171,7 @@ describe('NFS-e - servico (maquina de estados, idempotencia, incerteza)', () => 
       }
       expect(result.numero).toBe(1);
       expect(result.expiresInMinutes).toBe(10);
-      expect(result.summary).toContain('PRODUCAO');
+      expect(result.summary).toContain('HOMOLOGACAO');
       expect(result.summary).toContain('R$ 1.500,50');
       expect(result.summary).not.toContain('52998224725');
       const row = await h.row(1);
@@ -220,7 +228,7 @@ describe('NFS-e - servico (maquina de estados, idempotencia, incerteza)', () => 
           numero: 1,
           status: NfseEmissionStatus.Autorizada,
           chaveAcesso: CHAVE,
-          ambiente: 'producao',
+          ambiente: 'homologacao',
         },
       });
       expect(h.posts()).toHaveLength(1);
@@ -486,22 +494,21 @@ describe('NFS-e - servico (maquina de estados, idempotencia, incerteza)', () => 
       expect(h.calls).toHaveLength(0);
     });
 
-    // O portao do contrato de troca e coberto no cliente (`nfse-api.client.spec.ts`) e na configuracao
-    // (`nfse-settings.spec.ts`: producao exige o contrato confirmado). Pelo servico ele so seria alcancavel na
-    // restrita, e la o pedido ja falha antes, pelo leiaute (teste abaixo) - ate o gerador ser adaptado.
-    it('restrita (leiaute de 20/10/2026): o gerador atual ainda nao o produz, entao o pedido e recusado e nada e enviado', async () => {
-      h.config = { ...CONFIG, NFSE_AMBIENTE: 'restrita', NFSE_API_BASE_URL: undefined };
-
-      expect(await h.service.request(USER, 'telegram', ARGS)).toEqual({ kind: 'internal' });
-
+    it('Sefin real sem o contrato de troca confirmado: NAO_ENVIADA, nenhuma chamada', async () => {
+      h.config = { ...CONFIG, NFSE_API_BASE_URL: undefined, NFSE_WIRE_CONTRACT_CONFIRMED: false };
+      const { numero, code } = await h.createRequest();
+      expect(await h.service.confirm(USER, 'telegram', String(numero), code)).toMatchObject({
+        emission: { status: NfseEmissionStatus.NaoEnviada, erroCodigo: 'contrato_nao_confirmado' },
+      });
       expect(h.calls).toHaveLength(0);
-      expect((await h.row(1))?.status).toBe(NfseEmissionStatus.Expirada);
     });
 
-    it('producao com a mesma DPS: o leiaute de producao a aceita (so o ambiente muda o pacote)', async () => {
-      h.config = { ...CONFIG, NFSE_AMBIENTE: 'producao' };
-
-      expect((await h.service.request(USER, 'telegram', ARGS)).kind).toBe('created');
+    it('a DPS do pedido valida no leiaute do ambiente, nos dois ambientes (restrita e producao)', async () => {
+      for (const ambiente of ['restrita', 'producao']) {
+        h.config = { ...CONFIG, NFSE_AMBIENTE: ambiente };
+        const result = await h.service.request(USER, 'telegram', ARGS);
+        expect(result.kind).toBe('created');
+      }
     });
 
     it('banco fora do ar ao gravar o resultado: o chat recebe "incerta", sem rejeicao nao tratada', async () => {
@@ -596,6 +603,289 @@ describe('NFS-e - servico (maquina de estados, idempotencia, incerteza)', () => 
         NfseEmissionStatus.Enviando,
         NfseEmissionStatus.Autorizada,
       ]);
+    });
+  });
+
+  describe('nao optante: perfil fiscal aprovado (sintetico)', () => {
+    const NAO_OPTANTE = {
+      ...CONFIG,
+      NFSE_OPCAO_SIMPLES: '1',
+      NFSE_REGIME_APURACAO_SN: undefined,
+      NFSE_PERFIS_FISCAIS_PATH: '/run/secrets/perfis-ficticio.json',
+    } as Record<string, unknown>;
+    const ARGS_NO = `tomador=52998224725 nome="Maria Teste Sigilosa" valor=1500,50 servico=${SYNTHETIC_SERVICE} desc="Consultoria ficticia" iss=1 ret=1 local=3106200`;
+    const withProfiles = (...perfis: ReturnType<typeof approvedProfile>[]): void => {
+      h.config = { ...NAO_OPTANTE };
+      h.profiles = { perfis, problems: [] };
+    };
+
+    it('perfil aprovado + endereco: cria o pedido com resumo fiscal, sem expor o endereco nem o documento', async () => {
+      withProfiles(approvedProfile());
+
+      const result = await h.service.request(USER, 'telegram', ARGS_NO, {
+        tomadorEndereco: SYNTHETIC_ADDRESS,
+      });
+
+      expect(result.kind).toBe('created');
+      if (result.kind !== 'created') {
+        return;
+      }
+      expect(result.summary).toContain('Perfil fiscal: servico-sintetico v1');
+      expect(result.summary).toContain('aprovado por Contadora Ficticia');
+      expect(result.summary).toContain('IBS/CBS: CST 288, cClassTrib 288888, cIndOp 288888');
+      expect(result.summary).toContain('IRRF R$ 22,51');
+      expect(result.summary).toContain('CSLL R$ 30,01');
+      expect(result.summary).toMatch(
+        /Endereco do tomador: municipio 3106200 \(ref\. [0-9a-f]{8}\)/,
+      );
+      expect(result.summary).not.toMatch(/Rua Ficticia|Bairro Ficticio|30000000|52998224725/);
+      const row = await h.row(1);
+      expect(row?.dados).toMatchObject({
+        servico: SYNTHETIC_SERVICE,
+        tomadorEndereco: { cMun: '3106200' },
+        fiscal: { perfil: { id: 'servico-sintetico', versao: 1 }, cNBS: '188888888' },
+      });
+    });
+
+    it('sem perfil para o servico: recusa, nada e gravado', async () => {
+      withProfiles(
+        approvedProfile({ servico: { cTribNac: '990202', cTribMun: null, cNBS: '188888888' } }),
+      );
+
+      expect(
+        await h.service.request(USER, 'telegram', ARGS_NO, { tomadorEndereco: SYNTHETIC_ADDRESS }),
+      ).toEqual({
+        kind: 'invalid',
+        errors: ['servico: nao ha perfil fiscal cadastrado para este codigo'],
+      });
+      expect(await dataSource.getRepository(NfseEmission).count()).toBe(0);
+    });
+
+    it.each([
+      ['rascunho', { status: 'rascunho' as const }],
+      ['revogado', { status: 'revogado' as const }],
+      ['sem aprovador', { aprovadoPor: null }],
+      ['hash de outro conteudo', { conteudoSha256: 'a'.repeat(64) }],
+      ['aprovado no futuro', { aprovadoEm: '2026-12-31' }],
+    ])('perfil %s: nao ha emissao', async (_nome, aprovacao) => {
+      const base = approvedProfile();
+      withProfiles({ ...base, aprovacao: { ...base.aprovacao, ...aprovacao } });
+
+      const result = await h.service.request(USER, 'telegram', ARGS_NO, {
+        tomadorEndereco: SYNTHETIC_ADDRESS,
+      });
+
+      expect(result.kind).toBe('invalid');
+      expect(await dataSource.getRepository(NfseEmission).count()).toBe(0);
+    });
+
+    it('arquivo de perfis com qualquer problema nao libera nada (fail-closed)', async () => {
+      h.config = { ...NAO_OPTANTE };
+      h.profiles = { perfis: [approvedProfile()], problems: ['perfil x: campo desconhecido'] };
+
+      expect(
+        await h.service.request(USER, 'telegram', ARGS_NO, { tomadorEndereco: SYNTHETIC_ADDRESS }),
+      ).toEqual({ kind: 'invalid', errors: ['perfis fiscais indisponiveis ou invalidos'] });
+    });
+
+    it('endereco do tomador exigido e ausente (o comando ainda nao o informa): recusa', async () => {
+      withProfiles(approvedProfile());
+
+      expect(await h.service.request(USER, 'telegram', ARGS_NO)).toEqual({
+        kind: 'invalid',
+        errors: ['endereco do tomador: obrigatorio para este servico'],
+      });
+    });
+
+    it('endereco invalido: recusa citando so o nome do campo', async () => {
+      withProfiles(approvedProfile());
+
+      const result = await h.service.request(USER, 'telegram', ARGS_NO, {
+        tomadorEndereco: { ...SYNTHETIC_ADDRESS, cep: '123', logradouro: '' },
+      });
+
+      expect(result).toMatchObject({ kind: 'invalid' });
+      expect(JSON.stringify(result)).toMatch(/cep deve ter 8 digitos/);
+      expect(JSON.stringify(result)).not.toMatch(/Bairro Ficticio/);
+    });
+
+    it('iss/ret fora do que o perfil permite: recusa', async () => {
+      withProfiles(approvedProfile());
+
+      const result = await h.service.request(USER, 'telegram', ARGS_NO.replace('ret=1', 'ret=3'), {
+        tomadorEndereco: SYNTHETIC_ADDRESS,
+      });
+
+      expect(result).toEqual({
+        kind: 'invalid',
+        errors: ['ret: valor nao permitido pelo perfil fiscal'],
+      });
+    });
+
+    it('confirmar emite UMA vez, com a DPS do perfil valida no leiaute da restrita e assinada', async () => {
+      withProfiles(approvedProfile());
+      const created = await h.service.request(USER, 'telegram', ARGS_NO, {
+        tomadorEndereco: SYNTHETIC_ADDRESS,
+      });
+      if (created.kind !== 'created') {
+        throw new Error('pedido nao criado');
+      }
+
+      const done = await h.service.confirm(USER, 'telegram', String(created.numero), created.code);
+
+      expect(done).toMatchObject({
+        kind: 'finished',
+        emission: { status: NfseEmissionStatus.Autorizada },
+      });
+      expect(h.posts()).toHaveLength(1);
+      const sent = JSON.parse(h.posts()[0]?.body ?? '{}') as { dpsXmlGZipB64: string };
+      const dps = gunzipSync(Buffer.from(sent.dpsXmlGZipB64, 'base64')).toString('utf8');
+      expect(dps).toContain('<cNBS>188888888</cNBS>');
+      expect(dps).toContain('<IBSCBS>');
+      expect(dps).toContain('<vRetIRRF>22.51</vRetIRRF>');
+      expect(dps).toContain('<finNFSe>0</finNFSe>');
+      expect(verifyDpsSignature(dps, h.certificate.certificatePem)).toBe(true);
+    });
+
+    it('perfil revogado DEPOIS do pedido: a confirmacao nao transmite (NAO_ENVIADA, nenhuma chamada)', async () => {
+      withProfiles(approvedProfile());
+      const created = await h.service.request(USER, 'telegram', ARGS_NO, {
+        tomadorEndereco: SYNTHETIC_ADDRESS,
+      });
+      if (created.kind !== 'created') {
+        throw new Error('pedido nao criado');
+      }
+      const base = approvedProfile();
+      h.profiles = {
+        perfis: [{ ...base, aprovacao: { ...base.aprovacao, status: 'revogado' } }],
+        problems: [],
+      };
+
+      const done = await h.service.confirm(USER, 'telegram', String(created.numero), created.code);
+
+      expect(done).toMatchObject({
+        emission: {
+          status: NfseEmissionStatus.NaoEnviada,
+          erroCodigo: 'perfil_fiscal_indisponivel',
+        },
+      });
+      expect(h.calls).toHaveLength(0);
+    });
+
+    it('conteudo do perfil alterado depois do pedido (sem nova aprovacao): nao transmite', async () => {
+      withProfiles(approvedProfile());
+      const created = await h.service.request(USER, 'telegram', ARGS_NO, {
+        tomadorEndereco: SYNTHETIC_ADDRESS,
+      });
+      if (created.kind !== 'created') {
+        throw new Error('pedido nao criado');
+      }
+      const altered = {
+        ...approvedProfile(),
+        ibscbs: { ...approvedProfile().ibscbs, cClassTrib: '299999' },
+      };
+      h.profiles = { perfis: [altered], problems: [] };
+
+      const done = await h.service.confirm(USER, 'telegram', String(created.numero), created.code);
+
+      expect(done).toMatchObject({ emission: { erroCodigo: 'perfil_fiscal_indisponivel' } });
+      expect(h.calls).toHaveLength(0);
+    });
+
+    it('nova versao do perfil (ainda nao aprovada) depois do pedido: a versao anterior deixa de valer', async () => {
+      withProfiles(approvedProfile());
+      const created = await h.service.request(USER, 'telegram', ARGS_NO, {
+        tomadorEndereco: SYNTHETIC_ADDRESS,
+      });
+      if (created.kind !== 'created') {
+        throw new Error('pedido nao criado');
+      }
+      const v2 = {
+        ...approvedProfile({ versao: 2 }),
+        aprovacao: {
+          status: 'rascunho' as const,
+          aprovadoPor: null,
+          aprovadoEm: null,
+          conteudoSha256: null,
+        },
+      };
+      h.profiles = { perfis: [approvedProfile(), v2], problems: [] };
+
+      const done = await h.service.confirm(USER, 'telegram', String(created.numero), created.code);
+
+      expect(done).toMatchObject({ emission: { erroCodigo: 'perfil_fiscal_indisponivel' } });
+      expect(h.calls).toHaveLength(0);
+    });
+
+    it('a confirmacao segue vinculada: outra pessoa nao confirma o pedido do nao optante', async () => {
+      withProfiles(approvedProfile());
+      const created = await h.service.request(USER, 'telegram', ARGS_NO, {
+        tomadorEndereco: SYNTHETIC_ADDRESS,
+      });
+      if (created.kind !== 'created') {
+        throw new Error('pedido nao criado');
+      }
+
+      expect(
+        await h.service.confirm(OTHER, 'telegram', String(created.numero), created.code),
+      ).toEqual({
+        kind: 'not_found',
+      });
+      expect(h.calls).toHaveLength(0);
+    });
+
+    it('ME/EPP continua sem perfil: o fluxo anterior nao mudou (sem fiscal nem endereco gravados)', async () => {
+      h.config = { ...CONFIG };
+
+      const result = await h.service.request(USER, 'telegram', ARGS);
+
+      expect(result.kind).toBe('created');
+      const dados = (await h.row(1))?.dados as unknown as Record<string, unknown>;
+      expect(dados.fiscal).toBeUndefined();
+      expect(dados.tomadorEndereco).toBeUndefined();
+    });
+
+    it('o resumo e o hash incluem o perfil: trocar o conteudo do perfil muda o que foi confirmado', async () => {
+      withProfiles(approvedProfile());
+      const a = await h.service.request(USER, 'telegram', ARGS_NO, {
+        tomadorEndereco: SYNTHETIC_ADDRESS,
+      });
+      withProfiles(
+        approvedProfile({ ibscbs: { ...syntheticDraft().ibscbs, cClassTrib: '299999' } }),
+      );
+      const b = await h.service.request(USER, 'telegram', ARGS_NO, {
+        tomadorEndereco: SYNTHETIC_ADDRESS,
+      });
+
+      expect(a.kind === 'created' && b.kind === 'created' && a.summary !== b.summary).toBe(true);
+    });
+
+    it('o gerador usa o leiaute do ambiente: a DPS do perfil na producao tem finNFSe dentro do IBSCBS', async () => {
+      withProfiles(approvedProfile());
+      const built = await h.service.request(USER, 'telegram', ARGS_NO, {
+        tomadorEndereco: SYNTHETIC_ADDRESS,
+      });
+      expect(built.kind).toBe('created');
+      const row = await h.row(1);
+      const xml = buildDpsXml(
+        row?.dados as never,
+        {
+          tpAmb: 1,
+          municipioEmissor: '3106200',
+          prestadorCnpj: '11222333000181',
+          prestadorIm: null,
+          prestadorNome: null,
+          opSimpNac: 1,
+          regApTribSN: null,
+          regEspTrib: 0,
+          serie: '00001',
+        },
+        1,
+        new Date('2026-10-15T15:00:00Z'),
+        'producao-2026-02',
+      ).xml;
+      expect(xml).toMatch(/<IBSCBS><finNFSe>0<\/finNFSe>/);
+      expect(xml).not.toMatch(/<tpEmit>1<\/tpEmit><finNFSe>/);
     });
   });
 });

@@ -47,7 +47,8 @@ type NfseEnvKey =
   | 'NFSE_REGIME_ESPECIAL_TRIBUTACAO'
   | 'NFSE_DPS_SERIE'
   | 'NFSE_VALOR_MAXIMO'
-  | 'NFSE_CONFIRMATION_TTL_MINUTES';
+  | 'NFSE_CONFIRMATION_TTL_MINUTES'
+  | 'NFSE_PERFIS_FISCAIS_PATH';
 
 export type NfseEnv = Partial<Record<NfseEnvKey, unknown>>;
 
@@ -73,6 +74,11 @@ export interface NfseSettings {
   /** Texto decimal exato (`1000.00`). Limite por emissao decidido pela cliente: sem valor padrao. */
   readonly valorMaximo: string;
   readonly confirmationTtlMs: number;
+  /**
+   * Arquivo dos perfis fiscais aprovados (`nfse-fiscal-profile.ts`). Obrigatorio para empresa NAO optante
+   * (`opSimpNac = 1`); nao usado para ME/EPP. Fora do repositorio, montado somente leitura.
+   */
+  readonly perfisFiscaisPath: string | null;
 }
 
 export type NfseSettingsResult =
@@ -190,11 +196,17 @@ export function resolveNfseSettings(raw: NfseEnv & { NFSE_ENABLED?: unknown }): 
   if (opRaw !== '' && opSimpNac === null) {
     problems.push('NFSE_OPCAO_SIMPLES invalida: use 1 (nao optante), 2 (MEI) ou 3 (ME/EPP)');
   }
-  if (opSimpNac === 1) {
-    // O grupo IBS/CBS so e dispensado para optantes do Simples ate 2027 (Anexo I). Nao implementado:
-    // exige classificacao tributaria e a Calculadora oficial, ou seja, decisao fiscal.
+  const perfisFiscaisPath = text(raw.NFSE_PERFIS_FISCAIS_PATH);
+  if (opSimpNac === 1 && perfisFiscaisPath === '') {
+    // O grupo IBS/CBS e obrigatorio para quem NAO e optante do Simples (Anexo I). Classificacao tributaria e
+    // codigos sao decisao fiscal da contadora: so se emite com perfis fiscais APROVADOS (arquivo externo).
     problems.push(
-      'NFSE_OPCAO_SIMPLES=1 (nao optante) exige o grupo IBS/CBS, ainda NAO implementado: emissao indisponivel',
+      'NFSE_OPCAO_SIMPLES=1 (nao optante) exige NFSE_PERFIS_FISCAIS_PATH: sem perfil fiscal aprovado nao se emite',
+    );
+  }
+  if (opSimpNac !== 1 && perfisFiscaisPath !== '') {
+    problems.push(
+      'NFSE_PERFIS_FISCAIS_PATH so se aplica a empresa nao optante (NFSE_OPCAO_SIMPLES=1)',
     );
   }
   const regApRaw = text(raw.NFSE_REGIME_APURACAO_SN);
@@ -267,6 +279,7 @@ export function resolveNfseSettings(raw: NfseEnv & { NFSE_ENABLED?: unknown }): 
       serie: serie.padStart(5, '0'),
       valorMaximo,
       confirmationTtlMs: ttlMinutes * 60_000,
+      perfisFiscaisPath: perfisFiscaisPath === '' ? null : perfisFiscaisPath,
     },
   };
 }

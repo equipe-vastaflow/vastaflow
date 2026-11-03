@@ -38,7 +38,7 @@ function unsignedDps(): string {
   if (!built.ok) {
     throw new Error('entrada de teste invalida');
   }
-  return buildDpsXml(built.input, settings, 7, NOW).xml;
+  return buildDpsXml(built.input, settings, 7, NOW, 'producao-2026-02').xml;
 }
 
 describe('certificado (PKCS#12) e assinatura da DPS', () => {

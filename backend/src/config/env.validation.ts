@@ -657,6 +657,15 @@ export class EnvironmentVariables {
   NFSE_CONFIRMATION_TTL_MINUTES?: string;
 
   /**
+   * Arquivo JSON dos PERFIS FISCAIS aprovados pela contadora (so empresa nao optante: NFSE_OPCAO_SIMPLES=1).
+   * Fora do repositorio e montado somente leitura, como o certificado. Ver docs/nfse-perfis-fiscais.md.
+   */
+  @Transform(optionalString)
+  @IsOptional()
+  @IsString()
+  NFSE_PERFIS_FISCAIS_PATH?: string;
+
+  /**
    * URL base da API. SO aceita o host de HOMOLOGACAO conhecido (`rc.plantae.agr.br`),
    * em HTTPS, no caminho `/api/v1/external`. Uma URL de producao so entra depois da
    * liberacao oficial da Plantae, por mudanca de codigo - ver `plantae.constants.ts`.
