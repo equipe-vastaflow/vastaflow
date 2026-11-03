@@ -1,4 +1,9 @@
-import { ConflictException, ForbiddenException, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import type { JwtService } from '@nestjs/jwt';
 import type { EnvironmentVariables } from '../../config/env.validation';
@@ -7,10 +12,12 @@ import type { AuditService } from '../audit/audit.service';
 import type { Permission } from '../permissions/entities/permission.entity';
 import type { Role } from '../roles/entities/role.entity';
 import { RoleName } from '../roles/role-name.enum';
+import { toUserResponse } from '../users/dto/user-response.dto';
 import type { User } from '../users/entities/user.entity';
 import type { PasswordService } from '../users/password.service';
 import type { UsersService } from '../users/users.service';
 import { AuthService } from './auth.service';
+import { passwordVersion } from './password-version';
 
 const IP = '10.0.0.5';
 
@@ -37,15 +44,22 @@ function makeUser(overrides: Partial<User> = {}): User {
 }
 
 describe('AuthService', () => {
-  let usersService: jest.Mocked<Pick<UsersService, 'create' | 'findByEmail'>>;
-  let passwordService: jest.Mocked<Pick<PasswordService, 'verify'>>;
+  let usersService: jest.Mocked<
+    Pick<UsersService, 'create' | 'findByEmail' | 'findById' | 'replacePasswordHash'>
+  >;
+  let passwordService: jest.Mocked<Pick<PasswordService, 'verify' | 'hash'>>;
   let jwtService: jest.Mocked<Pick<JwtService, 'signAsync'>>;
   let auditService: jest.Mocked<Pick<AuditService, 'record'>>;
   let service: AuthService;
 
   beforeEach(() => {
-    usersService = { create: jest.fn(), findByEmail: jest.fn() };
-    passwordService = { verify: jest.fn() };
+    usersService = {
+      create: jest.fn(),
+      findByEmail: jest.fn(),
+      findById: jest.fn(),
+      replacePasswordHash: jest.fn(),
+    };
+    passwordService = { verify: jest.fn(), hash: jest.fn() };
     jwtService = { signAsync: jest.fn().mockResolvedValue('jwt-assinado') };
     auditService = { record: jest.fn().mockResolvedValue(undefined) };
 
@@ -71,7 +85,10 @@ describe('AuthService', () => {
       const result = await service.register(dto, IP);
 
       expect(usersService.create).toHaveBeenCalledWith({ ...dto, role: RoleName.Usuario });
-      expect(jwtService.signAsync).toHaveBeenCalledWith({ sub: 'user-1' });
+      expect(jwtService.signAsync).toHaveBeenCalledWith({
+        sub: 'user-1',
+        pv: passwordVersion('$2b$04$hash-armazenado'),
+      });
       expect(result).toMatchObject({
         accessToken: 'jwt-assinado',
         tokenType: 'Bearer',
@@ -209,6 +226,110 @@ describe('AuthService', () => {
       expect(auditService.record).toHaveBeenCalledWith(
         expect.objectContaining({ usuarioId: 'user-1', acao: AuditAction.Logout, ip: IP }),
       );
+    });
+  });
+
+  describe('changePassword', () => {
+    const actor = toUserResponse(makeUser());
+    const dto = { senhaAtual: 'SenhaAtual1', novaSenha: 'NovaSenha2' };
+
+    it('senha atual incorreta: 400, nada gravado, sem token e sem auditoria', async () => {
+      usersService.findById.mockResolvedValue(makeUser());
+      passwordService.verify.mockResolvedValue(false);
+
+      await expect(service.changePassword(actor, dto, IP)).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+
+      expect(passwordService.hash).not.toHaveBeenCalled();
+      expect(usersService.replacePasswordHash).not.toHaveBeenCalled();
+      expect(jwtService.signAsync).not.toHaveBeenCalled();
+      expect(auditService.record).not.toHaveBeenCalled();
+    });
+
+    it('nova senha igual a atual: 400, nada gravado', async () => {
+      usersService.findById.mockResolvedValue(makeUser());
+      passwordService.verify.mockResolvedValue(true);
+
+      await expect(service.changePassword(actor, dto, IP)).rejects.toThrow(
+        'A nova senha deve ser diferente da senha atual',
+      );
+
+      expect(passwordService.hash).not.toHaveBeenCalled();
+      expect(usersService.replacePasswordHash).not.toHaveBeenCalled();
+    });
+
+    it('conta inativa ou inexistente: 401', async () => {
+      usersService.findById.mockResolvedValue(makeUser({ ativo: false }));
+      await expect(service.changePassword(actor, dto, IP)).rejects.toBeInstanceOf(
+        UnauthorizedException,
+      );
+
+      usersService.findById.mockResolvedValue(null);
+      await expect(service.changePassword(actor, dto, IP)).rejects.toBeInstanceOf(
+        UnauthorizedException,
+      );
+      expect(usersService.replacePasswordHash).not.toHaveBeenCalled();
+    });
+
+    it('so age sobre quem esta autenticado: o id lido e gravado e o do actor', async () => {
+      usersService.findById.mockResolvedValue(makeUser());
+      passwordService.verify.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+      passwordService.hash.mockResolvedValue('$2b$04$hash-novo');
+      usersService.replacePasswordHash.mockResolvedValue(true);
+
+      await service.changePassword(actor, dto, IP);
+
+      expect(usersService.findById).toHaveBeenCalledWith('user-1');
+      expect(usersService.replacePasswordHash).toHaveBeenCalledWith(
+        'user-1',
+        '$2b$04$hash-armazenado',
+        '$2b$04$hash-novo',
+        expect.any(Date),
+      );
+    });
+
+    it('sucesso: audita PASSWORD_CHANGED sem segredo e devolve token com o pv NOVO', async () => {
+      usersService.findById.mockResolvedValue(makeUser());
+      passwordService.verify.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+      passwordService.hash.mockResolvedValue('$2b$04$hash-novo');
+      usersService.replacePasswordHash.mockResolvedValue(true);
+
+      const result = await service.changePassword(actor, dto, IP);
+
+      expect(jwtService.signAsync).toHaveBeenCalledWith({
+        sub: 'user-1',
+        pv: passwordVersion('$2b$04$hash-novo'),
+      });
+      expect(passwordVersion('$2b$04$hash-novo')).not.toBe(
+        passwordVersion('$2b$04$hash-armazenado'),
+      );
+      expect(result).toMatchObject({ accessToken: 'jwt-assinado', tokenType: 'Bearer' });
+      expect(auditService.record).toHaveBeenCalledTimes(1);
+      expect(auditService.record).toHaveBeenCalledWith({
+        usuarioId: 'user-1',
+        acao: AuditAction.PasswordChanged,
+        modulo: AuditModuleName.Auth,
+        descricao: 'Senha propria alterada',
+        ip: IP,
+        metadados: { alvoId: 'user-1' },
+      });
+      const exposto = JSON.stringify([auditService.record.mock.calls, result]);
+      expect(exposto).not.toMatch(/SenhaAtual1|NovaSenha2|hash-novo|hash-armazenado/);
+    });
+
+    it('troca concorrente (hash mudou no meio): 409, sem token e sem auditoria', async () => {
+      usersService.findById.mockResolvedValue(makeUser());
+      passwordService.verify.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+      passwordService.hash.mockResolvedValue('$2b$04$hash-novo');
+      usersService.replacePasswordHash.mockResolvedValue(false);
+
+      await expect(service.changePassword(actor, dto, IP)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+
+      expect(jwtService.signAsync).not.toHaveBeenCalled();
+      expect(auditService.record).not.toHaveBeenCalled();
     });
   });
 });

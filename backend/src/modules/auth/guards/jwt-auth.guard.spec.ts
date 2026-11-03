@@ -6,6 +6,7 @@ import { RoleName } from '../../roles/role-name.enum';
 import type { User } from '../../users/entities/user.entity';
 import type { UsersService } from '../../users/users.service';
 import type { AuthenticatedRequest } from '../auth.types';
+import { passwordVersion } from '../password-version';
 import { JwtAuthGuard } from './jwt-auth.guard';
 
 function makeContext(request: Partial<AuthenticatedRequest>): ExecutionContext {
@@ -102,6 +103,60 @@ describe('JwtAuthGuard', () => {
       ).rejects.toBeInstanceOf(UnauthorizedException);
     },
   );
+
+  describe('versao da senha (pv)', () => {
+    it('token com pv igual ao do hash atual: aceito', async () => {
+      jwtService.verifyAsync.mockResolvedValue({ sub: 'user-1', pv: passwordVersion('hash') });
+      usersService.findById.mockResolvedValue(activeUser);
+
+      await expect(guard.canActivate(makeContext(requestWith('Bearer abc')))).resolves.toBe(true);
+    });
+
+    it('token com pv de uma senha ANTERIOR: 401 (sessao invalidada pela troca)', async () => {
+      jwtService.verifyAsync.mockResolvedValue({
+        sub: 'user-1',
+        pv: passwordVersion('hash-antigo'),
+      });
+      usersService.findById.mockResolvedValue(activeUser);
+      const request = requestWith('Bearer abc');
+
+      await expect(guard.canActivate(makeContext(request))).rejects.toThrow(
+        'Token de acesso invalido ou expirado',
+      );
+      expect(request.user).toBeUndefined();
+    });
+
+    it('token SEM pv (anterior a este campo): aceito, compatibilidade temporaria', async () => {
+      jwtService.verifyAsync.mockResolvedValue({ sub: 'user-1' });
+      usersService.findById.mockResolvedValue(activeUser);
+
+      await expect(guard.canActivate(makeContext(requestWith('Bearer abc')))).resolves.toBe(true);
+    });
+
+    it.each([[123], [null], [{}], [['a']], ['']])('pv malformado (%j): 401', async (pv) => {
+      jwtService.verifyAsync.mockResolvedValue({ sub: 'user-1', pv });
+      usersService.findById.mockResolvedValue(activeUser);
+
+      await expect(
+        guard.canActivate(makeContext(requestWith('Bearer abc'))),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+    });
+
+    it('pv antigo e usuario inativo recebem a mesma resposta (nao revela o estado)', async () => {
+      jwtService.verifyAsync.mockResolvedValue({ sub: 'user-1', pv: 'ffffffffffffffff' });
+      usersService.findById.mockResolvedValue(activeUser);
+      const antigo = await guard
+        .canActivate(makeContext(requestWith('Bearer abc')))
+        .catch((e: unknown) => (e as Error).message);
+
+      usersService.findById.mockResolvedValue({ ...activeUser, ativo: false });
+      const inativo = await guard
+        .canActivate(makeContext(requestWith('Bearer abc')))
+        .catch((e: unknown) => (e as Error).message);
+
+      expect(antigo).toBe(inativo);
+    });
+  });
 
   it('rejeita usuario que nao existe mais', async () => {
     jwtService.verifyAsync.mockResolvedValue({ sub: 'user-1' });

@@ -183,7 +183,13 @@ mais tres regras:
    pode ser verificado em MySQL/Oracle reais.
 
 O `PATCH /users/:id` generico so aceita nome e e-mail: senha, perfil e status
-sao recusados com 400. Nao ha fluxo de troca de senha ainda.
+sao recusados com 400. A troca da PROPRIA senha e `POST /auth/change-password` (exige a senha atual,
+aplica a politica de senha, recusa reutilizar a atual, so age sobre quem esta autenticado, audita
+`PASSWORD_CHANGED` e tem limite de 5/min por IP no nginx). O token traz `pv` (impressao digital do hash
+da senha): trocar a senha invalida os tokens anteriores e a resposta devolve um token novo. Tokens
+emitidos antes do campo `pv` existir seguem validos ate expirar (compatibilidade temporaria; remover a
+tolerancia no guard quando todos tiverem expirado). **Nao ha** recuperacao de senha esquecida nem
+redefinicao por administrador.
 
 O frontend usa `GET /users/assignable-roles` para saber quais acoes mostrar, sem
 reimplementar a hierarquia. Esconder botoes e so conveniencia: toda operacao e
@@ -217,8 +223,8 @@ recusadas (403, 409). Senha nunca e gravada - nem aparece nas operacoes, e o
 
 **Limitacoes conhecidas (para o hardening).**
 
-- Logout nao invalida o JWT (stateless): apenas audita. O token vale ate expirar.
-  Revogacao imediata exige lista de tokens revogados ou versao de token no usuario.
+- Logout nao invalida o JWT (stateless): apenas audita. O token vale ate expirar. Somente a TROCA DE
+  SENHA invalida tokens anteriores (via `pv`); revogar um token isolado exigiria lista de revogados.
 - Sem limite de tentativas de login (rate limiting / bloqueio temporario).
 - Sem refresh token: ao expirar, o usuario faz login de novo.
 - Migration Oracle nunca executada em banco real, e sem caminho definido para

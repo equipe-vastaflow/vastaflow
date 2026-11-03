@@ -188,6 +188,32 @@ export class UsersRepository {
   }
 
   /**
+   * Troca o hash da senha, SO se o hash gravado ainda for `hashAnterior` (compare-and-swap).
+   *
+   * Duas trocas simultaneas partem do mesmo hash: so a primeira alcanca a linha, a outra recebe zero e
+   * nao sobrescreve a senha da primeira. UPDATE direcionado: apenas `senha_hash` e `updated_at`, entao
+   * nome, e-mail, perfil e status nao sao tocados. `updated_at` vai explicito pelo mesmo motivo de
+   * `updateName`.
+   *
+   * @returns quantas linhas foram alcancadas: zero quando o usuario sumiu ou o hash ja mudou.
+   */
+  async updatePasswordHash(
+    id: string,
+    hashAnterior: string,
+    novoHash: string,
+    quando: Date,
+  ): Promise<number> {
+    const result = await this.repository
+      .createQueryBuilder()
+      .update(User)
+      .set({ senhaHash: novoHash, updatedAt: quando })
+      .where('id = :id AND senha_hash = :hashAnterior', { id, hashAnterior })
+      .execute();
+
+    return result.affected ?? 0;
+  }
+
+  /**
    * Executa uma alteracao de status ou de perfil sob lock, para que a regra do
    * "ultimo ADMIN ativo" valha tambem sob concorrencia.
    *

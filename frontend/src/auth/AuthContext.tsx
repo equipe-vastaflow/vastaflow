@@ -23,6 +23,11 @@ interface AuthContextValue {
   logout: () => Promise<void>;
   /** Rele o usuario da sessao no servidor (ex.: depois de ele editar os proprios dados). */
   refreshUser: () => Promise<void>;
+  /**
+   * Troca a propria senha. O servidor invalida os tokens anteriores e devolve um NOVO, que passa a ser o
+   * da sessao (guardado no lugar do antigo): quem trocou continua logado. Erros sobem para a tela.
+   */
+  changePassword: (senhaAtual: string, novaSenha: string) => Promise<void>;
 }
 
 interface Session {
@@ -124,6 +129,19 @@ export function AuthProvider({ children }: { children: ReactNode }): ReactNode {
     setSession((current) => (current?.token === session.token ? { ...current, user } : current));
   }, [session]);
 
+  const changePassword = useCallback(
+    async (senhaAtual: string, novaSenha: string): Promise<void> => {
+      if (!session) {
+        return;
+      }
+      const response = await api.changePassword(session.token, { senhaAtual, novaSenha });
+      const expiresAt = Date.now() + response.expiresIn * 1000;
+      saveSession({ token: response.accessToken, expiresAt });
+      setSession({ token: response.accessToken, expiresAt, user: response.user });
+    },
+    [session],
+  );
+
   const value = useMemo<AuthContextValue>(
     () => ({
       status,
@@ -133,8 +151,9 @@ export function AuthProvider({ children }: { children: ReactNode }): ReactNode {
       login,
       logout,
       refreshUser,
+      changePassword,
     }),
-    [status, session, login, logout, refreshUser],
+    [status, session, login, logout, refreshUser, changePassword],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

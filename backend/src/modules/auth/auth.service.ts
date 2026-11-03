@@ -1,10 +1,17 @@
-import { ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import type { EnvironmentVariables } from '../../config/env.validation';
 import { AuditAction, AuditModuleName } from '../audit/audit-action.enum';
 import { AuditService } from '../audit/audit.service';
 import { RoleName } from '../roles/role-name.enum';
+import type { ChangePasswordDto } from '../users/dto/change-password.dto';
 import { toUserResponse } from '../users/dto/user-response.dto';
 import type { User } from '../users/entities/user.entity';
 import { PasswordService } from '../users/password.service';
@@ -13,6 +20,7 @@ import { parseDurationToSeconds } from './auth.config';
 import type { AuthenticatedUser, JwtPayload } from './auth.types';
 import type { AuthResponseDto } from './dto/auth-response.dto';
 import type { LoginDto } from './dto/login.dto';
+import { passwordVersion } from './password-version';
 import type { RegisterDto } from './dto/register.dto';
 
 @Injectable()
@@ -117,8 +125,58 @@ export class AuthService {
     });
   }
 
+  /**
+   * Troca da PROPRIA senha. O alvo e sempre `actor` (vem do JWT): nao ha parametro de usuario.
+   *
+   * Exige a senha atual, aplica a politica de senha (no DTO) e recusa reaproveitar a senha atual. A
+   * gravacao so vale se o hash ainda for o que foi verificado (duas trocas simultaneas: so uma passa).
+   * Depois da troca os tokens emitidos ANTES deixam de valer (o `pv` deles nao confere mais com o hash
+   * novo - ver `JwtAuthGuard`); por isso devolve um token NOVO para a sessao de quem trocou.
+   *
+   * A senha atual errada responde 400, nunca 401: o frontend trata 401 como sessao expirada e deslogaria.
+   * Nenhuma senha nem hash vai para log, resposta ou auditoria.
+   *
+   * @throws UnauthorizedException a conta sumiu ou ficou inativa entre o guard e esta chamada.
+   * @throws BadRequestException senha atual incorreta, ou nova senha igual a atual.
+   * @throws ConflictException a senha mudou durante a operacao.
+   */
+  async changePassword(
+    actor: AuthenticatedUser,
+    dto: ChangePasswordDto,
+    ip: string | null,
+  ): Promise<AuthResponseDto> {
+    const user = await this.usersService.findById(actor.id);
+    if (!user?.ativo) {
+      throw new UnauthorizedException('Token de acesso invalido ou expirado');
+    }
+
+    if (!(await this.passwordService.verify(dto.senhaAtual, user.senhaHash))) {
+      throw new BadRequestException('Senha atual incorreta');
+    }
+    if (await this.passwordService.verify(dto.novaSenha, user.senhaHash)) {
+      throw new BadRequestException('A nova senha deve ser diferente da senha atual');
+    }
+
+    const novoHash = await this.passwordService.hash(dto.novaSenha);
+    const quando = new Date();
+    if (!(await this.usersService.replacePasswordHash(user.id, user.senhaHash, novoHash, quando))) {
+      throw new ConflictException('A senha foi alterada por outra requisicao. Tente novamente.');
+    }
+
+    await this.auditService.record({
+      usuarioId: user.id,
+      acao: AuditAction.PasswordChanged,
+      modulo: AuditModuleName.Auth,
+      descricao: 'Senha propria alterada',
+      ip,
+      metadados: { alvoId: user.id },
+    });
+
+    return this.buildAuthResponse({ ...user, senhaHash: novoHash, updatedAt: quando });
+  }
+
   private async buildAuthResponse(user: User): Promise<AuthResponseDto> {
-    const payload: JwtPayload = { sub: user.id };
+    const payload: JwtPayload = { sub: user.id, pv: passwordVersion(user.senhaHash) };
     return {
       accessToken: await this.jwtService.signAsync(payload),
       tokenType: 'Bearer',

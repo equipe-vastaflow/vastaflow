@@ -216,18 +216,20 @@ describe('Tela de perfil', () => {
       expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
     });
 
-    it('nao ha campo de senha', async () => {
+    it('o formulario do nome nao tem campo de senha (a senha tem formulario proprio)', async () => {
       renderAt('/profile', COMUM);
-      await heading('Meu perfil');
+      await screen.findByRole('textbox', { name: 'Nome' });
 
-      expect(document.querySelector('input[type="password"]')).toBeNull();
+      const formNome = campoNome().closest('form');
+      expect(formNome?.querySelector('input[type="password"]')).toBeNull();
+      expect(document.querySelectorAll('input[type="password"]')).toHaveLength(3);
     });
 
     it('a tela diz o que nao e editavel aqui', async () => {
       renderAt('/profile', COMUM);
 
       expect(
-        await screen.findByText(/Troca de senha e de e-mail ainda não estão disponíveis/),
+        await screen.findByText(/A troca de e-mail ainda não está disponível/),
       ).toBeInTheDocument();
     });
 
@@ -473,6 +475,226 @@ describe('Tela de perfil', () => {
       const alertas = await screen.findAllByRole('alert');
       expect(alertas.some((a) => a.textContent?.includes('conectar ao servidor'))).toBe(true);
       expect(within(await heading('Meu perfil')).queryByText('erro')).toBeNull();
+    });
+  });
+
+  describe('alterar senha', () => {
+    const TROCA = 'POST /auth/change-password';
+    const SESSAO = 'vastaflow.session';
+
+    const respostaTroca = (token = 'jwt-novo'): Reply => ({
+      status: 200,
+      body: { accessToken: token, tokenType: 'Bearer', expiresIn: 3600, user: COMUM },
+    });
+
+    const campo = (nome: string): HTMLElement => screen.getByLabelText(nome);
+
+    function chamadasA(fetchMock: ReturnType<typeof vi.fn>, rota: string): [string, RequestInit][] {
+      const [metodo, caminho] = rota.split(' ');
+      return chamadas(fetchMock).filter(
+        ([url, init]) => (init.method ?? 'GET') === metodo && new URL(url).pathname === caminho,
+      );
+    }
+
+    async function preencher(atual: string, nova: string, confirmacao = nova): Promise<void> {
+      await screen.findByRole('heading', { name: 'Alterar senha' });
+      await userEvent.type(campo('Senha atual'), atual);
+      await userEvent.type(campo('Nova senha'), nova);
+      await userEvent.type(campo('Confirmar nova senha'), confirmacao);
+    }
+
+    const enviar = (): Promise<void> =>
+      userEvent.click(screen.getByRole('button', { name: 'Alterar senha' }));
+
+    it('mostra a secao com tres campos de senha e a regra da senha', async () => {
+      renderAt('/profile', COMUM);
+
+      expect(await screen.findByRole('heading', { name: 'Alterar senha' })).toBeInTheDocument();
+      for (const nome of ['Senha atual', 'Nova senha', 'Confirmar nova senha']) {
+        expect(campo(nome)).toHaveAttribute('type', 'password');
+      }
+      expect(campo('Senha atual')).toHaveAttribute('autocomplete', 'current-password');
+      expect(campo('Nova senha')).toHaveAttribute('autocomplete', 'new-password');
+      expect(screen.getByText(/de 8 a 72 caracteres/)).toBeInTheDocument();
+    });
+
+    it('envia SO a senha atual e a nova, com o token da sessao', async () => {
+      const fetchMock = renderAt('/profile', COMUM, { [TROCA]: respostaTroca() });
+
+      await preencher('SenhaAtual1', 'NovaSenha2');
+      await enviar();
+      await screen.findByText(/Senha alterada com sucesso/);
+
+      const [chamada] = chamadasA(fetchMock, TROCA);
+      expect(JSON.parse(chamada?.[1].body as string)).toEqual({
+        senhaAtual: 'SenhaAtual1',
+        novaSenha: 'NovaSenha2',
+      });
+      expect(chamada?.[1].headers).toMatchObject({ Authorization: 'Bearer jwt-guardado' });
+    });
+
+    it('sucesso: guarda o token NOVO, limpa os campos, avisa e nao desloga', async () => {
+      const fetchMock = renderAt('/profile', COMUM, {
+        [TROCA]: respostaTroca(),
+        'POST /auth/logout': { status: 204 },
+      });
+
+      await preencher('SenhaAtual1', 'NovaSenha2');
+      await enviar();
+
+      expect(await screen.findByRole('status')).toHaveTextContent(/Senha alterada com sucesso/);
+      expect(JSON.parse(localStorage.getItem(SESSAO) ?? '{}')).toMatchObject({
+        token: 'jwt-novo',
+      });
+      expect(campo('Senha atual')).toHaveValue('');
+      expect(campo('Nova senha')).toHaveValue('');
+      expect(campo('Confirmar nova senha')).toHaveValue('');
+      expect(chamadasA(fetchMock, 'POST /auth/logout')).toHaveLength(0);
+      expect(screen.getByRole('heading', { name: 'Meu perfil' })).toBeInTheDocument();
+    });
+
+    it('depois da troca as chamadas seguintes usam o token novo', async () => {
+      const fetchMock = renderAt('/profile', COMUM, { [TROCA]: respostaTroca('jwt-novo') });
+
+      await preencher('SenhaAtual1', 'NovaSenha2');
+      await enviar();
+      await screen.findByText(/Senha alterada com sucesso/);
+
+      await waitFor(() => {
+        const ultima = chamadasA(fetchMock, 'GET /profile').at(-1);
+        expect(ultima?.[1].headers).toMatchObject({ Authorization: 'Bearer jwt-novo' });
+      });
+    });
+
+    it('senha atual incorreta (400): mostra o motivo, NAO desloga e mantem a sessao', async () => {
+      const fetchMock = renderAt('/profile', COMUM, {
+        [TROCA]: { status: 400, body: { message: 'Senha atual incorreta' } },
+        'POST /auth/logout': { status: 204 },
+      });
+
+      await preencher('Errada123', 'NovaSenha2');
+      await enviar();
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('Senha atual incorreta');
+      expect(JSON.parse(localStorage.getItem(SESSAO) ?? '{}')).toMatchObject({
+        token: 'jwt-guardado',
+      });
+      expect(chamadasA(fetchMock, 'POST /auth/logout')).toHaveLength(0);
+      expect(screen.getByRole('heading', { name: 'Meu perfil' })).toBeInTheDocument();
+      expect(screen.queryByText('Entre com sua conta para continuar.')).toBeNull();
+      expect(screen.getByRole('button', { name: 'Alterar senha' })).toBeEnabled();
+    });
+
+    it('nova senha fora da politica (400): mostra a mensagem do servidor', async () => {
+      renderAt('/profile', COMUM, {
+        [TROCA]: {
+          status: 400,
+          body: { message: ['A senha deve ter de 8 a 72 caracteres'] },
+        },
+      });
+
+      await preencher('SenhaAtual1', 'fraca');
+      await enviar();
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        'A senha deve ter de 8 a 72 caracteres',
+      );
+    });
+
+    it('confirmacao diferente: avisa e nao chama a API', async () => {
+      const fetchMock = renderAt('/profile', COMUM, { [TROCA]: respostaTroca() });
+
+      await preencher('SenhaAtual1', 'NovaSenha2', 'NovaSenha3');
+      await enviar();
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(/confirmação não confere/);
+      expect(chamadasA(fetchMock, TROCA)).toHaveLength(0);
+    });
+
+    it('nova senha igual a atual: avisa e nao chama a API', async () => {
+      const fetchMock = renderAt('/profile', COMUM, { [TROCA]: respostaTroca() });
+
+      await preencher('SenhaAtual1', 'SenhaAtual1');
+      await enviar();
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(/diferente da senha atual/);
+      expect(chamadasA(fetchMock, TROCA)).toHaveLength(0);
+    });
+
+    it('campos vazios: avisa e nao chama a API', async () => {
+      const fetchMock = renderAt('/profile', COMUM, { [TROCA]: respostaTroca() });
+      await screen.findByRole('heading', { name: 'Alterar senha' });
+
+      await enviar();
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(/Preencha/);
+      expect(chamadasA(fetchMock, TROCA)).toHaveLength(0);
+    });
+
+    it('401 de verdade (sessao expirada): encerra a sessao e leva ao login', async () => {
+      renderAt('/profile', COMUM, {
+        [TROCA]: { status: 401, body: { message: 'expirado' } },
+        'POST /auth/logout': { status: 204 },
+      });
+
+      await preencher('SenhaAtual1', 'NovaSenha2');
+      await enviar();
+
+      expect(await screen.findByText('Entre com sua conta para continuar.')).toBeInTheDocument();
+    });
+
+    it('429: pede para aguardar e mantem a sessao', async () => {
+      renderAt('/profile', COMUM, { [TROCA]: { status: 429, body: { message: 'Too Many' } } });
+
+      await preencher('SenhaAtual1', 'NovaSenha2');
+      await enviar();
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(/Muitas tentativas/);
+      expect(JSON.parse(localStorage.getItem(SESSAO) ?? '{}')).toMatchObject({
+        token: 'jwt-guardado',
+      });
+    });
+
+    it('erro de rede nao derruba a tela nem a sessao', async () => {
+      renderAt('/profile', COMUM, {
+        [TROCA]: () => {
+          throw new TypeError('rede fora');
+        },
+      });
+
+      await preencher('SenhaAtual1', 'NovaSenha2');
+      await enviar();
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(/conectar ao servidor/);
+      expect(JSON.parse(localStorage.getItem(SESSAO) ?? '{}')).toMatchObject({
+        token: 'jwt-guardado',
+      });
+    });
+
+    it('as senhas nunca vao para o armazenamento local, nem em texto na tela', async () => {
+      renderAt('/profile', COMUM, { [TROCA]: respostaTroca() });
+
+      await preencher('SenhaAtual1', 'NovaSenha2');
+      expect(localStorage.getItem(SESSAO)).not.toMatch(/SenhaAtual1|NovaSenha2/);
+      await enviar();
+      await screen.findByText(/Senha alterada com sucesso/);
+
+      expect(localStorage.getItem(SESSAO)).not.toMatch(/SenhaAtual1|NovaSenha2/);
+      expect(document.body.textContent).not.toMatch(/SenhaAtual1|NovaSenha2/);
+    });
+
+    it('o corpo nunca leva id, e-mail ou perfil: so os dois campos de senha', async () => {
+      const fetchMock = renderAt('/profile', COMUM, { [TROCA]: respostaTroca() });
+
+      await preencher('SenhaAtual1', 'NovaSenha2');
+      await enviar();
+      await screen.findByText(/Senha alterada com sucesso/);
+
+      const [chamada] = chamadasA(fetchMock, TROCA);
+      expect(Object.keys(JSON.parse(chamada?.[1].body as string) as object).sort()).toEqual([
+        'novaSenha',
+        'senhaAtual',
+      ]);
     });
   });
 });

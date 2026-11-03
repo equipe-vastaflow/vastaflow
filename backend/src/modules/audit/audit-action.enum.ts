@@ -4,6 +4,8 @@ export enum AuditAction {
   /** Tentativa de login recusada (credenciais invalidas ou usuario inativo). */
   LoginFailed = 'LOGIN_FAILED',
   Logout = 'LOGOUT',
+  /** O proprio usuario trocou a senha. Nenhuma senha nem hash entra nos metadados. */
+  PasswordChanged = 'PASSWORD_CHANGED',
   Register = 'REGISTER',
 
   // Administracao de usuarios. `usuarioId` e quem executou; o alvo vai em `metadados.alvoId`.

@@ -9,6 +9,12 @@ import type { UserResponseDto } from '../users/dto/user-response.dto';
  */
 export interface JwtPayload {
   sub: string;
+  /**
+   * Versao da senha no momento da emissao (`passwordVersion`). Trocar a senha invalida o token. Tokens
+   * emitidos antes deste campo existir nao o trazem e seguem validos ate expirar (compatibilidade
+   * temporaria, no maximo `JWT_EXPIRES_IN`).
+   */
+  pv?: string;
 }
 
 /** Usuario autenticado, anexado a requisicao pelo `JwtAuthGuard`. */

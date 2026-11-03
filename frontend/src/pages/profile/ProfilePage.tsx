@@ -5,6 +5,7 @@ import { useAuth } from '../../auth/AuthContext';
 import { AppShell } from '../../components/AppShell';
 import { ROLE_LABELS } from '../../roles';
 import { formatDateTime } from '../users/format';
+import { ChangePasswordForm } from './ChangePasswordForm';
 
 const NOT_FOUND = 'Sua conta não foi encontrada. Entre novamente.';
 
@@ -202,8 +203,8 @@ export function ProfilePage(): ReactNode {
             </div>
           </dl>
           <p className="muted">
-            E-mail, perfil e situação não são editáveis aqui. Troca de senha e de e-mail ainda não
-            estão disponíveis.
+            E-mail, perfil e situação não são editáveis aqui. A troca de e-mail ainda não está
+            disponível.
           </p>
 
           <div className="row-actions">
@@ -213,6 +214,8 @@ export function ProfilePage(): ReactNode {
           </div>
         </form>
       )}
+
+      {profile && <ChangePasswordForm />}
     </AppShell>
   );
 }

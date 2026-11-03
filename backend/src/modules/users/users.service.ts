@@ -38,6 +38,21 @@ export class UsersService {
     return this.usersRepository.findById(id);
   }
 
+  /**
+   * Grava o novo hash da senha se o atual ainda for `hashAnterior`. Quem chama ja verificou a senha
+   * atual e aplicou a politica; aqui so se persiste. `false` = a conta sumiu ou a senha mudou no meio.
+   */
+  async replacePasswordHash(
+    id: string,
+    hashAnterior: string,
+    novoHash: string,
+    quando: Date,
+  ): Promise<boolean> {
+    return (
+      (await this.usersRepository.updatePasswordHash(id, hashAnterior, novoHash, quando)) === 1
+    );
+  }
+
   findByEmail(email: string): Promise<User | null> {
     return this.usersRepository.findByEmail(normalizeEmail(email));
   }

@@ -13,6 +13,7 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { ClientIp } from '../../common/decorators/client-ip.decorator';
+import { ChangePasswordDto } from '../users/dto/change-password.dto';
 import { UserResponseDto } from '../users/dto/user-response.dto';
 import { AuthService } from './auth.service';
 import { CurrentUser } from './decorators/current-user.decorator';
@@ -57,6 +58,30 @@ export class AuthController {
   @ApiForbiddenResponse({ description: 'Usuario inativo' })
   login(@Body() dto: LoginDto, @ClientIp() ip: string | null): Promise<AuthResponseDto> {
     return this.authService.login(dto, ip);
+  }
+
+  @Post('change-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: 'Troca a PROPRIA senha',
+    description:
+      'Exige a senha atual e aplica a politica de senha. Nao ha parametro de usuario: o alvo e ' +
+      'sempre quem esta autenticado. Os tokens emitidos antes da troca deixam de valer; a resposta ' +
+      'traz um token novo para a sessao atual. Senha atual incorreta responde 400 (nunca 401).',
+  })
+  @ApiOkResponse({ type: AuthResponseDto })
+  @ApiBadRequestResponse({
+    description: 'Senha atual incorreta, nova senha fora da politica ou igual a atual',
+  })
+  @ApiUnauthorizedResponse({ description: 'Token ausente, invalido ou expirado' })
+  @ApiConflictResponse({ description: 'A senha foi alterada por outra requisicao' })
+  changePassword(
+    @CurrentUser() user: UserResponseDto,
+    @Body() dto: ChangePasswordDto,
+    @ClientIp() ip: string | null,
+  ): Promise<AuthResponseDto> {
+    return this.authService.changePassword(user, dto, ip);
   }
 
   @Get('me')

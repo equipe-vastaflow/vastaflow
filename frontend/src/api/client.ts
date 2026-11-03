@@ -385,6 +385,15 @@ export interface UpdateProfileInput {
   nome?: string;
 }
 
+/**
+ * Troca da PROPRIA senha (`POST /auth/change-password`). So estes dois campos: nao ha id nem e-mail, o
+ * alvo e quem esta autenticado. A resposta traz um token NOVO (o antigo deixa de valer).
+ */
+export interface ChangePasswordInput {
+  senhaAtual: string;
+  novaSenha: string;
+}
+
 /** Natureza da notificacao. O texto da tela sempre diz qual e - a cor nao e a unica pista. */
 export type NotificationType = 'INFO' | 'SUCCESS' | 'WARNING' | 'ERROR';
 
@@ -605,6 +614,10 @@ export const api = {
     request('/auth/login', { method: 'POST', body: { email, senha } }),
 
   me: (token: string): Promise<User> => request('/auth/me', { token }),
+
+  /** Senha atual incorreta responde 400 (nunca 401): a tela nao confunde com sessao expirada. */
+  changePassword: (token: string, input: ChangePasswordInput): Promise<LoginResponse> =>
+    request('/auth/change-password', { method: 'POST', body: input, token }),
 
   logout: (token: string): Promise<void> => request('/auth/logout', { method: 'POST', token }),
 

@@ -13,6 +13,7 @@ import {
 import { UsersService } from '../../users/users.service';
 import type { AuthenticatedRequest, JwtPayload } from '../auth.types';
 import { toAuthenticatedUser } from '../authenticated-user';
+import { passwordVersion } from '../password-version';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 
 /**
@@ -66,10 +67,16 @@ export class JwtAuthGuard implements CanActivate {
       throw new UnauthorizedException('Token de acesso ausente');
     }
 
-    const userId = await this.verify(token);
+    const payload = await this.verify(token);
+    const record = await this.usersService.findById(payload.sub);
     // Mesma regra dos canais de mensageria (`toAuthenticatedUser`).
-    const user = toAuthenticatedUser(await this.usersService.findById(userId));
-    if (!user) {
+    const user = toAuthenticatedUser(record);
+    // Token emitido com versao de senha (`pv`): se a senha mudou depois, ele deixa de valer. Sem `pv`
+    // (token anterior a este campo) segue valido ate expirar - compatibilidade temporaria.
+    if (
+      !user ||
+      (payload.pv !== undefined && payload.pv !== passwordVersion(record?.senhaHash ?? ''))
+    ) {
       // Mesma resposta para "nao existe" e "inativo": nao revela o estado da conta.
       throw new UnauthorizedException('Token de acesso invalido ou expirado');
     }
@@ -78,14 +85,21 @@ export class JwtAuthGuard implements CanActivate {
     return true;
   }
 
-  private async verify(token: string): Promise<string> {
+  private async verify(token: string): Promise<{ sub: string; pv?: string }> {
     try {
       // Fixar o algoritmo impede o ataque de troca de algoritmo (ex.: `none`).
       const payload = await this.jwtService.verifyAsync<JwtPayload>(token, {
         algorithms: ['HS256'],
       });
-      if (typeof payload.sub === 'string' && payload.sub !== '') {
-        return payload.sub;
+      // `pv`, quando presente, tem de ser texto: qualquer outro tipo e token malformado.
+      if (
+        typeof payload.sub === 'string' &&
+        payload.sub !== '' &&
+        (payload.pv === undefined || typeof payload.pv === 'string')
+      ) {
+        return payload.pv === undefined
+          ? { sub: payload.sub }
+          : { sub: payload.sub, pv: payload.pv };
       }
     } catch {
       // Assinatura invalida, token expirado ou malformado: todos viram 401.

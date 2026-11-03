@@ -502,6 +502,7 @@ describe('Auth, usuarios e RBAC (e2e)', () => {
       expect(Object.keys(document.paths).sort()).toEqual(
         [
           '/audit-logs',
+          '/auth/change-password',
           '/auth/login',
           '/auth/logout',
           '/auth/me',
