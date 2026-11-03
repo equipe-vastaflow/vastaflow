@@ -16,7 +16,7 @@ const GOOD = {
   tomador: '529.982.247-25',
   nome: 'Maria Teste',
   valor: '1500,50',
-  servico: '990101',
+  servico: '010301',
   desc: 'Servico ficticio',
   iss: '1',
   ret: '1',
@@ -212,8 +212,8 @@ describe('NFS-e - impressao digital da confirmacao', () => {
     expect(summary).toContain(
       'Perfil fiscal: servico-sintetico v1 (aprovado por Contadora Ficticia em 01/10/2026; ref. ',
     );
-    expect(summary).toContain('Codigos: cTribNac 990101, cTribMun 777, NBS 188888888');
-    expect(summary).toContain('IBS/CBS: CST 288, cClassTrib 288888, cIndOp 288888, indDest 0');
+    expect(summary).toContain('Codigos: cTribNac 010301, cTribMun 777, NBS 101011100');
+    expect(summary).toContain('IBS/CBS: CST 288, cClassTrib 288888, cIndOp 100301, indDest 0');
     expect(summary).toContain('Tributos federais: PIS/COFINS CST 99, IRRF R$ 22,51, CSLL R$ 30,01');
     expect(summary).toContain(
       'Total aproximado de tributos: federal R$ 150,05, estadual R$ 75,03, municipal R$ 37,51',

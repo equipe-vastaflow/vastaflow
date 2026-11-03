@@ -6,6 +6,7 @@ import {
   parseFiscalProfiles,
   profileContentHash,
 } from './nfse-fiscal-profile';
+import { checkProfileCompatibility } from './nfse-profile-compat';
 
 /**
  * Apoio a aprovacao dos perfis fiscais (so leitura; nao altera o arquivo, nao fala com a rede):
@@ -60,6 +61,15 @@ export function run(argv: readonly string[], io: ProfileCliIo): number {
       io.err('erro: perfil nao encontrado (ou invalido)');
       return 1;
     }
+    // Perfil que o gerador de DPS nao consegue atender NAO ganha folha de aprovacao: seria aprovar o que nao emite.
+    const issues = checkProfileCompatibility(profile);
+    if (issues.length > 0) {
+      for (const issue of issues) {
+        io.err(`incompativel [${issue.regra}] ${issue.mensagem}`);
+      }
+      io.err('erro: corrija o perfil antes de aprova-lo (nenhum hash foi gerado)');
+      return 1;
+    }
     const { aprovacao: _approval, ...content } = profile;
     io.out(canonicalJson(content));
     io.out(`conteudoSha256: ${profileContentHash(profile)}`);
@@ -75,6 +85,11 @@ export function run(argv: readonly string[], io: ProfileCliIo): number {
         check.usable ? 'UTILIZAVEL' : `NAO utilizavel (${check.motivo})`
       } | conteudoSha256: ${profileContentHash(profile)}`,
     );
+    // As incompatibilidades aparecem para TODO perfil, inclusive rascunho: corrigir antes de pedir a aprovacao.
+    for (const issue of checkProfileCompatibility(profile)) {
+      io.out(`  incompativel [${issue.regra}] ${issue.mensagem}`);
+      usable = false;
+    }
   }
   if (parsed.perfis.length === 0) {
     io.out('nenhum perfil valido no arquivo');

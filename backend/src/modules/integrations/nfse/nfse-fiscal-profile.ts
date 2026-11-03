@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { checkProfileCompatibility, describeIssues } from './nfse-profile-compat';
 
 /**
  * PERFIS FISCAIS por servico (empresa NAO optante pelo Simples Nacional).
@@ -524,6 +525,14 @@ export function checkProfile(profile: NfseFiscalProfile, today: string): Profile
   }
   if (approval.conteudoSha256 !== profileContentHash(profile)) {
     return { usable: false, motivo: 'conteudo alterado depois da aprovacao (hash nao confere)' };
+  }
+  // Aprovado e integro, mas o VastaFlow so usa o perfil se consegue gerar uma DPS VALIDA para ele.
+  const issues = checkProfileCompatibility(profile);
+  if (issues.length > 0) {
+    return {
+      usable: false,
+      motivo: `incompativel com o gerador de DPS (${describeIssues(issues)})`,
+    };
   }
   return { usable: true };
 }

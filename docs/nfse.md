@@ -205,6 +205,9 @@ Rollback: `NFSE_ENABLED=false` e recriar o backend (a tabela e o histórico perm
 
 ## 10. Limitações
 
+Perfil fiscal só é utilizável se o gerador de DPS consegue atendê-lo (tabelas oficiais e regras do Anexo I; ver
+`docs/nfse-perfis-fiscais.md`, seção 5.1, com as pendências que dependem da contadora).
+
 Sem cancelamento (`/nfse_cancelar`), sem substituição, sem imunidade/exportação, sem Calculadora do IBS/CBS (o não optante
 emite só com perfil fiscal aprovado e o comando do Telegram ainda não coleta o endereço do tomador), sem CNPJ alfanumérico, sem
 DANFSe/PDF, sem envio de arquivo por chat, sem retentativa automática (de propósito), Oracle nunca executado, mTLS e TLS

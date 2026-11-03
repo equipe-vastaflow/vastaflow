@@ -103,7 +103,7 @@ describe('NFS-e - comandos no Command Engine (RBAC, conversa, auditoria)', () =>
       expect(gestor.permissions).not.toContain(PermissionCode.NfseRead);
 
       for (const text of [
-        '/nfse tomador=1 servico=990101',
+        '/nfse tomador=1 servico=010301',
         '/nfse_confirmar 1 ABCDEFGH',
         '/nfse_status',
       ]) {
@@ -154,7 +154,7 @@ describe('NFS-e - comandos no Command Engine (RBAC, conversa, auditoria)', () =>
     it('endereco do tomador: os argumentos chegam ao servico sem alteracao (a validacao e do servico)', async () => {
       request.mockResolvedValue({ kind: 'disabled' });
       const texto =
-        'tomador=52998224725 servico=990101 cmun=3106200 cep=30000-000 logradouro="Rua Ficticia" numero=100 bairro="Bairro Ficticio"';
+        'tomador=52998224725 servico=010301 cmun=3106200 cep=30000-000 logradouro="Rua Ficticia" numero=100 bairro="Bairro Ficticio"';
 
       await run(`/nfse ${texto}`, ADMIN);
 

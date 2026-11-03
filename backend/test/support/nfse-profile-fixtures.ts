@@ -9,7 +9,7 @@ import {
   type NfseFiscalProfile,
 } from '../../src/modules/integrations/nfse/nfse-fiscal-profile';
 
-export const SYNTHETIC_SERVICE = '990101';
+export const SYNTHETIC_SERVICE = '010301';
 export const SYNTHETIC_TODAY = '2026-10-15';
 
 type Draft = Omit<NfseFiscalProfile, 'aprovacao'>;
@@ -19,7 +19,7 @@ export function syntheticDraft(over: Partial<Draft> = {}): Draft {
     id: 'servico-sintetico',
     versao: 1,
     descricao: 'Perfil sintetico de teste (sem valor fiscal)',
-    servico: { cTribNac: SYNTHETIC_SERVICE, cTribMun: '777', cNBS: '188888888' },
+    servico: { cTribNac: SYNTHETIC_SERVICE, cTribMun: '777', cNBS: '101011100' },
     permitidos: { tribIssqn: [1], tpRetIssqn: [1, 2] },
     tomador: { exigeEndereco: true },
     tribFed: {
@@ -29,7 +29,7 @@ export function syntheticDraft(over: Partial<Draft> = {}): Draft {
     totTrib: { tipo: 'valores', fed: '10.00', est: '5.00', mun: '2.50' },
     ibscbs: {
       indDest: 0,
-      cIndOp: '288888',
+      cIndOp: '100301',
       indFinal: 0,
       tpOper: null,
       tpEnteGov: null,

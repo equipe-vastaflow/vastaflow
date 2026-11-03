@@ -85,7 +85,7 @@ describe('NFS-e - DPS do nao optante: valida no leiaute de CADA ambiente', () =>
   it.each([
     [
       'sem cTribMun',
-      { servico: { cTribNac: SYNTHETIC_SERVICE, cTribMun: null, cNBS: '188888888' } },
+      { servico: { cTribNac: SYNTHETIC_SERVICE, cTribMun: null, cNBS: '101011100' } },
     ],
     ['sem indFinal', { ibscbs: { ...approvedProfile().ibscbs, indFinal: null } }],
     [
@@ -166,10 +166,10 @@ describe('NFS-e - posicao e obrigatoriedade dos campos em cada leiaute', () => {
 
   it('ordem de cServ: producao (cTribNac, cTribMun, xDescServ, cNBS) x restrita (cTribNac, cTribMun, cNBS, xDescServ)', () => {
     expect(xmlProducao).toContain(
-      `<cServ><cTribNac>${SYNTHETIC_SERVICE}</cTribNac><cTribMun>777</cTribMun><xDescServ>Servico ficticio</xDescServ><cNBS>188888888</cNBS></cServ>`,
+      `<cServ><cTribNac>${SYNTHETIC_SERVICE}</cTribNac><cTribMun>777</cTribMun><xDescServ>Servico ficticio</xDescServ><cNBS>101011100</cNBS></cServ>`,
     );
     expect(xmlRestrita).toContain(
-      `<cServ><cTribNac>${SYNTHETIC_SERVICE}</cTribNac><cTribMun>777</cTribMun><cNBS>188888888</cNBS><xDescServ>Servico ficticio</xDescServ></cServ>`,
+      `<cServ><cTribNac>${SYNTHETIC_SERVICE}</cTribNac><cTribMun>777</cTribMun><cNBS>101011100</cNBS><xDescServ>Servico ficticio</xDescServ></cServ>`,
     );
   });
 
@@ -202,7 +202,7 @@ describe('NFS-e - posicao e obrigatoriedade dos campos em cada leiaute', () => {
     );
 
     expect(xml).toMatch(
-      /<cIndOp>288888<\/cIndOp><tpOper>1<\/tpOper><tpEnteGov>2<\/tpEnteGov><indDest>0<\/indDest>/,
+      /<cIndOp>100301<\/cIndOp><tpOper>1<\/tpOper><tpEnteGov>2<\/tpEnteGov><indDest>0<\/indDest>/,
     );
   });
 
@@ -228,8 +228,8 @@ describe('NFS-e - posicao e obrigatoriedade dos campos em cada leiaute', () => {
   });
 
   it('producao exige cIndOp no grupo IBSCBS; a restrita o aceita ausente', async () => {
-    const semCIndOpProducao = xmlProducao.replace('<cIndOp>288888</cIndOp>', '');
-    const semCIndOpRestrita = xmlRestrita.replace('<cIndOp>288888</cIndOp>', '');
+    const semCIndOpProducao = xmlProducao.replace('<cIndOp>100301</cIndOp>', '');
+    const semCIndOpRestrita = xmlRestrita.replace('<cIndOp>100301</cIndOp>', '');
 
     expect((await validateDpsXml(semCIndOpProducao, PRODUCAO)).valid).toBe(false);
     expect((await validateDpsXml(semCIndOpRestrita, RESTRITA)).valid).toBe(true);

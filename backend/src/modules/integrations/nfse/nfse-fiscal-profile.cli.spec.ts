@@ -76,7 +76,7 @@ describe('NFS-e - CLI dos perfis fiscais', () => {
   it('check: arquivo com problema lista o campo, nunca o valor, e sai com codigo 1', () => {
     const bad = {
       ...approvedProfile(),
-      servico: { cTribNac: 'VALOR-RUIM', cTribMun: null, cNBS: '188888888' },
+      servico: { cTribNac: 'VALOR-RUIM', cTribMun: null, cNBS: '101011100' },
     };
     const h = io(file(bad));
 
@@ -93,6 +93,44 @@ describe('NFS-e - CLI dos perfis fiscais', () => {
     expect(h.out[0]).not.toContain('aprovacao');
     expect(h.out[0]).toContain('"id":"servico-sintetico"');
     expect(h.out[1]).toBe(`conteudoSha256: ${approvedProfile().aprovacao.conteudoSha256}`);
+  });
+
+  it('check: perfil aprovado e integro mas incompativel com o gerador lista a regra e sai com codigo 1', () => {
+    const base = syntheticDraft();
+    const h = io(file(approvedProfile({ ibscbs: { ...base.ibscbs, indDest: 1 } })));
+
+    expect(run(['check', 'perfis.json'], h.io)).toBe(1);
+    expect(h.out.join('\n')).toMatch(/NAO utilizavel \(incompativel com o gerador de DPS/);
+    expect(h.out.join('\n')).toMatch(/ {2}incompativel \[DEST-1\]/);
+  });
+
+  it('check: rascunho incompativel tambem e apontado (corrigir antes de pedir aprovacao)', () => {
+    const base = syntheticDraft();
+    const h = io(
+      file({
+        ...base,
+        ibscbs: { ...base.ibscbs, cIndOp: '030101' },
+        aprovacao: {
+          status: 'rascunho',
+          aprovadoPor: null,
+          aprovadoEm: null,
+          conteudoSha256: null,
+        },
+      }),
+    );
+
+    expect(run(['check', 'perfis.json'], h.io)).toBe(1);
+    expect(h.out.join('\n')).toMatch(/incompativel \[OP-1\]/);
+  });
+
+  it('show: perfil incompativel NAO gera hash de aprovacao', () => {
+    const base = syntheticDraft();
+    const h = io(file(approvedProfile({ ibscbs: { ...base.ibscbs, tpOper: 2, tpEnteGov: 4 } })));
+
+    expect(run(['show', 'perfis.json', 'servico-sintetico', '1'], h.io)).toBe(1);
+    expect(h.out).toEqual([]);
+    expect(h.err.join('\n')).toMatch(/incompativel \[REF-1\]/);
+    expect(h.err.join('\n')).toMatch(/nenhum hash foi gerado/);
   });
 
   it('show: perfil inexistente ou sem id/versao', () => {

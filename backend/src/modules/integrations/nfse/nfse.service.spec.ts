@@ -652,7 +652,7 @@ describe('NFS-e - servico (maquina de estados, idempotencia, incerteza)', () => 
       }
       expect(result.summary).toContain('Perfil fiscal: servico-sintetico v1');
       expect(result.summary).toContain('aprovado por Contadora Ficticia');
-      expect(result.summary).toContain('IBS/CBS: CST 288, cClassTrib 288888, cIndOp 288888');
+      expect(result.summary).toContain('IBS/CBS: CST 288, cClassTrib 288888, cIndOp 100301');
       expect(result.summary).toContain('IRRF R$ 22,51');
       expect(result.summary).toContain('CSLL R$ 30,01');
       expect(result.summary).toMatch(
@@ -663,13 +663,13 @@ describe('NFS-e - servico (maquina de estados, idempotencia, incerteza)', () => 
       expect(row?.dados).toMatchObject({
         servico: SYNTHETIC_SERVICE,
         tomadorEndereco: { cMun: '3106200' },
-        fiscal: { perfil: { id: 'servico-sintetico', versao: 1 }, cNBS: '188888888' },
+        fiscal: { perfil: { id: 'servico-sintetico', versao: 1 }, cNBS: '101011100' },
       });
     });
 
     it('sem perfil para o servico: recusa, nada e gravado', async () => {
       withProfiles(
-        approvedProfile({ servico: { cTribNac: '990202', cTribMun: null, cNBS: '188888888' } }),
+        approvedProfile({ servico: { cTribNac: '990202', cTribMun: null, cNBS: '101011100' } }),
       );
 
       expect(await h.service.request(USER, 'telegram', ARGS_NO_ADDR)).toEqual({
@@ -678,6 +678,25 @@ describe('NFS-e - servico (maquina de estados, idempotencia, incerteza)', () => 
       });
       expect(await dataSource.getRepository(NfseEmission).count()).toBe(0);
     });
+
+    it.each([
+      ['indDest=1 (exige dest)', { indDest: 1 as const }, 'DEST-1'],
+      ['tpOper=2 (exige gRefNFSe)', { tpOper: 2 as const, tpEnteGov: 4 as const }, 'REF-1'],
+      ['cIndOp que depende de prest/end', { cIndOp: '030101' }, 'OP-1'],
+      ['cIndOp fora do Anexo C', { cIndOp: '000000' }, 'TAB-3'],
+    ])(
+      'perfil aprovado e integro, mas incompativel com o gerador (%s): nao ha pedido e o motivo cita a regra',
+      async (_nome, ibscbs, regra) => {
+        withProfiles(approvedProfile({ ibscbs: { ...syntheticDraft().ibscbs, ...ibscbs } }));
+
+        const result = await h.service.request(USER, 'telegram', ARGS_NO_ADDR);
+
+        expect(result.kind).toBe('invalid');
+        expect(JSON.stringify(result)).toContain(`incompativel com o gerador de DPS (${regra}:`);
+        expect(JSON.stringify(result)).not.toMatch(/Maria Teste|52998224725|Rua Ficticia/);
+        expect(await dataSource.getRepository(NfseEmission).count()).toBe(0);
+      },
+    );
 
     it.each([
       ['rascunho', { status: 'rascunho' as const }],
@@ -761,7 +780,7 @@ describe('NFS-e - servico (maquina de estados, idempotencia, incerteza)', () => 
       expect(h.posts()).toHaveLength(1);
       const sent = JSON.parse(h.posts()[0]?.body ?? '{}') as { dpsXmlGZipB64: string };
       const dps = gunzipSync(Buffer.from(sent.dpsXmlGZipB64, 'base64')).toString('utf8');
-      expect(dps).toContain('<cNBS>188888888</cNBS>');
+      expect(dps).toContain('<cNBS>101011100</cNBS>');
       expect(dps).toContain('<IBSCBS>');
       expect(dps).toContain('<vRetIRRF>22.51</vRetIRRF>');
       expect(dps).toContain('<finNFSe>0</finNFSe>');
@@ -928,9 +947,9 @@ describe('NFS-e - servico (maquina de estados, idempotencia, incerteza)', () => 
 
         expect(created.success).toBe(true);
         expect(created.reply).toContain('Perfil fiscal: servico-sintetico v1');
-        expect(created.reply).toContain('Codigos: cTribNac 990101, cTribMun 777, NBS 188888888');
+        expect(created.reply).toContain('Codigos: cTribNac 010301, cTribMun 777, NBS 101011100');
         expect(created.reply).toContain(
-          'IBS/CBS: CST 288, cClassTrib 288888, cIndOp 288888, indDest 0',
+          'IBS/CBS: CST 288, cClassTrib 288888, cIndOp 100301, indDest 0',
         );
         expect(created.reply).toContain(
           'Tributos federais: PIS/COFINS CST 99, IRRF R$ 22,51, CSLL R$ 30,01',
@@ -953,7 +972,7 @@ describe('NFS-e - servico (maquina de estados, idempotencia, incerteza)', () => 
 
       it('sem perfil aprovado nao ha pedido: o Telegram recebe o motivo e nada e criado', async () => {
         setup(
-          approvedProfile({ servico: { cTribNac: '990202', cTribMun: null, cNBS: '188888888' } }),
+          approvedProfile({ servico: { cTribNac: '990202', cTribMun: null, cNBS: '101011100' } }),
         );
 
         const result = await request(`/nfse ${ARGS_NO_ADDR}`);
@@ -1003,7 +1022,14 @@ describe('NFS-e - servico (maquina de estados, idempotencia, incerteza)', () => 
       });
 
       it('perfil que NAO exige endereco: informar o endereco e recusado (dado pessoal desnecessario)', async () => {
-        setup(approvedProfile({ tomador: { exigeEndereco: false } }));
+        // Sem endereco: o local e o da prestacao (Anexo C) e nao ha retencao do ISS pelo tomador.
+        setup(
+          approvedProfile({
+            tomador: { exigeEndereco: false },
+            permitidos: { tribIssqn: [1], tpRetIssqn: [1] },
+            ibscbs: { ...syntheticDraft().ibscbs, cIndOp: '030104' },
+          }),
+        );
 
         const without = await request(`/nfse ${ARGS_NO}`);
         const withAddress = await request(`/nfse ${ARGS_NO_ADDR}`);

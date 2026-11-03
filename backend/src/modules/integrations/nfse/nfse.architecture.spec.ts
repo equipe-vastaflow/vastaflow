@@ -146,11 +146,38 @@ describe('Arquitetura da NFS-e', () => {
     for (const { arquivo, codigo } of NFSE) {
       // Literais de 6 ou 9 digitos sao o formato de cTribNac, cClassTrib, cIndOp e cNBS. Em codigo de producao
       // so haveria um se alguem fixasse um padrao tributario: a regra do projeto e nunca ter padrao.
+      // UNICA excecao: as regras do leiaute em `nfse-profile-compat.ts` (subitens de construcao civil do Anexo I),
+      // que sao REGRA oficial e nao valor padrao (conferidas na linha abaixo).
+      const literais = semComentarios(codigo).match(/['"]\d{6}['"]|['"]\d{9}['"]/g) ?? [];
       expect({
         arquivo,
-        literais: semComentarios(codigo).match(/['"]\d{6}['"]|['"]\d{9}['"]/g) ?? [],
+        literais: arquivo === 'nfse-profile-compat.ts' ? [] : literais,
       }).toEqual({ arquivo, literais: [] });
     }
+  });
+
+  it('as unicas constantes numericas do conferidor de compatibilidade sao regras do Anexo I (11 subitens de construcao civil e 99.04.01)', () => {
+    const literais = (fonte('nfse-profile-compat.ts').match(/['"]\d{6}['"]/g) ?? []).map((item) =>
+      item.slice(1, -1),
+    );
+
+    expect(literais.sort()).toEqual(
+      [
+        '070201',
+        '070202',
+        '070401',
+        '070501',
+        '070502',
+        '070601',
+        '070602',
+        '070701',
+        '070801',
+        '071701',
+        '071901',
+        '990401',
+      ].sort(),
+    );
+    expect(fonte('nfse-profile-compat.ts')).not.toMatch(/['"]\d{9}['"]/);
   });
 
   it('o arquivo de perfis fiscais vem so da configuracao e nunca do repositorio', () => {

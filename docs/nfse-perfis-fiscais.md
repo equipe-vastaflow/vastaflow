@@ -105,6 +105,43 @@ Regras de uso (todas testadas):
    alterado depois do pedido, o resultado é `NAO_ENVIADA` (`perfil_fiscal_indisponivel`) e **nada é enviado**.
 4. **Duplicidade, `INCERTA`, reconciliação por consulta, auditoria:** inalterados.
 
+## 5.1 Compatibilidade com o gerador de DPS (rejeição antes do pedido)
+
+Aprovar um perfil **não basta**: ele só é utilizável se o VastaFlow consegue gerar uma DPS válida para ele. `checkProfile`
+roda, depois da checagem de aprovação e integridade, o conferidor `nfse-profile-compat.ts`. Perfil incompatível fica
+**NAO utilizável** (motivo `incompativel com o gerador de DPS (REGRA: ...)`), o pedido nem é criado e o `check` da CLI o aponta
+(inclusive em rascunho); o `show` **não gera hash** para ele, para não se aprovar o que não emite. A aprovação e o hash do
+conteúdo **não são alterados** por isso. As mensagens citam campo e regra, nunca valores. Só vale para empresa não optante: o
+fluxo ME/EPP não passa por aqui.
+
+Fonte das regras: Anexo I (SEFIN ADN DPS, v1.01 de 20/10/2026, produção restrita) e tabelas oficiais (Anexos B e C), embutidas
+em `nfse/tabelas/` (arquivos gerados, com fonte e SHA-256 do `.xlsx`).
+
+| Regra | O que recusa | Origem |
+| --- | --- | --- |
+| TAB-1 | `cTribNac` fora da lista de serviço nacional | Anexo B (338 códigos) |
+| TAB-2 | `cNBS` fora da NBS 2.0 | Anexo B (918 códigos) |
+| TAB-3 | `cIndOp` fora da tabela | Anexo C (26 códigos) |
+| SRV-1 | `cTribNac` 99.03.xx ou 99.04.01 | Anexo I: "deve ser rejeitada" |
+| OP-1 | `cIndOp` cujo local depende de `prest/end`, `dest`, `endExt`, `atvEvento` ou NFS-e Via (não gerados) | Anexo C, coluna "campo no leiaute" |
+| OP-2 | `cIndOp` de imóvel fora dos subitens de construção civil (exige grupo `imovel`, não gerado) | Anexo C + Anexo I |
+| END-1 | local = endereço do adquirente, `indDest=0` e `exigeEndereco=false` | Anexo I |
+| END-2 | `tpRetIssqn` inclui 2 e `exigeEndereco=false` | Anexo I |
+| DEST-1 | `indDest=1` (exige `dest`, não gerado) | Anexo I |
+| REF-1 | `tpOper` 2 ou 3 (exige `gRefNFSe`, não gerado) | Anexo I |
+| OPER-1 / OPER-2 | `tpOper` ausente quando obrigatório (com `tpEnteGov` ou serviços 25.05, 15.09, 17.12, 10.05) / informado fora disso | Anexo I |
+| PC-1 / PC-2 | CSLL retida ausente com `tpRetPisCofins` ≠ 0 e ≠ 2 / presente com `tpRetPisCofins=0` | Anexo I |
+
+### Pendências (NÃO verificadas: nenhuma regra foi inventada)
+
+- **`cClassTrib` e CST** (IBS/CBS): só o formato é conferido. Não há tabela oficial nos anexos; quem valida é a Calculadora do
+  IBS/CBS. **Depende da contadora** e do teste na produção restrita.
+- **Correlação serviço × NBS × `cIndOp` × `cClassTrib`** (Anexo VIII): documento não vinculante e em desenvolvimento; não usado.
+- **`tpEnteGov` por serviço** e restrições finas de `tpOper` por subitem além das acima: o texto dos anexos não permitiu provar.
+- **`cTribMun`** (código municipal de BH): sem tabela disponível; **depende da contadora/prefeitura**.
+- **Grupos não gerados** (`dest`, `gRefNFSe`, `imovel`, `prest/end`, `endExt`, `atvEvento`, `bensMoveis`): perfis que os exigem
+  são recusados (regras acima); gerá-los exigiria nova etapa.
+
 ## 6. Limitações (o que ainda impede uma emissão real)
 
 - **O endereço do tomador agora vem por argumentos do `/nfse`** (`cmun`, `cep`, `logradouro`, `numero`, `bairro`, `compl`). Com
@@ -137,7 +174,7 @@ perfis sintéticos equivalentes em `backend/test/support/nfse-profile-fixtures.t
       "id": "servico-sintetico",
       "versao": 1,
       "descricao": "Perfil sintetico de exemplo (sem valor fiscal)",
-      "servico": { "cTribNac": "990101", "cTribMun": null, "cNBS": "188888888" },
+      "servico": { "cTribNac": "010301", "cTribMun": null, "cNBS": "101011100" },
       "permitidos": { "tribIssqn": [1], "tpRetIssqn": [1] },
       "tomador": { "exigeEndereco": true },
       "tribFed": null,
