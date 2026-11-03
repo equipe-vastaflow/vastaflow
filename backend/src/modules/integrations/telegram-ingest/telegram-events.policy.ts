@@ -11,3 +11,10 @@ export const STUCK_AFTER_MS = 15 * 60 * 1000;
  * teorico, e o piso conservador.
  */
 export const EVENT_RETENTION_MIN_DAYS = 7;
+
+/** Retencao automatica: primeira passada 10 min depois do boot (o boot nao compete com ela), depois 1 vez por dia. */
+export const RETENTION_INITIAL_DELAY_MS = 10 * 60 * 1000;
+export const RETENTION_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+/** Retencao padrao dos eventos terminais quando a rotina automatica esta ligada. */
+export const EVENT_RETENTION_DEFAULT_DAYS = 30;

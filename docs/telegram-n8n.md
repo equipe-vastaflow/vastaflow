@@ -362,7 +362,13 @@ comporta o novo valor.
   recusa; sem `--yes` so simula; nunca apaga `PROCESSANDO`. O piso existe porque apagar o registro
   reabre o update: o Telegram reentrega por ate 24 h e o fluxo ja descarta mensagem com mais de 10 min
   (no polling **e** no ingest), entao 7 dias cobre com folga qualquer update atrasado. Recomendado:
-  30 dias, rodando o CLI por agendamento do servidor (nao ha job interno).
+  30 dias.
+- **Retencao automatica (opt-in):** com `TELEGRAM_EVENTS_PURGE_ENABLED=true` o proprio backend roda a
+  mesma limpeza 1 vez por dia (primeira passada 10 min apos o boot), com `TELEGRAM_EVENTS_RETENTION_DAYS`
+  (padrao 30, piso 7; valor menor recusa o boot). Mesmas garantias do CLI: so terminais, nunca
+  `PROCESSANDO`, nenhuma outra tabela. Falha na limpeza nunca afeta o recebimento (e so registrada, com o
+  nome do erro). Log: `Telegram: N evento(s) antigo(s) removido(s) (retencao de D dias)`; auditoria
+  `TELEGRAM_EVENT_ADMIN` com `origem: agendada`, so quando algo foi apagado. Nao ha job externo.
 - Linhas de auditoria **antigas** (anteriores a 5.1) de `/contas_pagar` podem ter o id da conversa do
   Telegram em `metadados.conversationId`; a auditoria e append-only e nao foi reescrita.
 

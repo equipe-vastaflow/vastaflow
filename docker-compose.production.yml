@@ -255,6 +255,9 @@ services:
       # fica VAZIO em producao: so aceita os hosts telegram-fake/localhost/127.0.0.1 e
       # existe para backend/test/fake-telegram (ver docs/telegram-n8n.md).
       TELEGRAM_USER_RATE_LIMIT_PER_MINUTE: ${TELEGRAM_USER_RATE_LIMIT_PER_MINUTE:-}
+      # Retencao automatica de telegram_inbound_events (opt-in; ver docs/telegram-n8n.md, secao 12.4)
+      TELEGRAM_EVENTS_PURGE_ENABLED: ${TELEGRAM_EVENTS_PURGE_ENABLED:-false}
+      TELEGRAM_EVENTS_RETENTION_DAYS: ${TELEGRAM_EVENTS_RETENTION_DAYS:-}
       TELEGRAM_API_BASE_URL: ${TELEGRAM_API_BASE_URL:-}
       # WhatsApp (Cloud API oficial da Meta). DESLIGADO por padrao (rotas 404). Ligado, exige TODAS as
       # variaveis; so o backend as recebe (nunca o n8n/frontend/migrate). O webhook publico passa pelo

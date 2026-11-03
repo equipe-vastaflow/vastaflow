@@ -24,6 +24,10 @@ import { validateNfseSettings } from '../modules/integrations/nfse/nfse-settings
 import { validateWhatsappSettings } from '../modules/integrations/whatsapp/whatsapp-settings';
 import { resolveTelegramApiBase } from '../modules/integrations/telegram/telegram-api-base';
 import {
+  EVENT_RETENTION_DEFAULT_DAYS,
+  EVENT_RETENTION_MIN_DAYS,
+} from '../modules/integrations/telegram-ingest/telegram-events.policy';
+import {
   isAcceptableSigningKey,
   parseN8nWebhookUrl,
   TELEGRAM_DELIVERY_MODES,
@@ -433,6 +437,26 @@ export class EnvironmentVariables {
   @Min(1)
   @Max(120)
   TELEGRAM_USER_RATE_LIMIT_PER_MINUTE: number = 10;
+
+  /**
+   * Retencao automatica de `telegram_inbound_events` (eventos terminais antigos). Opt-in: desligada
+   * nao apaga nada (a limpeza manual por CLI continua valendo). Ver `telegram-events-retention.service.ts`.
+   */
+  @Transform(({ value }: TransformInput): boolean => value === 'true' || value === true)
+  @IsBoolean({ message: "TELEGRAM_EVENTS_PURGE_ENABLED deve ser 'true' ou 'false'" })
+  TELEGRAM_EVENTS_PURGE_ENABLED: boolean = false;
+
+  /**
+   * Dias de retencao dos eventos terminais (padrao 30). Piso de 7 (`EVENT_RETENTION_MIN_DAYS`): abaixo
+   * disso um update reentregue seria tratado como novo.
+   */
+  @Transform(({ value }: TransformInput): number =>
+    isBlank(value) ? EVENT_RETENTION_DEFAULT_DAYS : Number(value),
+  )
+  @IsInt({ message: 'TELEGRAM_EVENTS_RETENTION_DAYS deve ser um numero inteiro' })
+  @Min(EVENT_RETENTION_MIN_DAYS)
+  @Max(3650)
+  TELEGRAM_EVENTS_RETENTION_DAYS: number = EVENT_RETENTION_DEFAULT_DAYS;
 
   /**
    * Integracao com a API externa do Plantae (somente leitura). Desligada por

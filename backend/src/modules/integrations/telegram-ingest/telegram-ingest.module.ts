@@ -1,10 +1,12 @@
 import { Logger, Module, type OnApplicationBootstrap } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import type { EnvironmentVariables } from '../../../config/env.validation';
 import { AuditModule } from '../../audit/audit.module';
 import { AuditService } from '../../audit/audit.service';
 import { TelegramAdapter } from '../telegram/telegram.adapter';
 import { TelegramModule } from '../telegram/telegram.module';
+import { TelegramEventsRetentionService } from './telegram-events-retention.service';
 import { TelegramInboundEvent } from './telegram-inbound-event.entity';
 import { TelegramInboundEventsRepository } from './telegram-inbound-events.repository';
 import { STUCK_AFTER_MS } from './telegram-events.policy';
@@ -40,6 +42,16 @@ import { TelegramIngestService } from './telegram-ingest.service';
         adapter: TelegramAdapter,
         audit: AuditService,
       ): TelegramIngestService => new TelegramIngestService(config, events, adapter, audit),
+    },
+    {
+      provide: TelegramEventsRetentionService,
+      inject: [ConfigService, TelegramInboundEventsRepository, AuditService],
+      useFactory: (
+        config: ConfigService<EnvironmentVariables, true>,
+        events: TelegramInboundEventsRepository,
+        audit: AuditService,
+      ): TelegramEventsRetentionService =>
+        new TelegramEventsRetentionService(config, events, audit),
     },
   ],
 })
