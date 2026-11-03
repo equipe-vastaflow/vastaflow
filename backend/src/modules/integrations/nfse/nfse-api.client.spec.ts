@@ -50,15 +50,25 @@ describe('NFS-e - cliente da Sefin (contra servidor falso em loopback)', () => {
     seen.length = 0;
   });
 
-  const settings = (): { baseUrl: string; testServer: true; wireContractConfirmed: false } => ({
+  const settings = (): {
+    baseUrl: string;
+    testServer: true;
+    wireContractConfirmed: false;
+    producaoAutorizada: false;
+  } => ({
     baseUrl: `http://127.0.0.1:${String(port)}/api`,
     testServer: true,
     wireContractConfirmed: false,
+    producaoAutorizada: false,
   });
   const client = (timeoutMs = 2000): NfseApiClient =>
     new NfseApiClient(
       settings(),
-      createTransport({ testServer: true, caBundlePath: null }, null, timeoutMs),
+      createTransport(
+        { testServer: true, caBundlePath: null, producaoAutorizada: false },
+        null,
+        timeoutMs,
+      ),
     );
   const reply =
     (status: number, body: string) =>
@@ -108,8 +118,17 @@ describe('NFS-e - cliente da Sefin (contra servidor falso em loopback)', () => {
 
   it('conexao recusada = "nao enviada" (certeza de que nao chegou)', async () => {
     const closed = new NfseApiClient(
-      { baseUrl: 'http://127.0.0.1:1', testServer: true, wireContractConfirmed: false },
-      createTransport({ testServer: true, caBundlePath: null }, null, 1000),
+      {
+        baseUrl: 'http://127.0.0.1:1',
+        testServer: true,
+        wireContractConfirmed: false,
+        producaoAutorizada: false,
+      },
+      createTransport(
+        { testServer: true, caBundlePath: null, producaoAutorizada: false },
+        null,
+        1000,
+      ),
     );
     expect(await closed.emit('<DPS/>')).toEqual({ kind: 'not_sent', reason: 'sem_conexao' });
   });
@@ -158,8 +177,17 @@ describe('NFS-e - cliente da Sefin (contra servidor falso em loopback)', () => {
 
   it('falha de consulta nunca lanca: vira "desconhecida"', async () => {
     const dead = new NfseApiClient(
-      { baseUrl: 'http://127.0.0.1:1', testServer: true, wireContractConfirmed: false },
-      createTransport({ testServer: true, caBundlePath: null }, null, 500),
+      {
+        baseUrl: 'http://127.0.0.1:1',
+        testServer: true,
+        wireContractConfirmed: false,
+        producaoAutorizada: false,
+      },
+      createTransport(
+        { testServer: true, caBundlePath: null, producaoAutorizada: false },
+        null,
+        500,
+      ),
     );
     expect(await dead.findByDps('DPS1')).toEqual({ kind: 'unknown' });
     expect(await dead.fetchNfse(CHAVE)).toEqual({ kind: 'unknown' });
@@ -181,6 +209,7 @@ describe('NFS-e - portao do contrato de troca', () => {
       baseUrl: 'https://sefin.producaorestrita.nfse.gov.br/API/SefinNacional',
       testServer: false,
       wireContractConfirmed: false,
+      producaoAutorizada: false,
     };
     const probe = spy();
     const api = new NfseApiClient(official, probe.transport);
@@ -195,6 +224,7 @@ describe('NFS-e - portao do contrato de troca', () => {
       baseUrl: 'https://sefin.producaorestrita.nfse.gov.br/API/SefinNacional',
       testServer: false,
       wireContractConfirmed: true,
+      producaoAutorizada: false,
     };
     const urls: string[] = [];
     const api = new NfseApiClient(official, (request) => {

@@ -21,6 +21,16 @@ export const NFSE_OFFICIAL_BASES: Record<'restrita' | 'producao', string> = {
   producao: 'https://sefin.nfse.gov.br/SefinNacional',
 };
 
+/**
+ * AUTORIZACAO DE PRODUCAO: segunda chave, independente de `NFSE_WIRE_CONTRACT_CONFIRMED`, exigida SO para emitir
+ * em producao real. Nao e um booleano: e uma FRASE EXATA que embute o CNPJ do prestador, para que nao possa ser
+ * ligada por engano, por copia de um `.env` de outra empresa, nem por outra variavel.
+ * Vazia (padrao) = producao bloqueada. Na restrita NAO e exigida e NAO pode estar definida.
+ */
+export const NFSE_PRODUCAO_AUTORIZACAO_PREFIXO = 'EMITIR-NFSE-REAL-';
+export const producaoAutorizacaoEsperada = (cnpjPrestador: string): string =>
+  `${NFSE_PRODUCAO_AUTORIZACAO_PREFIXO}${cnpjPrestador}`;
+
 /** Hosts de servidor de TESTE aceitos em `NFSE_API_BASE_URL` (lista fechada, como Telegram/WhatsApp). */
 export const NFSE_TEST_HOSTS: readonly string[] = ['nfse-fake', 'localhost', '127.0.0.1'];
 
@@ -48,7 +58,8 @@ type NfseEnvKey =
   | 'NFSE_DPS_SERIE'
   | 'NFSE_VALOR_MAXIMO'
   | 'NFSE_CONFIRMATION_TTL_MINUTES'
-  | 'NFSE_PERFIS_FISCAIS_PATH';
+  | 'NFSE_PERFIS_FISCAIS_PATH'
+  | 'NFSE_PRODUCAO_AUTORIZACAO';
 
 export type NfseEnv = Partial<Record<NfseEnvKey, unknown>>;
 
@@ -58,6 +69,8 @@ export interface NfseSettings {
   readonly baseUrl: string;
   readonly testServer: boolean;
   readonly wireContractConfirmed: boolean;
+  /** `true` SO em producao com `NFSE_PRODUCAO_AUTORIZACAO` exata. Sem isso, nada vai a Sefin de producao. */
+  readonly producaoAutorizada: boolean;
   readonly certPfxPath: string;
   readonly certPfxPassword: string;
   readonly caBundlePath: string | null;
@@ -235,6 +248,25 @@ export function resolveNfseSettings(raw: NfseEnv & { NFSE_ENABLED?: unknown }): 
     problems.push(`NFSE_API_BASE_URL invalida: ${base.problem}`);
   }
   const wireContractConfirmed = parseBoolean(raw.NFSE_WIRE_CONTRACT_CONFIRMED);
+  // Autorizacao de producao: independente do contrato e de qualquer outra variavel (so este valor a liga).
+  const autorizacaoRaw = text(raw.NFSE_PRODUCAO_AUTORIZACAO);
+  let producaoAutorizada = false;
+  if (autorizacaoRaw !== '') {
+    if (ambiente !== 'producao') {
+      problems.push(
+        'NFSE_PRODUCAO_AUTORIZACAO so se aplica a NFSE_AMBIENTE=producao: remova-a da configuracao da restrita',
+      );
+    } else if (
+      CNPJ.test(prestadorCnpj) &&
+      autorizacaoRaw !== producaoAutorizacaoEsperada(prestadorCnpj)
+    ) {
+      problems.push(
+        `NFSE_PRODUCAO_AUTORIZACAO invalida: o valor exato e ${NFSE_PRODUCAO_AUTORIZACAO_PREFIXO}<CNPJ do prestador>`,
+      );
+    } else if (CNPJ.test(prestadorCnpj)) {
+      producaoAutorizada = true;
+    }
+  }
   if (
     ambiente === 'producao' &&
     !wireContractConfirmed &&
@@ -266,6 +298,7 @@ export function resolveNfseSettings(raw: NfseEnv & { NFSE_ENABLED?: unknown }): 
       baseUrl: base.base,
       testServer: base.testServer,
       wireContractConfirmed,
+      producaoAutorizada,
       certPfxPath,
       certPfxPassword,
       caBundlePath: text(raw.NFSE_CA_BUNDLE_PATH) === '' ? null : text(raw.NFSE_CA_BUNDLE_PATH),

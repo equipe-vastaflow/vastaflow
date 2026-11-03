@@ -13,7 +13,11 @@ import {
   type CommandContext,
   type CommandResult,
 } from '../../commands/command.types';
-import { NfseTransportError, type NfseTransport } from './nfse-api.client';
+import {
+  NfseProductionNotAuthorizedError,
+  NfseTransportError,
+  type NfseTransport,
+} from './nfse-api.client';
 import { NfseCertificateError, openPfx, type NfseCertificate } from './nfse-certificate';
 import type { NfseEmissionInput } from './nfse-dps';
 import { NfseEmission, NfseEmissionStatus } from './nfse-emission.entity';
@@ -1157,6 +1161,113 @@ describe('NFS-e - servico (maquina de estados, idempotencia, incerteza)', () => 
         expect(other.success).toBe(false);
         expect(wrongNumber.success).toBe(false);
         expect(h.calls).toHaveLength(0);
+      });
+    });
+  });
+
+  describe('producao real: autorizacao propria (a Sefin de producao so recebe com a frase exata)', () => {
+    const AUTORIZACAO = 'EMITIR-NFSE-REAL-11222333000181';
+    // Sefin REAL (sem NFSE_API_BASE_URL) de PRODUCAO, com o contrato confirmado: tudo ligado, menos a autorizacao.
+    const PRODUCAO = {
+      ...CONFIG,
+      NFSE_AMBIENTE: 'producao',
+      NFSE_API_BASE_URL: undefined,
+      NFSE_WIRE_CONTRACT_CONFIRMED: 'true',
+    } as Record<string, unknown>;
+    const PRODUCAO_URL = 'https://sefin.nfse.gov.br/SefinNacional/nfse';
+    const RESTRITA_URL = 'https://sefin.producaorestrita.nfse.gov.br/API/SefinNacional/nfse';
+
+    it('SEM autorizacao: pedido, confirmacao e consulta sao recusados e NADA chega ao transporte', async () => {
+      h.config = { ...PRODUCAO };
+
+      expect(await h.service.request(USER, 'telegram', ARGS)).toEqual({ kind: 'misconfigured' });
+      expect(await h.service.confirm(USER, 'telegram', '1', 'ABCDEFGH')).toEqual({
+        kind: 'misconfigured',
+      });
+      expect(await h.service.status(USER, undefined)).toEqual({ kind: 'misconfigured' });
+
+      expect(h.calls).toHaveLength(0);
+      expect(await dataSource.getRepository(NfseEmission).count()).toBe(0);
+    });
+
+    it('autorizacao com valor errado ("true", outro CNPJ, incompleta): continua bloqueado, sem transporte', async () => {
+      for (const valor of ['true', '1', 'EMITIR-NFSE-REAL-34250070000110', 'EMITIR-NFSE-REAL']) {
+        h.config = { ...PRODUCAO, NFSE_PRODUCAO_AUTORIZACAO: valor };
+
+        expect(await h.service.request(USER, 'telegram', ARGS)).toEqual({ kind: 'misconfigured' });
+      }
+      expect(h.calls).toHaveLength(0);
+      expect(await dataSource.getRepository(NfseEmission).count()).toBe(0);
+    });
+
+    it('COM a frase exata: o fluxo segue e a chamada vai ao host de producao (transporte falso, sem rede)', async () => {
+      h.config = { ...PRODUCAO, NFSE_PRODUCAO_AUTORIZACAO: AUTORIZACAO };
+      const { numero, code } = await h.createRequest();
+
+      const done = await h.service.confirm(USER, 'telegram', String(numero), code);
+
+      expect(done).toMatchObject({
+        kind: 'finished',
+        emission: { status: NfseEmissionStatus.Autorizada, ambiente: 'producao' },
+      });
+      expect(h.posts().map((call) => call.url)).toEqual([PRODUCAO_URL]);
+    });
+
+    it('autorizacao removida DEPOIS do pedido: a confirmacao e recusada, o codigo NAO e consumido e nada e enviado', async () => {
+      h.config = { ...PRODUCAO, NFSE_PRODUCAO_AUTORIZACAO: AUTORIZACAO };
+      const { numero, code } = await h.createRequest();
+
+      h.config = { ...PRODUCAO };
+      expect(await h.service.confirm(USER, 'telegram', String(numero), code)).toEqual({
+        kind: 'misconfigured',
+      });
+
+      expect(h.calls).toHaveLength(0);
+      expect((await h.row(numero))?.status).toBe(NfseEmissionStatus.AguardandoConfirmacao);
+      // Restabelecida a autorizacao (decisao explicita), o MESMO codigo ainda vale: nada foi gasto.
+      h.config = { ...PRODUCAO, NFSE_PRODUCAO_AUTORIZACAO: AUTORIZACAO };
+      expect(await h.service.confirm(USER, 'telegram', String(numero), code)).toMatchObject({
+        kind: 'finished',
+      });
+      expect(h.posts()).toHaveLength(1);
+    });
+
+    it('a restrita NAO exige a autorizacao: com o contrato confirmado, o fluxo segue ao host da restrita', async () => {
+      h.config = { ...PRODUCAO, NFSE_AMBIENTE: 'restrita' };
+      const { numero, code } = await h.createRequest();
+
+      const done = await h.service.confirm(USER, 'telegram', String(numero), code);
+
+      expect(done).toMatchObject({ kind: 'finished', emission: { ambiente: 'homologacao' } });
+      expect(h.posts().map((call) => call.url)).toEqual([RESTRITA_URL]);
+    });
+
+    it('a autorizacao nao pode existir na restrita: configuracao recusada, nada e criado nem enviado', async () => {
+      h.config = { ...PRODUCAO, NFSE_AMBIENTE: 'restrita', NFSE_PRODUCAO_AUTORIZACAO: AUTORIZACAO };
+
+      expect(await h.service.request(USER, 'telegram', ARGS)).toEqual({ kind: 'misconfigured' });
+      expect(h.calls).toHaveLength(0);
+    });
+
+    it('servidor de TESTE em modo producao nao e producao real: nao exige a autorizacao (destino local)', async () => {
+      h.config = { ...CONFIG, NFSE_AMBIENTE: 'producao' };
+
+      expect((await h.service.request(USER, 'telegram', ARGS)).kind).toBe('created');
+      expect(h.calls).toHaveLength(0);
+    });
+
+    it('se o portao do cliente barrar mesmo assim: NAO_ENVIADA (producao_nao_autorizada), nunca "incerta"', async () => {
+      h.config = { ...PRODUCAO, NFSE_AMBIENTE: 'restrita' };
+      h.respond = () => Promise.reject(new NfseProductionNotAuthorizedError());
+      const { numero, code } = await h.createRequest();
+
+      const done = await h.service.confirm(USER, 'telegram', String(numero), code);
+
+      expect(done).toMatchObject({
+        emission: {
+          status: NfseEmissionStatus.NaoEnviada,
+          erroCodigo: 'producao_nao_autorizada',
+        },
       });
     });
   });

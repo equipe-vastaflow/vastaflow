@@ -294,6 +294,9 @@ services:
       NFSE_CONFIRMATION_TTL_MINUTES: ${NFSE_CONFIRMATION_TTL_MINUTES:-}
       # Perfis fiscais aprovados (so nao optante). Arquivo FORA do Git, montado somente leitura.
       NFSE_PERFIS_FISCAIS_PATH: ${NFSE_PERFIS_FISCAIS_PATH:-}
+      # AUTORIZACAO DE PRODUCAO (frase exata com o CNPJ). VAZIA por padrao: sem ela nada vai a Sefin de producao,
+      # mesmo com NFSE_ENABLED e NFSE_WIRE_CONTRACT_CONFIRMED. NAO preencher sem aprovacao expressa (docs/nfse-producao-restrita.md).
+      NFSE_PRODUCAO_AUTORIZACAO: ${NFSE_PRODUCAO_AUTORIZACAO:-}
     volumes:
       - *ca-mount
       # DIRETORIO, nao arquivo, e somente leitura. Diretorio porque o CLI

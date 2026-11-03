@@ -157,6 +157,10 @@ nem por estes comandos; conceder é decisão da cliente, fora do código.
 ## 6. Segurança operacional
 
 - **Desligada por padrão**; ligada exige configuração completa (o boot é recusado). Não optante exige `NFSE_PERFIS_FISCAIS_PATH` e só emite com **perfil fiscal completo e aprovado** ([`nfse-perfis-fiscais.md`](nfse-perfis-fiscais.md)).
+- **Autorização de produção independente** (`NFSE_PRODUCAO_AUTORIZACAO`, frase exata com o CNPJ; desativada por padrão):
+  nada vai à Sefin de **produção** sem ela, mesmo com `NFSE_ENABLED=true` e `NFSE_WIRE_CONTRACT_CONFIRMED=true`; não é exigida
+  (e **não pode existir**) na restrita. Bloqueio no serviço, no cliente HTTP e no transporte, antes de abrir conexão. Procedimento
+  de homologação e de liberação: [`nfse-producao-restrita.md`](nfse-producao-restrita.md).
 - **Permissões próprias** `nfse:emit` / `nfse:read`: nenhum perfil as tem por padrão, **OPERADOR inclusive**; só o ADMIN
   (que passa em qualquer verificação). Conceder é decisão explícita da cliente.
 - Certificado: `.pfx` fora do Git e da imagem, montado somente leitura; senha só no `.env` do servidor; aberto **em memória**,
@@ -173,7 +177,7 @@ nem por estes comandos; conceder é decisão da cliente, fora do código.
 `NFSE_ENABLED`, `NFSE_AMBIENTE` (`restrita`|`producao`, sem padrão), `NFSE_CERT_PFX_PATH`, `NFSE_CERT_PFX_PASSWORD`,
 `NFSE_PRESTADOR_CNPJ` (+ `NFSE_PRESTADOR_IM`, `NFSE_PRESTADOR_NOME`), `NFSE_MUNICIPIO_EMISSOR_IBGE`, `NFSE_OPCAO_SIMPLES`
 (2 ou 3), `NFSE_REGIME_APURACAO_SN`, `NFSE_REGIME_ESPECIAL_TRIBUTACAO`, `NFSE_DPS_SERIE` (1–49999), `NFSE_VALOR_MAXIMO`,
-`NFSE_CONFIRMATION_TTL_MINUTES`, `NFSE_WIRE_CONTRACT_CONFIRMED` (padrão `false`), `NFSE_CA_BUNDLE_PATH` (opcional),
+`NFSE_CONFIRMATION_TTL_MINUTES`, `NFSE_WIRE_CONTRACT_CONFIRMED` (padrão `false`; só o contrato), `NFSE_PRODUCAO_AUTORIZACAO` (padrão vazio; só produção), `NFSE_CA_BUNDLE_PATH` (opcional),
 `NFSE_API_BASE_URL` (**só teste**). O Compose repassa as variáveis **somente ao backend**.
 
 ## 8. O que depende da empresa, do certificado e do município (nada disto foi feito)
@@ -196,7 +200,7 @@ com `NFSE_AMBIENTE=restrita`. 3. Com o Swagger agora acessível (com o certifica
 (`dpsXmlGZipB64`, `chaveAcesso`, `nfseXmlGZipB64`, lista de erros), o caminho-base, o algoritmo de assinatura e a aceitação do
 leiaute; corrigir `nfse-wire.ts`/`nfse-signer.ts` se divergirem. 4. Só então `NFSE_WIRE_CONTRACT_CONFIRMED=true`, recriar **só
 o backend** (a migration roda antes) e emitir **uma** nota de teste com um usuário ADMIN. 5. Conferir rejeição, incerteza (derrubar
-a rede) e reconciliação. 6. Só depois pensar em `producao` (exige `NFSE_WIRE_CONTRACT_CONFIRMED=true`).
+a rede) e reconciliação. 6. Só depois pensar em `producao`, que exige `NFSE_WIRE_CONTRACT_CONFIRMED=true` **e** a autorização própria `NFSE_PRODUCAO_AUTORIZACAO` (aprovação expressa: [`nfse-producao-restrita.md`](nfse-producao-restrita.md)).
 Rollback: `NFSE_ENABLED=false` e recriar o backend (a tabela e o histórico permanecem).
 
 ## 10. Limitações

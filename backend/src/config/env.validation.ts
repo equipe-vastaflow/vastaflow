@@ -666,6 +666,16 @@ export class EnvironmentVariables {
   NFSE_PERFIS_FISCAIS_PATH?: string;
 
   /**
+   * AUTORIZACAO DE PRODUCAO da NFS-e: frase exata `EMITIR-NFSE-REAL-<CNPJ do prestador>`. Independente de
+   * NFSE_WIRE_CONTRACT_CONFIRMED; exigida SO para emitir em producao real; deve ficar VAZIA (padrao) em qualquer
+   * outro caso e nao pode existir na restrita. Ver docs/nfse-producao-restrita.md.
+   */
+  @Transform(optionalString)
+  @IsOptional()
+  @IsString()
+  NFSE_PRODUCAO_AUTORIZACAO?: string;
+
+  /**
    * URL base da API. SO aceita o host de HOMOLOGACAO conhecido (`rc.plantae.agr.br`),
    * em HTTPS, no caminho `/api/v1/external`. Uma URL de producao so entra depois da
    * liberacao oficial da Plantae, por mudanca de codigo - ver `plantae.constants.ts`.

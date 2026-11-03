@@ -4,6 +4,7 @@ import { AuditAction, AuditModuleName } from '../../audit/audit-action.enum';
 import {
   NfseApiClient,
   NfseContractUnconfirmedError,
+  NfseProductionNotAuthorizedError,
   createTransport,
   type NfseTransport,
 } from './nfse-api.client';
@@ -242,11 +243,24 @@ export class NfseService {
       'NFSE_VALOR_MAXIMO',
       'NFSE_CONFIRMATION_TTL_MINUTES',
       'NFSE_PERFIS_FISCAIS_PATH',
+      'NFSE_PRODUCAO_AUTORIZACAO',
     ] as const) {
       env[key] = this.config.get<unknown>(key);
     }
     const result = resolveNfseSettings(env);
-    return result.ok ? result.settings : 'misconfigured';
+    if (!result.ok) {
+      return 'misconfigured';
+    }
+    // Producao real sem a autorizacao propria: nem pedido, nem confirmacao, nem consulta. (Servidor de teste
+    // nao e producao real: o destino e local.)
+    if (
+      result.settings.ambiente === 'producao' &&
+      !result.settings.testServer &&
+      !result.settings.producaoAutorizada
+    ) {
+      return 'misconfigured';
+    }
+    return result.settings;
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -589,6 +603,12 @@ export class NfseService {
       if (error instanceof NfseContractUnconfirmedError) {
         return await finish(NfseEmissionStatus.NaoEnviada, {
           erroCodigo: 'contrato_nao_confirmado',
+        });
+      }
+      if (error instanceof NfseProductionNotAuthorizedError) {
+        // Nada saiu: o portao do cliente barrou antes de qualquer conexao.
+        return await finish(NfseEmissionStatus.NaoEnviada, {
+          erroCodigo: 'producao_nao_autorizada',
         });
       }
       // Qualquer outra falha depois do ponto sem volta: NAO se sabe se algo saiu.

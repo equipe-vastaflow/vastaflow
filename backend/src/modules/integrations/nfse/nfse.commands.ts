@@ -63,6 +63,7 @@ const INTERNAL_REASONS: Record<string, string> = {
   xsd_invalido: 'a DPS gerada nao passou na validacao do leiaute',
   xsd_assinado_invalido: 'a DPS assinada nao passou na validacao do leiaute',
   contrato_nao_confirmado: 'a integracao com a Sefin ainda nao foi liberada para este ambiente',
+  producao_nao_autorizada: 'a emissao em PRODUCAO nao esta autorizada neste ambiente',
   sem_conexao: 'sem conexao com a Sefin',
   http_401: 'autenticacao recusada pela Sefin',
   http_403: 'acesso recusado pela Sefin',

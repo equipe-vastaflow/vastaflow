@@ -172,6 +172,43 @@ describe('Arquitetura da NFS-e', () => {
     expect(fonte('nfse.commands.ts')).not.toMatch(/process\.env|config\.get|certPfx|prestadorCnpj/);
   });
 
+  it('a autorizacao de producao: decidida so na configuracao, aplicada no cliente HTTP, invisivel ao comando', () => {
+    const usam = (padrao: RegExp): string[] =>
+      NFSE.filter(({ codigo }) => padrao.test(semComentarios(codigo))).map(
+        ({ arquivo }) => arquivo,
+      );
+
+    expect(usam(/NFSE_PRODUCAO_AUTORIZACAO/).sort()).toEqual([
+      'nfse-settings.ts',
+      'nfse.service.ts',
+    ]);
+    expect(usam(/producaoAutorizada/).sort()).toEqual([
+      'nfse-api.client.ts',
+      'nfse-settings.ts',
+      'nfse.service.ts',
+    ]);
+    expect(usam(/producaoAutorizacaoEsperada/)).toEqual(['nfse-settings.ts']);
+    expect(fonte('nfse.commands.ts')).not.toMatch(/producaoAutorizada|NFSE_PRODUCAO_AUTORIZACAO/);
+  });
+
+  it('o portao de producao vem ANTES de qualquer acesso a rede, no transporte e em toda chamada do cliente', () => {
+    const cliente = fonte('nfse-api.client.ts');
+    const transporte = /export function createTransport[\s\S]*?\n}\n/.exec(cliente)?.[0] ?? '';
+    const portao = transporte.indexOf(
+      'isProductionUrl(request.url) && !settings.producaoAutorizada',
+    );
+    const rede = transporte.search(/\bsend\(|https\.request|http\.request/);
+
+    expect(portao).toBeGreaterThan(-1);
+    expect(portao).toBeLessThan(rede);
+    // Cada operacao do cliente confere o portao ANTES de chamar o transporte.
+    for (const operacao of ['async emit(', 'async findByDps(', 'async fetchNfse(']) {
+      const corpo = cliente.slice(cliente.indexOf(operacao));
+      const antes = corpo.slice(0, corpo.indexOf('this.transport('));
+      expect(antes).toContain('this.assertProduction(url)');
+    }
+  });
+
   it('o comando nao concede permissao: nfse:emit e nfse:read so existem no ADMIN por padrao', () => {
     const catalogo = readFileSync(join(__dirname, '..', '..', 'roles', 'role-defaults.ts'), 'utf8');
     expect(semComentarios(catalogo)).not.toMatch(/Nfse(Emit|Read)|nfse:(emit|read)/);
