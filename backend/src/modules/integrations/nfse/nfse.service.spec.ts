@@ -15,6 +15,7 @@ import {
 } from '../../commands/command.types';
 import {
   NfseProductionNotAuthorizedError,
+  NfseTlsConfigError,
   NfseTransportError,
   type NfseTransport,
 } from './nfse-api.client';
@@ -78,6 +79,8 @@ class Harness {
   codeSeq = 0;
   readonly service: NfseService;
   readonly emissions: NfseEmissionsRepository;
+  /** Erro lancado ao CRIAR o transporte (ex.: configuracao TLS invalida). */
+  transportError: Error | null = null;
   /** Perfis fiscais que o servico enxerga (so o nao optante os usa). */
   profiles: ParsedProfiles = { perfis: [], problems: [] };
 
@@ -111,7 +114,12 @@ class Harness {
         now: () => this.clock,
         randomCode: () =>
           `K7M2Q${String(++this.codeSeq).padStart(3, '0')}`.replace(/0/g, 'X').replace(/1/g, 'Y'),
-        transport: () => transport,
+        transport: () => {
+          if (this.transportError !== null) {
+            throw this.transportError;
+          }
+          return transport;
+        },
         loadCertificate: () => {
           if (this.certificateFails) {
             throw new NfseCertificateError('arquivo_ilegivel');
@@ -1270,5 +1278,24 @@ describe('NFS-e - servico (maquina de estados, idempotencia, incerteza)', () => 
         },
       });
     });
+  });
+
+  describe('configuracao TLS invalida (bundle de CAs): nada sai e o pedido NAO fica "incerto"', () => {
+    it.each(['ca_bundle_ilegivel', 'ca_bundle_invalido'] as const)(
+      '%s ao criar o transporte: NAO_ENVIADA com o codigo, nenhuma chamada, mensagem sem caminho',
+      async (code) => {
+        const { numero, code: confirmacao } = await h.createRequest();
+        h.transportError = new NfseTlsConfigError(code);
+
+        const done = await h.service.confirm(USER, 'telegram', String(numero), confirmacao);
+
+        expect(done).toMatchObject({
+          kind: 'finished',
+          emission: { status: NfseEmissionStatus.NaoEnviada, erroCodigo: code },
+        });
+        expect(h.calls).toHaveLength(0);
+        expect(JSON.stringify(done)).not.toMatch(/\.pem|\/etc\/|\/run\//);
+      },
+    );
   });
 });

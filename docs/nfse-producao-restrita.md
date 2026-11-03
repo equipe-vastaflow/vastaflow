@@ -40,7 +40,7 @@ o resultado é `NAO_ENVIADA` (`producao_nao_autorizada`).
 
 ## 2. Procedimento seguro de homologação (produção restrita)
 
-Pré-requisitos: certificado A1 da Quasar, perfil fiscal aprovado ([`nfse-perfis-fiscais.md`](nfse-perfis-fiscais.md)), e a
+Pré-requisitos: conexão mTLS verificada localmente ([`nfse-mtls.md`](nfse-mtls.md)), certificado A1 da Quasar com as intermediárias no `.pfx`, perfil fiscal aprovado ([`nfse-perfis-fiscais.md`](nfse-perfis-fiscais.md)), e a
 verificação offline e de leitura descrita em `docs/nfse.md`, seção 9 (contrato e assinatura).
 
 1. **Garanta que `NFSE_PRODUCAO_AUTORIZACAO` está VAZIA ou ausente** no `.env` da restrita. Se estiver preenchida, o boot é

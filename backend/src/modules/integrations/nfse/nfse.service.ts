@@ -5,6 +5,7 @@ import {
   NfseApiClient,
   NfseContractUnconfirmedError,
   NfseProductionNotAuthorizedError,
+  NfseTlsConfigError,
   createTransport,
   type NfseTransport,
 } from './nfse-api.client';
@@ -604,6 +605,10 @@ export class NfseService {
         return await finish(NfseEmissionStatus.NaoEnviada, {
           erroCodigo: 'contrato_nao_confirmado',
         });
+      }
+      if (error instanceof NfseTlsConfigError) {
+        // Nada saiu: a configuracao TLS (ex.: bundle de CAs) foi recusada antes de qualquer conexao.
+        return await finish(NfseEmissionStatus.NaoEnviada, { erroCodigo: error.code });
       }
       if (error instanceof NfseProductionNotAuthorizedError) {
         // Nada saiu: o portao do cliente barrou antes de qualquer conexao.

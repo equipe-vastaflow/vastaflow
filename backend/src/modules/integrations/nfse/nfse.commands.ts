@@ -64,6 +64,8 @@ const INTERNAL_REASONS: Record<string, string> = {
   xsd_assinado_invalido: 'a DPS assinada nao passou na validacao do leiaute',
   contrato_nao_confirmado: 'a integracao com a Sefin ainda nao foi liberada para este ambiente',
   producao_nao_autorizada: 'a emissao em PRODUCAO nao esta autorizada neste ambiente',
+  ca_bundle_ilegivel: 'o arquivo de CAs (NFSE_CA_BUNDLE_PATH) nao pode ser lido',
+  ca_bundle_invalido: 'o arquivo de CAs (NFSE_CA_BUNDLE_PATH) nao contem certificados',
   sem_conexao: 'sem conexao com a Sefin',
   http_401: 'autenticacao recusada pela Sefin',
   http_403: 'acesso recusado pela Sefin',
@@ -80,7 +82,7 @@ function describe(view: EmissionView): string {
     case NfseEmissionStatus.Rejeitada:
       return `${header}\nCodigo ${view.erroCodigo ?? '?'}${view.erroMensagem ? `: ${view.erroMensagem}` : ''}\nCorrija o dado e crie um novo pedido com /nfse.`;
     case NfseEmissionStatus.NaoEnviada:
-      return `${header}\nMotivo: ${INTERNAL_REASONS[view.erroCodigo ?? ''] ?? 'falha antes do envio'}.`;
+      return `${header}\nMotivo: ${INTERNAL_REASONS[view.erroCodigo ?? ''] ?? ((view.erroCodigo ?? '').startsWith('tls_') ? 'falha na conexao segura (certificado do servidor ou do cliente)' : 'falha antes do envio')}.`;
     case NfseEmissionStatus.Incerta:
       return `${header}\nNAO sei se a nota foi gerada. NAO crie outro pedido igual: pode duplicar a nota. Consulte de novo em alguns minutos com /nfse_status ${String(view.numero)}; se continuar incerto, confira no portal nfse.gov.br antes de qualquer nova emissao.`;
     case NfseEmissionStatus.Enviando:

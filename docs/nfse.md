@@ -177,7 +177,7 @@ nem por estes comandos; conceder é decisão da cliente, fora do código.
 `NFSE_ENABLED`, `NFSE_AMBIENTE` (`restrita`|`producao`, sem padrão), `NFSE_CERT_PFX_PATH`, `NFSE_CERT_PFX_PASSWORD`,
 `NFSE_PRESTADOR_CNPJ` (+ `NFSE_PRESTADOR_IM`, `NFSE_PRESTADOR_NOME`), `NFSE_MUNICIPIO_EMISSOR_IBGE`, `NFSE_OPCAO_SIMPLES`
 (2 ou 3), `NFSE_REGIME_APURACAO_SN`, `NFSE_REGIME_ESPECIAL_TRIBUTACAO`, `NFSE_DPS_SERIE` (1–49999), `NFSE_VALOR_MAXIMO`,
-`NFSE_CONFIRMATION_TTL_MINUTES`, `NFSE_WIRE_CONTRACT_CONFIRMED` (padrão `false`; só o contrato), `NFSE_PRODUCAO_AUTORIZACAO` (padrão vazio; só produção), `NFSE_CA_BUNDLE_PATH` (opcional),
+`NFSE_CONFIRMATION_TTL_MINUTES`, `NFSE_WIRE_CONTRACT_CONFIRMED` (padrão `false`; só o contrato), `NFSE_PRODUCAO_AUTORIZACAO` (padrão vazio; só produção), `NFSE_CA_BUNDLE_PATH` (opcional; **complementa** as CAs padrão do Node, ver [`nfse-mtls.md`](nfse-mtls.md)),
 `NFSE_API_BASE_URL` (**só teste**). O Compose repassa as variáveis **somente ao backend**.
 
 ## 8. O que depende da empresa, do certificado e do município (nada disto foi feito)

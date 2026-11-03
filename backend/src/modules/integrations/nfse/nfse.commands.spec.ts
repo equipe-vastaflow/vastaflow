@@ -236,6 +236,38 @@ describe('NFS-e - comandos no Command Engine (RBAC, conversa, auditoria)', () =>
       expect(result.reply).toMatch(/perfil fiscal foi revogado, alterado ou substituido/);
     });
 
+    it.each([
+      ['ca_bundle_ilegivel', /arquivo de CAs \(NFSE_CA_BUNDLE_PATH\) nao pode ser lido/],
+      ['ca_bundle_invalido', /arquivo de CAs \(NFSE_CA_BUNDLE_PATH\) nao contem certificados/],
+      [
+        'tls_err_tls_cert_altname_invalid',
+        /falha na conexao segura \(certificado do servidor ou do cliente\)/,
+      ],
+      ['tls_unable_to_get_issuer_cert_locally', /falha na conexao segura/],
+    ])(
+      'falha TLS (%s): explica o motivo, diz que nada foi emitido e nao vaza detalhe',
+      async (erroCodigo, motivo) => {
+        confirm.mockResolvedValue({
+          kind: 'finished',
+          emission: {
+            numero: 12,
+            status: NfseEmissionStatus.NaoEnviada,
+            ambiente: 'homologacao',
+            chaveAcesso: null,
+            erroCodigo,
+            erroMensagem: null,
+          },
+        });
+
+        const result = await run('/nfse_confirmar 12 K7M2QX9P', ADMIN);
+
+        expect(result.success).toBe(false);
+        expect(result.reply).toContain('NAO ENVIADA (nada foi emitido)');
+        expect(result.reply).toMatch(motivo);
+        expect(result.reply).not.toMatch(/\.pem|\/etc\/|\/run\/|BEGIN/);
+      },
+    );
+
     it('entrada invalida: lista os problemas e o formato; nao e erro do sistema', async () => {
       request.mockResolvedValue({ kind: 'invalid', errors: ['falta o campo valor', 'iss: x'] });
       const result = await run('/nfse nome=a', ADMIN);

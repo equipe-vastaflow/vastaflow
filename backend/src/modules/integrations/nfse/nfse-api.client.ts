@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
+import tls from 'node:tls';
 import type { NfseCertificate } from './nfse-certificate';
 import { NFSE_OFFICIAL_BASES, type NfseSettings } from './nfse-settings';
 import {
@@ -26,9 +27,27 @@ export interface TransportResponse {
  * conexao caiu ou estourou o prazo DEPOIS do envio, nao se sabe.
  */
 export class NfseTransportError extends Error {
-  constructor(readonly requestMayHaveBeenProcessed: boolean) {
+  /**
+   * @param code codigo FIXO do Node/OpenSSL (ex.: `UNABLE_TO_VERIFY_LEAF_SIGNATURE`), so para diagnostico; nunca a
+   *   mensagem do erro original (que pode trazer host, caminho ou trecho de certificado).
+   */
+  constructor(
+    readonly requestMayHaveBeenProcessed: boolean,
+    readonly code: string | null = null,
+  ) {
     super('falha de transporte com a Sefin Nacional');
     this.name = 'NfseTransportError';
+  }
+}
+
+/**
+ * Configuracao TLS invalida (ex.: o bundle de CAs nao existe ou nao tem certificado). Lancada ANTES de qualquer
+ * conexao; o codigo e fixo e a mensagem nunca traz caminho nem conteudo.
+ */
+export class NfseTlsConfigError extends Error {
+  constructor(readonly code: 'ca_bundle_ilegivel' | 'ca_bundle_invalido') {
+    super(`configuracao TLS invalida: ${code}`);
+    this.name = 'NfseTlsConfigError';
   }
 }
 
@@ -64,13 +83,32 @@ export function isProductionUrl(url: URL): boolean {
   return hostOf(url) === PRODUCTION_HOST;
 }
 
+/** Codigos de erro do Node/OpenSSL que cabem como "motivo" de diagnostico (nunca texto livre). */
+const SAFE_ERROR_CODE = /^[A-Z0-9_]{3,64}$/;
+const safeCode = (code: string | undefined): string | null =>
+  code !== undefined && SAFE_ERROR_CODE.test(code) ? code : null;
+
+/**
+ * Motivo (codigo fixo) de um envio que NAO saiu. Falha de TLS/certificado vira `tls_<codigo>` (ajuda a separar "servidor
+ * nao confiavel", "hostname", "certificado do cliente recusado"); o resto e `sem_conexao`. Nunca texto livre.
+ */
+export function notSentReason(code: string | null): string {
+  return code !== null && /^(ERR_SSL|ERR_TLS|UNABLE_TO|DEPTH_ZERO|SELF_SIGNED|CERT_)/.test(code)
+    ? `tls_${code.toLowerCase()}`.slice(0, 40)
+    : 'sem_conexao';
+}
+
 export type NfseTransport = (request: {
   readonly method: 'GET' | 'POST';
   readonly url: URL;
   readonly body?: string;
 }) => Promise<TransportResponse>;
 
-/** Erros em que o pedido, com certeza, nao foi entregue ao servico. */
+/**
+ * Erros em que o pedido, com certeza, nao foi entregue ao servico: falha ao ACHAR o servidor ou ao VALIDAR um dos
+ * lados na negociacao TLS (antes de qualquer dado HTTP ser processado). `ECONNRESET` e timeout NAO entram: la nao
+ * se sabe.
+ */
 const NEVER_DELIVERED = new Set([
   'ENOTFOUND',
   'EAI_AGAIN',
@@ -81,24 +119,71 @@ const NEVER_DELIVERED = new Set([
   'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
   'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
   'CERT_HAS_EXPIRED',
+  // Alertas FATAIS de certificado: o servidor recusou na negociacao TLS (por exemplo, certificado de cliente
+  // ausente, invalido ou expirado) e nenhum dado HTTP chegou a ser processado.
   'ERR_SSL_TLSV1_ALERT_UNKNOWN_CA',
+  'ERR_SSL_TLSV13_ALERT_CERTIFICATE_REQUIRED',
+  'ERR_SSL_SSLV3_ALERT_BAD_CERTIFICATE',
+  'ERR_SSL_SSLV3_ALERT_UNSUPPORTED_CERTIFICATE',
+  'ERR_SSL_SSLV3_ALERT_CERTIFICATE_REVOKED',
+  'ERR_SSL_SSLV3_ALERT_CERTIFICATE_EXPIRED',
+  'ERR_SSL_SSLV3_ALERT_CERTIFICATE_UNKNOWN',
 ]);
 
 /** Transporte real: HTTPS com certificado de cliente (mTLS) ou HTTP para o servidor de teste. */
+/**
+ * Opcoes TLS do cliente mTLS, em um unico lugar (e testaveis):
+ *
+ * - CERTIFICADO DO CLIENTE: a folha seguida das intermediarias, em ordem e SEM a raiz (`cert` = uma cadeia por chave,
+ *   como o Node documenta). Sem as intermediarias o servidor nao monta a cadeia ate a raiz que ele confia e recusa.
+ * - SERVIDOR: validacao rigorosa e SEMPRE ligada (`rejectUnauthorized: true`, com a checagem de hostname padrao do
+ *   Node). Nao ha configuracao que a desligue.
+ * - `NFSE_CA_BUNDLE_PATH` COMPLEMENTA as CAs padrao do Node (as publicas, mais `NODE_EXTRA_CA_CERTS` e o que o
+ *   Node estiver configurado a usar): `ca = padrao + bundle`. NAO as substitui. Motivo: o `ca` puro do Node
+ *   SUBSTITUI o padrao, e um bundle so com a raiz da ICP-Brasil derrubaria a conexao se a cadeia do servidor
+ *   mudar para uma CA publica. Sem bundle, vale so o padrao do Node.
+ *
+ * O bundle e lido aqui, antes de qualquer conexao. Ilegivel ou sem nenhum certificado PEM: `NfseTlsConfigError` com
+ * codigo fixo (nunca o caminho nem o conteudo).
+ */
+export function buildHttpsAgentOptions(
+  settings: Pick<NfseSettings, 'caBundlePath'>,
+  certificate: Pick<NfseCertificate, 'privateKeyPem' | 'certificatePem' | 'chainPem'> | null,
+): https.AgentOptions {
+  let ca: string[] | undefined;
+  if (settings.caBundlePath !== null) {
+    let bundle: string;
+    try {
+      bundle = readFileSync(settings.caBundlePath, 'utf8');
+    } catch {
+      throw new NfseTlsConfigError('ca_bundle_ilegivel');
+    }
+    if (!/-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----/.test(bundle)) {
+      throw new NfseTlsConfigError('ca_bundle_invalido');
+    }
+    ca = [...tls.getCACertificates('default'), bundle];
+  }
+  return {
+    key: certificate?.privateKeyPem,
+    cert:
+      certificate === null
+        ? undefined
+        : [certificate.certificatePem, ...certificate.chainPem].map((pem) => pem.trim()).join('\n'),
+    ca,
+    rejectUnauthorized: true,
+    minVersion: 'TLSv1.2',
+    keepAlive: false,
+  };
+}
+
 export function createTransport(
   settings: Pick<NfseSettings, 'testServer' | 'caBundlePath' | 'producaoAutorizada'>,
-  certificate: Pick<NfseCertificate, 'privateKeyPem' | 'certificatePem'> | null,
+  certificate: Pick<NfseCertificate, 'privateKeyPem' | 'certificatePem' | 'chainPem'> | null,
   timeoutMs: number = NFSE_REQUEST_TIMEOUT_MS,
 ): NfseTransport {
   const agent = settings.testServer
     ? undefined
-    : new https.Agent({
-        key: certificate?.privateKeyPem,
-        cert: certificate?.certificatePem,
-        ca: settings.caBundlePath === null ? undefined : readFileSync(settings.caBundlePath),
-        minVersion: 'TLSv1.2',
-        keepAlive: false,
-      });
+    : new https.Agent(buildHttpsAgentOptions(settings, certificate));
   return (request) =>
     new Promise<TransportResponse>((resolve, reject) => {
       // PORTAO DE PRODUCAO, no ultimo limite antes da rede: sem autorizacao exata, nem socket nem byte sai.
@@ -150,7 +235,9 @@ export function createTransport(
         reject(new NfseTransportError(true));
       });
       outgoing.on('error', (error: NodeJS.ErrnoException) => {
-        reject(new NfseTransportError(!NEVER_DELIVERED.has(error.code ?? '')));
+        reject(
+          new NfseTransportError(!NEVER_DELIVERED.has(error.code ?? ''), safeCode(error.code)),
+        );
       });
       outgoing.end(request.body);
     });
@@ -186,7 +273,7 @@ export class NfseApiClient {
         throw error;
       }
       if (error instanceof NfseTransportError && !error.requestMayHaveBeenProcessed) {
-        return { kind: 'not_sent', reason: 'sem_conexao' };
+        return { kind: 'not_sent', reason: notSentReason(error.code) };
       }
       return { kind: 'uncertain', reason: 'transporte_apos_envio' };
     }

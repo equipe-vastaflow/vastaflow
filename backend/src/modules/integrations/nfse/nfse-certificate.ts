@@ -5,7 +5,11 @@ import forge from 'node-forge';
 export interface NfseCertificate {
   readonly privateKeyPem: string;
   readonly certificatePem: string;
-  /** Cadeia (intermediarias) em PEM, se o `.pfx` as trouxer. */
+  /**
+   * Intermediarias em PEM, na ORDEM da cadeia (a que emitiu a folha primeiro, depois a que emitiu esta...), SEM a
+   * folha e SEM a raiz autoassinada. Certificados do `.pfx` que nao pertencem a cadeia da folha ficam de fora.
+   * E o que o cliente mTLS apresenta ao servidor logo depois da folha (`[certificatePem, ...chainPem]`).
+   */
   readonly chainPem: readonly string[];
   readonly notBefore: Date;
   readonly notAfter: Date;
@@ -28,6 +32,47 @@ export class NfseCertificateError extends Error {
     super(`certificado indisponivel: ${code}`);
     this.name = 'NfseCertificateError';
   }
+}
+
+/** Autoassinado = raiz (o emissor e o proprio titular). */
+const isSelfSigned = (cert: forge.pki.Certificate): boolean =>
+  cert.subject.hash === cert.issuer.hash;
+
+/** `parent` assinou `child`? Falha de verificacao (ou certificado malformado) conta como "nao". */
+function signedBy(parent: forge.pki.Certificate, child: forge.pki.Certificate): boolean {
+  try {
+    return parent.verify(child);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Intermediarias na ordem da cadeia: parte da folha e sobe pelo emissor, verificando a ASSINATURA de cada elo
+ * (nao so o nome). Para na raiz (que NAO entra: o servidor a tem) ou quando nao ha mais elo. Limite de 8 niveis
+ * contra ciclos. O que sobrar no `.pfx` (certificados sem relacao com a folha) e descartado.
+ */
+function orderedIntermediates(
+  leaf: forge.pki.Certificate,
+  all: readonly forge.pki.Certificate[],
+): forge.pki.Certificate[] {
+  const chain: forge.pki.Certificate[] = [];
+  let current = leaf;
+  for (let depth = 0; depth < 8 && !isSelfSigned(current); depth += 1) {
+    const parent = all.find(
+      (candidate) =>
+        candidate !== leaf &&
+        !chain.includes(candidate) &&
+        candidate.subject.hash === current.issuer.hash &&
+        signedBy(candidate, current),
+    );
+    if (parent === undefined || isSelfSigned(parent)) {
+      break;
+    }
+    chain.push(parent);
+    current = parent;
+  }
+  return chain;
 }
 
 const OID_CNPJ = '2.16.76.1.3.3';
@@ -113,9 +158,9 @@ export function openPfx(pfx: Buffer, password: string, now: Date = new Date()): 
   return {
     privateKeyPem: forge.pki.privateKeyToPem(key),
     certificatePem: forge.pki.certificateToPem(leaf),
-    chainPem: certificates
-      .filter((cert) => cert !== leaf)
-      .map((cert) => forge.pki.certificateToPem(cert)),
+    chainPem: orderedIntermediates(leaf, certificates).map((cert) =>
+      forge.pki.certificateToPem(cert),
+    ),
     notBefore: leaf.validity.notBefore,
     notAfter: leaf.validity.notAfter,
     cnpj: cnpj !== null && /^\d{14}$/.test(cnpj) ? cnpj : null,
