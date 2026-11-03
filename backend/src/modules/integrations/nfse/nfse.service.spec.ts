@@ -2,19 +2,26 @@ import { gunzipSync, gzipSync } from 'node:zlib';
 import { DataSource } from 'typeorm';
 import {
   approvedProfile,
-  SYNTHETIC_ADDRESS,
   SYNTHETIC_SERVICE,
   syntheticDraft,
 } from '../../../../test/support/nfse-profile-fixtures';
 import { createTestPki, type TestPki } from '../../../../test/support/nfse-test-pki';
 import { AuditAction, AuditModuleName } from '../../audit/audit-action.enum';
+import type { AuthenticatedUser } from '../../auth/auth.types';
+import {
+  CommandChannel,
+  type CommandContext,
+  type CommandResult,
+} from '../../commands/command.types';
 import { NfseTransportError, type NfseTransport } from './nfse-api.client';
 import { NfseCertificateError, openPfx, type NfseCertificate } from './nfse-certificate';
+import type { NfseEmissionInput } from './nfse-dps';
 import { NfseEmission, NfseEmissionStatus } from './nfse-emission.entity';
 import { NfseEmissionsRepository } from './nfse-emissions.repository';
 import type { ParsedProfiles } from './nfse-fiscal-profile';
 import { buildDpsXml } from './nfse-xml.builder';
 import { verifyDpsSignature } from './nfse-signer';
+import { NfseConfirmCommandHandler, NfseRequestCommandHandler } from './nfse.commands';
 import { NfseService, STALE_SENDING_MS, type AuditWriter } from './nfse.service';
 
 const USER = 'user-1';
@@ -614,6 +621,9 @@ describe('NFS-e - servico (maquina de estados, idempotencia, incerteza)', () => 
       NFSE_PERFIS_FISCAIS_PATH: '/run/secrets/perfis-ficticio.json',
     } as Record<string, unknown>;
     const ARGS_NO = `tomador=52998224725 nome="Maria Teste Sigilosa" valor=1500,50 servico=${SYNTHETIC_SERVICE} desc="Consultoria ficticia" iss=1 ret=1 local=3106200`;
+    const ADDRESS_ARGS =
+      'cmun=3106200 cep=30000-000 logradouro="Rua Ficticia" numero=100 bairro="Bairro Ficticio"';
+    const ARGS_NO_ADDR = `${ARGS_NO} ${ADDRESS_ARGS}`;
     const withProfiles = (...perfis: ReturnType<typeof approvedProfile>[]): void => {
       h.config = { ...NAO_OPTANTE };
       h.profiles = { perfis, problems: [] };
@@ -622,9 +632,7 @@ describe('NFS-e - servico (maquina de estados, idempotencia, incerteza)', () => 
     it('perfil aprovado + endereco: cria o pedido com resumo fiscal, sem expor o endereco nem o documento', async () => {
       withProfiles(approvedProfile());
 
-      const result = await h.service.request(USER, 'telegram', ARGS_NO, {
-        tomadorEndereco: SYNTHETIC_ADDRESS,
-      });
+      const result = await h.service.request(USER, 'telegram', ARGS_NO_ADDR);
 
       expect(result.kind).toBe('created');
       if (result.kind !== 'created') {
@@ -636,7 +644,7 @@ describe('NFS-e - servico (maquina de estados, idempotencia, incerteza)', () => 
       expect(result.summary).toContain('IRRF R$ 22,51');
       expect(result.summary).toContain('CSLL R$ 30,01');
       expect(result.summary).toMatch(
-        /Endereco do tomador: municipio 3106200 \(ref\. [0-9a-f]{8}\)/,
+        /Endereco do tomador: municipio 3106200, CEP 30000-\*\*\* \(ref\. [0-9a-f]{8}\)/,
       );
       expect(result.summary).not.toMatch(/Rua Ficticia|Bairro Ficticio|30000000|52998224725/);
       const row = await h.row(1);
@@ -652,9 +660,7 @@ describe('NFS-e - servico (maquina de estados, idempotencia, incerteza)', () => 
         approvedProfile({ servico: { cTribNac: '990202', cTribMun: null, cNBS: '188888888' } }),
       );
 
-      expect(
-        await h.service.request(USER, 'telegram', ARGS_NO, { tomadorEndereco: SYNTHETIC_ADDRESS }),
-      ).toEqual({
+      expect(await h.service.request(USER, 'telegram', ARGS_NO_ADDR)).toEqual({
         kind: 'invalid',
         errors: ['servico: nao ha perfil fiscal cadastrado para este codigo'],
       });
@@ -671,9 +677,7 @@ describe('NFS-e - servico (maquina de estados, idempotencia, incerteza)', () => 
       const base = approvedProfile();
       withProfiles({ ...base, aprovacao: { ...base.aprovacao, ...aprovacao } });
 
-      const result = await h.service.request(USER, 'telegram', ARGS_NO, {
-        tomadorEndereco: SYNTHETIC_ADDRESS,
-      });
+      const result = await h.service.request(USER, 'telegram', ARGS_NO_ADDR);
 
       expect(result.kind).toBe('invalid');
       expect(await dataSource.getRepository(NfseEmission).count()).toBe(0);
@@ -683,9 +687,10 @@ describe('NFS-e - servico (maquina de estados, idempotencia, incerteza)', () => 
       h.config = { ...NAO_OPTANTE };
       h.profiles = { perfis: [approvedProfile()], problems: ['perfil x: campo desconhecido'] };
 
-      expect(
-        await h.service.request(USER, 'telegram', ARGS_NO, { tomadorEndereco: SYNTHETIC_ADDRESS }),
-      ).toEqual({ kind: 'invalid', errors: ['perfis fiscais indisponiveis ou invalidos'] });
+      expect(await h.service.request(USER, 'telegram', ARGS_NO_ADDR)).toEqual({
+        kind: 'invalid',
+        errors: ['perfis fiscais indisponiveis ou invalidos'],
+      });
     });
 
     it('endereco do tomador exigido e ausente (o comando ainda nao o informa): recusa', async () => {
@@ -693,16 +698,20 @@ describe('NFS-e - servico (maquina de estados, idempotencia, incerteza)', () => 
 
       expect(await h.service.request(USER, 'telegram', ARGS_NO)).toEqual({
         kind: 'invalid',
-        errors: ['endereco do tomador: obrigatorio para este servico'],
+        errors: [
+          'endereco do tomador: este servico exige (informe cmun, cep, logradouro, numero, bairro e, se houver, compl)',
+        ],
       });
     });
 
     it('endereco invalido: recusa citando so o nome do campo', async () => {
       withProfiles(approvedProfile());
 
-      const result = await h.service.request(USER, 'telegram', ARGS_NO, {
-        tomadorEndereco: { ...SYNTHETIC_ADDRESS, cep: '123', logradouro: '' },
-      });
+      const result = await h.service.request(
+        USER,
+        'telegram',
+        `${ARGS_NO} cmun=3106200 cep=123 logradouro="" numero=100 bairro="Bairro Ficticio"`,
+      );
 
       expect(result).toMatchObject({ kind: 'invalid' });
       expect(JSON.stringify(result)).toMatch(/cep deve ter 8 digitos/);
@@ -712,9 +721,11 @@ describe('NFS-e - servico (maquina de estados, idempotencia, incerteza)', () => 
     it('iss/ret fora do que o perfil permite: recusa', async () => {
       withProfiles(approvedProfile());
 
-      const result = await h.service.request(USER, 'telegram', ARGS_NO.replace('ret=1', 'ret=3'), {
-        tomadorEndereco: SYNTHETIC_ADDRESS,
-      });
+      const result = await h.service.request(
+        USER,
+        'telegram',
+        ARGS_NO_ADDR.replace('ret=1', 'ret=3'),
+      );
 
       expect(result).toEqual({
         kind: 'invalid',
@@ -724,9 +735,7 @@ describe('NFS-e - servico (maquina de estados, idempotencia, incerteza)', () => 
 
     it('confirmar emite UMA vez, com a DPS do perfil valida no leiaute da restrita e assinada', async () => {
       withProfiles(approvedProfile());
-      const created = await h.service.request(USER, 'telegram', ARGS_NO, {
-        tomadorEndereco: SYNTHETIC_ADDRESS,
-      });
+      const created = await h.service.request(USER, 'telegram', ARGS_NO_ADDR);
       if (created.kind !== 'created') {
         throw new Error('pedido nao criado');
       }
@@ -749,9 +758,7 @@ describe('NFS-e - servico (maquina de estados, idempotencia, incerteza)', () => 
 
     it('perfil revogado DEPOIS do pedido: a confirmacao nao transmite (NAO_ENVIADA, nenhuma chamada)', async () => {
       withProfiles(approvedProfile());
-      const created = await h.service.request(USER, 'telegram', ARGS_NO, {
-        tomadorEndereco: SYNTHETIC_ADDRESS,
-      });
+      const created = await h.service.request(USER, 'telegram', ARGS_NO_ADDR);
       if (created.kind !== 'created') {
         throw new Error('pedido nao criado');
       }
@@ -774,9 +781,7 @@ describe('NFS-e - servico (maquina de estados, idempotencia, incerteza)', () => 
 
     it('conteudo do perfil alterado depois do pedido (sem nova aprovacao): nao transmite', async () => {
       withProfiles(approvedProfile());
-      const created = await h.service.request(USER, 'telegram', ARGS_NO, {
-        tomadorEndereco: SYNTHETIC_ADDRESS,
-      });
+      const created = await h.service.request(USER, 'telegram', ARGS_NO_ADDR);
       if (created.kind !== 'created') {
         throw new Error('pedido nao criado');
       }
@@ -794,9 +799,7 @@ describe('NFS-e - servico (maquina de estados, idempotencia, incerteza)', () => 
 
     it('nova versao do perfil (ainda nao aprovada) depois do pedido: a versao anterior deixa de valer', async () => {
       withProfiles(approvedProfile());
-      const created = await h.service.request(USER, 'telegram', ARGS_NO, {
-        tomadorEndereco: SYNTHETIC_ADDRESS,
-      });
+      const created = await h.service.request(USER, 'telegram', ARGS_NO_ADDR);
       if (created.kind !== 'created') {
         throw new Error('pedido nao criado');
       }
@@ -819,9 +822,7 @@ describe('NFS-e - servico (maquina de estados, idempotencia, incerteza)', () => 
 
     it('a confirmacao segue vinculada: outra pessoa nao confirma o pedido do nao optante', async () => {
       withProfiles(approvedProfile());
-      const created = await h.service.request(USER, 'telegram', ARGS_NO, {
-        tomadorEndereco: SYNTHETIC_ADDRESS,
-      });
+      const created = await h.service.request(USER, 'telegram', ARGS_NO_ADDR);
       if (created.kind !== 'created') {
         throw new Error('pedido nao criado');
       }
@@ -847,24 +848,18 @@ describe('NFS-e - servico (maquina de estados, idempotencia, incerteza)', () => 
 
     it('o resumo e o hash incluem o perfil: trocar o conteudo do perfil muda o que foi confirmado', async () => {
       withProfiles(approvedProfile());
-      const a = await h.service.request(USER, 'telegram', ARGS_NO, {
-        tomadorEndereco: SYNTHETIC_ADDRESS,
-      });
+      const a = await h.service.request(USER, 'telegram', ARGS_NO_ADDR);
       withProfiles(
         approvedProfile({ ibscbs: { ...syntheticDraft().ibscbs, cClassTrib: '299999' } }),
       );
-      const b = await h.service.request(USER, 'telegram', ARGS_NO, {
-        tomadorEndereco: SYNTHETIC_ADDRESS,
-      });
+      const b = await h.service.request(USER, 'telegram', ARGS_NO_ADDR);
 
       expect(a.kind === 'created' && b.kind === 'created' && a.summary !== b.summary).toBe(true);
     });
 
     it('o gerador usa o leiaute do ambiente: a DPS do perfil na producao tem finNFSe dentro do IBSCBS', async () => {
       withProfiles(approvedProfile());
-      const built = await h.service.request(USER, 'telegram', ARGS_NO, {
-        tomadorEndereco: SYNTHETIC_ADDRESS,
-      });
+      const built = await h.service.request(USER, 'telegram', ARGS_NO_ADDR);
       expect(built.kind).toBe('created');
       const row = await h.row(1);
       const xml = buildDpsXml(
@@ -886,6 +881,283 @@ describe('NFS-e - servico (maquina de estados, idempotencia, incerteza)', () => 
       ).xml;
       expect(xml).toMatch(/<IBSCBS><finNFSe>0<\/finNFSe>/);
       expect(xml).not.toMatch(/<tpEmit>1<\/tpEmit><finNFSe>/);
+    });
+
+    // -------------------------------------------------------------------------------------------------
+    // Etapa 3: comandos do Telegram (endereco pelos argumentos, resumo, confirmacao e invalidacao)
+    // -------------------------------------------------------------------------------------------------
+    describe('comandos: /nfse e /nfse_confirmar com perfil fiscal', () => {
+      const context = (text: string): CommandContext => ({
+        user: { id: USER } as AuthenticatedUser,
+        conversationId: 'chat-1',
+        channel: CommandChannel.Telegram,
+        text,
+      });
+      const request = (text: string): Promise<CommandResult> =>
+        new NfseRequestCommandHandler(h.service).handle(context(text));
+      const confirm = (text: string): Promise<CommandResult> =>
+        new NfseConfirmCommandHandler(h.service).handle(context(text));
+      const pedido = (reply: string): { numero: string; code: string } => {
+        const match = /\/nfse_confirmar (\d+) ([A-Z2-9]{8})/.exec(reply);
+        if (match === null) {
+          throw new Error('sem instrucao de confirmacao');
+        }
+        return { numero: match[1] ?? '', code: match[2] ?? '' };
+      };
+      const setup = (...perfis: ReturnType<typeof approvedProfile>[]): void => {
+        h.config = { ...NAO_OPTANTE };
+        h.profiles = { perfis: perfis.length === 0 ? [approvedProfile()] : perfis, problems: [] };
+      };
+
+      it('fluxo completo pelo Telegram: pedido com resumo fiscal, codigo de uso unico e emissao confirmada', async () => {
+        setup();
+
+        const created = await request(`/nfse ${ARGS_NO_ADDR}`);
+
+        expect(created.success).toBe(true);
+        expect(created.reply).toContain('Perfil fiscal: servico-sintetico v1');
+        expect(created.reply).toContain('Codigos: cTribNac 990101, cTribMun 777, NBS 188888888');
+        expect(created.reply).toContain(
+          'IBS/CBS: CST 288, cClassTrib 288888, cIndOp 288888, indDest 0',
+        );
+        expect(created.reply).toContain(
+          'Tributos federais: PIS/COFINS CST 99, IRRF R$ 22,51, CSLL R$ 30,01',
+        );
+        expect(created.reply).toContain('Total aproximado de tributos:');
+        expect(created.reply).toMatch(/QUALQUER dado fiscal mudar/);
+        expect(created.reply).not.toMatch(/Rua Ficticia|Bairro Ficticio|52998224725/);
+        expect(h.calls).toHaveLength(0);
+        const { numero, code } = pedido(created.reply);
+
+        const done = await confirm(`/nfse_confirmar ${numero} ${code}`);
+
+        expect(done.success).toBe(true);
+        expect(done.reply).toContain('EMITIDA');
+        expect(h.posts()).toHaveLength(1);
+        // Confirmar de novo (update duplicado) nao envia outra vez.
+        expect((await confirm(`/nfse_confirmar ${numero} ${code}`)).success).toBe(false);
+        expect(h.posts()).toHaveLength(1);
+      });
+
+      it('sem perfil aprovado nao ha pedido: o Telegram recebe o motivo e nada e criado', async () => {
+        setup(
+          approvedProfile({ servico: { cTribNac: '990202', cTribMun: null, cNBS: '188888888' } }),
+        );
+
+        const result = await request(`/nfse ${ARGS_NO_ADDR}`);
+
+        expect(result.success).toBe(false);
+        expect(result.reply).toContain(
+          '- servico: nao ha perfil fiscal cadastrado para este codigo',
+        );
+        expect(await dataSource.getRepository(NfseEmission).count()).toBe(0);
+      });
+
+      it('perfil exige endereco e ele nao veio: o Telegram diz quais argumentos informar', async () => {
+        setup();
+
+        const result = await request(`/nfse ${ARGS_NO}`);
+
+        expect(result.success).toBe(false);
+        expect(result.reply).toContain('cmun, cep, logradouro, numero, bairro');
+        expect(await dataSource.getRepository(NfseEmission).count()).toBe(0);
+      });
+
+      it('endereco pela metade ou invalido: recusa citando os argumentos, sem criar pedido', async () => {
+        setup();
+
+        const half = await request(`/nfse ${ARGS_NO} cep=30000-000`);
+        const bad = await request(
+          `/nfse ${ARGS_NO} cmun=31 cep=30000-000 logradouro="Rua Ficticia" numero=1 bairro=B`,
+        );
+
+        expect(half.reply).toMatch(/endereco do tomador: cmun/);
+        expect(half.reply).toMatch(/endereco do tomador: logradouro/);
+        expect(bad.reply).toContain('endereco do tomador: cmun deve ter 7 digitos');
+        expect(await dataSource.getRepository(NfseEmission).count()).toBe(0);
+      });
+
+      it('CEP formatado (30.000-000) e complemento sao aceitos', async () => {
+        setup();
+
+        const result = await request(
+          `/nfse ${ARGS_NO} cmun=3106200 cep=30.000-000 logradouro="Rua Ficticia" numero=S/N bairro="Bairro Ficticio" compl="Sala 1"`,
+        );
+
+        expect(result.success).toBe(true);
+        expect((await h.row(1))?.dados).toMatchObject({
+          tomadorEndereco: { cep: '30000000', numero: 'S/N', complemento: 'Sala 1' },
+        });
+      });
+
+      it('perfil que NAO exige endereco: informar o endereco e recusado (dado pessoal desnecessario)', async () => {
+        setup(approvedProfile({ tomador: { exigeEndereco: false } }));
+
+        const without = await request(`/nfse ${ARGS_NO}`);
+        const withAddress = await request(`/nfse ${ARGS_NO_ADDR}`);
+
+        expect(without.success).toBe(true);
+        expect(withAddress.success).toBe(false);
+        expect(withAddress.reply).toContain('este servico nao o utiliza');
+      });
+
+      it('ME/EPP: endereco do tomador nao e aceito e o fluxo anterior segue igual', async () => {
+        h.config = { ...CONFIG };
+
+        const withAddress = await request(`/nfse ${ARGS} ${ADDRESS_ARGS}`);
+        const plain = await request(`/nfse ${ARGS}`);
+
+        expect(withAddress.success).toBe(false);
+        expect(withAddress.reply).toContain('este servico nao o utiliza');
+        expect(plain.success).toBe(true);
+        expect(plain.reply).not.toMatch(/Perfil fiscal|IBS\/CBS/);
+      });
+
+      it('campo fiscal que o resumo MOSTRA e alterado no banco depois do pedido: a confirmacao e invalidada', async () => {
+        setup();
+        const { numero, code } = pedido((await request(`/nfse ${ARGS_NO_ADDR}`)).reply);
+        const row = await h.row(1);
+        const dados = row?.dados as unknown as Record<string, unknown>;
+        await dataSource
+          .getRepository(NfseEmission)
+          .update({ id: row?.id }, { dados: { ...dados, valor: '9999.00' } });
+
+        const result = await confirm(`/nfse_confirmar ${numero} ${code}`);
+
+        expect(result.success).toBe(false);
+        expect(result.reply).toMatch(/Pedido nao encontrado/);
+        expect(h.calls).toHaveLength(0);
+      });
+
+      const tampered: [string, (d: NfseEmissionInput) => NfseEmissionInput][] = [
+        [
+          'logradouro (o resumo nao o mostra)',
+          (d) => ({
+            ...d,
+            tomadorEndereco: d.tomadorEndereco && {
+              ...d.tomadorEndereco,
+              logradouro: 'Rua Trocada',
+            },
+          }),
+        ],
+        [
+          'indFinal (o resumo nao o mostra)',
+          (d) =>
+            d.fiscal
+              ? { ...d, fiscal: { ...d.fiscal, ibscbs: { ...d.fiscal.ibscbs, indFinal: 1 } } }
+              : d,
+        ],
+        [
+          'tpRetPisCofins (o resumo nao o mostra)',
+          (d) =>
+            d.fiscal?.tribFed
+              ? {
+                  ...d,
+                  fiscal: {
+                    ...d.fiscal,
+                    tribFed: { ...d.fiscal.tribFed, piscofins: { cst: '99', tpRetPisCofins: '1' } },
+                  },
+                }
+              : d,
+        ],
+        ['cNBS', (d) => (d.fiscal ? { ...d, fiscal: { ...d.fiscal, cNBS: '188888889' } } : d)],
+        ['perfil removido do pedido', (d) => ({ ...d, fiscal: null })],
+      ];
+      it.each(tampered)(
+        'alteracao fiscal no banco depois do pedido, em %s: a confirmacao e invalidada e nada e enviado',
+        async (_nome, change) => {
+          setup();
+          const { numero, code } = pedido((await request(`/nfse ${ARGS_NO_ADDR}`)).reply);
+          const row = await h.row(1);
+          await dataSource
+            .getRepository(NfseEmission)
+            .update({ id: row?.id }, { dados: change(row?.dados as NfseEmissionInput) });
+
+          const result = await confirm(`/nfse_confirmar ${numero} ${code}`);
+
+          expect(result.success).toBe(false);
+          expect(result.reply).toMatch(/Pedido nao encontrado/);
+          expect(h.calls).toHaveLength(0);
+        },
+      );
+
+      it('perfil alterado depois do pedido (conteudo, versao nova ou revogacao): o Telegram explica e nada e enviado', async () => {
+        for (const mudanca of ['conteudo', 'versao', 'revogacao'] as const) {
+          await dataSource.getRepository(NfseEmission).clear();
+          h.calls.length = 0;
+          setup();
+          const { numero, code } = pedido((await request(`/nfse ${ARGS_NO_ADDR}`)).reply);
+          const base = approvedProfile();
+          h.profiles = {
+            perfis:
+              mudanca === 'conteudo'
+                ? [{ ...base, ibscbs: { ...base.ibscbs, cClassTrib: '299999' } }]
+                : mudanca === 'versao'
+                  ? [
+                      base,
+                      {
+                        ...approvedProfile({ versao: 2 }),
+                        aprovacao: { ...base.aprovacao, conteudoSha256: null },
+                      },
+                    ]
+                  : [{ ...base, aprovacao: { ...base.aprovacao, status: 'revogado' as const } }],
+            problems: [],
+          };
+
+          const result = await confirm(`/nfse_confirmar ${numero} ${code}`);
+
+          expect({ mudanca, ok: result.success }).toEqual({ mudanca, ok: false });
+          expect(result.reply).toMatch(/perfil fiscal foi revogado, alterado ou substituido/);
+          expect(h.calls).toHaveLength(0);
+        }
+      });
+
+      it('configuracao fiscal alterada depois do pedido (municipio emissor): nao transmite', async () => {
+        setup();
+        const { numero, code } = pedido((await request(`/nfse ${ARGS_NO_ADDR}`)).reply);
+        h.config = { ...NAO_OPTANTE, NFSE_MUNICIPIO_EMISSOR_IBGE: '3550308' };
+
+        const result = await confirm(`/nfse_confirmar ${numero} ${code}`);
+
+        expect(result.success).toBe(false);
+        expect(result.reply).toContain('NAO ENVIADA (nada foi emitido)');
+        expect(result.reply).toMatch(/configuracao mudou depois do pedido/);
+        expect(h.calls).toHaveLength(0);
+      });
+
+      it('um novo /nfse cancela o pedido anterior: so o codigo mais recente vale', async () => {
+        setup();
+        const first = pedido((await request(`/nfse ${ARGS_NO_ADDR}`)).reply);
+        const second = pedido(
+          (
+            await request(
+              `/nfse ${ARGS_NO_ADDR.replace('Consultoria ficticia', 'Outra descricao')}`,
+            )
+          ).reply,
+        );
+
+        const old = await confirm(`/nfse_confirmar ${first.numero} ${first.code}`);
+        const current = await confirm(`/nfse_confirmar ${second.numero} ${second.code}`);
+
+        expect(old.success).toBe(false);
+        expect(current.success).toBe(true);
+        expect(h.posts()).toHaveLength(1);
+      });
+
+      it('o codigo nao serve para outra pessoa nem para outro numero', async () => {
+        setup();
+        const { numero, code } = pedido((await request(`/nfse ${ARGS_NO_ADDR}`)).reply);
+
+        const other = await new NfseConfirmCommandHandler(h.service).handle({
+          ...context(`/nfse_confirmar ${numero} ${code}`),
+          user: { id: OTHER } as AuthenticatedUser,
+        });
+        const wrongNumber = await confirm(`/nfse_confirmar ${String(Number(numero) + 1)} ${code}`);
+
+        expect(other.success).toBe(false);
+        expect(wrongNumber.success).toBe(false);
+        expect(h.calls).toHaveLength(0);
+      });
     });
   });
 });

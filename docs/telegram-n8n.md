@@ -165,6 +165,7 @@ linguagem natural: so `/comando args`.
 | `/financeiro` | `finance:read` | financeiro **local** |
 | `/contas_pagar` | **`plantae:read`** (so ADMIN) | Plantae, leitura, homologacao |
 | `/vincular CODIGO` | - | so no caminho direto do backend |
+| `/nfse`, `/nfse_confirmar`, `/nfse_status` | `nfse:emit` / `nfse:read` (so ADMIN) | NFS-e Nacional, **desligada** (`NFSE_ENABLED=false`). Pedido com resumo, confirmacao de uso unico e endereco do tomador por argumentos: ver [`nfse.md`](nfse.md), secao 4, e [`nfse-perfis-fiscais.md`](nfse-perfis-fiscais.md) |
 
 ### `/contas_pagar`
 

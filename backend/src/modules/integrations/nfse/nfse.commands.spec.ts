@@ -95,6 +95,29 @@ describe('NFS-e - comandos no Command Engine (RBAC, conversa, auditoria)', () =>
       expect(status).not.toHaveBeenCalled();
     });
 
+    it('GESTOR (perfil da Rizola) com as permissoes padrao continua barrado nos tres comandos: nada foi concedido', async () => {
+      const gestor = person(RoleName.Gestor, [
+        ...(DEFAULT_ROLE_PERMISSIONS[RoleName.Gestor] ?? []),
+      ]);
+      expect(gestor.permissions).not.toContain(PermissionCode.NfseEmit);
+      expect(gestor.permissions).not.toContain(PermissionCode.NfseRead);
+
+      for (const text of [
+        '/nfse tomador=1 servico=990101',
+        '/nfse_confirmar 1 ABCDEFGH',
+        '/nfse_status',
+      ]) {
+        expect(await run(text, gestor)).toMatchObject({
+          success: false,
+          outcome: CommandOutcome.PermissionDenied,
+          reply: ROUTER_MESSAGES.permissionDenied,
+        });
+      }
+      expect(request).not.toHaveBeenCalled();
+      expect(confirm).not.toHaveBeenCalled();
+      expect(status).not.toHaveBeenCalled();
+    });
+
     it('ler nao autoriza emitir, e emitir nao autoriza ler', async () => {
       expect((await run('/nfse x=1', SO_LE)).outcome).toBe(CommandOutcome.PermissionDenied);
       expect((await run('/nfse_confirmar 1 ABCDEFGH', SO_LE)).outcome).toBe(
@@ -118,6 +141,43 @@ describe('NFS-e - comandos no Command Engine (RBAC, conversa, auditoria)', () =>
       expect(request).not.toHaveBeenCalled();
     });
 
+    it('a ajuda explica o perfil fiscal aprovado e os campos do endereco do tomador', async () => {
+      const { reply } = await run('/nfse', ADMIN);
+
+      expect(reply).toMatch(/PERFIL FISCAL aprovado pela contadora/);
+      expect(reply).toMatch(/Sem perfil aprovado nao ha emissao/);
+      for (const campo of ['cmun=', 'cep=', 'logradouro=', 'numero=', 'bairro=', 'compl=']) {
+        expect(reply).toContain(campo);
+      }
+    });
+
+    it('endereco do tomador: os argumentos chegam ao servico sem alteracao (a validacao e do servico)', async () => {
+      request.mockResolvedValue({ kind: 'disabled' });
+      const texto =
+        'tomador=52998224725 servico=990101 cmun=3106200 cep=30000-000 logradouro="Rua Ficticia" numero=100 bairro="Bairro Ficticio"';
+
+      await run(`/nfse ${texto}`, ADMIN);
+
+      expect(request).toHaveBeenCalledWith('user-1', 'telegram', texto);
+    });
+
+    it('erro de perfil ou de endereco: lista os problemas e repete o formato, sem criar nada', async () => {
+      request.mockResolvedValue({
+        kind: 'invalid',
+        errors: [
+          'servico: nao ha perfil fiscal cadastrado para este codigo',
+          'endereco do tomador: cep deve ter 8 digitos',
+        ],
+      });
+
+      const result = await run('/nfse tomador=1', ADMIN);
+
+      expect(result.success).toBe(false);
+      expect(result.reply).toContain('- servico: nao ha perfil fiscal cadastrado para este codigo');
+      expect(result.reply).toContain('- endereco do tomador: cep deve ter 8 digitos');
+      expect(result.reply).toContain(NFSE_USAGE);
+    });
+
     it('entrega ao servico o texto cru preservando aspas e espacos, com a pessoa e o canal certos', async () => {
       request.mockResolvedValue({ kind: 'disabled' });
       await run('/nfse   nome="Maria  da Silva" valor=10', ADMIN, CommandChannel.Whatsapp);
@@ -139,6 +199,41 @@ describe('NFS-e - comandos no Command Engine (RBAC, conversa, auditoria)', () =>
       expect(result.reply).toMatch(/10 minutos/);
       expect(result.reply).toMatch(/so uma vez/);
       expect(result.reply).toMatch(/portal nfse\.gov\.br/);
+    });
+
+    it('pedido criado: avisa que qualquer mudanca fiscal depois do pedido invalida o codigo', async () => {
+      request.mockResolvedValue({
+        kind: 'created',
+        numero: 12,
+        summary: 'RESUMO FISCAL',
+        code: 'K7M2QX9P',
+        expiresInMinutes: 10,
+      });
+
+      const { reply } = await run('/nfse valor=10', ADMIN);
+
+      expect(reply).toMatch(/QUALQUER dado fiscal mudar depois deste pedido/);
+      expect(reply).toMatch(/perde a validade: nada sera emitido/);
+    });
+
+    it('perfil fiscal revogado/alterado depois do pedido: a confirmacao explica o motivo e diz que nada foi emitido', async () => {
+      confirm.mockResolvedValue({
+        kind: 'finished',
+        emission: {
+          numero: 12,
+          status: NfseEmissionStatus.NaoEnviada,
+          ambiente: 'homologacao',
+          chaveAcesso: null,
+          erroCodigo: 'perfil_fiscal_indisponivel',
+          erroMensagem: null,
+        },
+      });
+
+      const result = await run('/nfse_confirmar 12 K7M2QX9P', ADMIN);
+
+      expect(result.success).toBe(false);
+      expect(result.reply).toContain('NAO ENVIADA (nada foi emitido)');
+      expect(result.reply).toMatch(/perfil fiscal foi revogado, alterado ou substituido/);
     });
 
     it('entrada invalida: lista os problemas e o formato; nao e erro do sistema', async () => {

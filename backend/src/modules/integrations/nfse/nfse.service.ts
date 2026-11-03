@@ -10,12 +10,14 @@ import {
 import { loadNfseCertificate, type NfseCertificate } from './nfse-certificate';
 import {
   buildNfseInput,
+  confirmationFingerprint,
   hashText,
+  parseAddressArgs,
   parseNfseArgs,
   summarizeInput,
   todayInBrasilia,
-  validateTomadorEndereco,
   type NfseEmissionInput,
+  type NfseTomadorEndereco,
 } from './nfse-dps';
 import { NfseEmission, NfseEmissionStatus } from './nfse-emission.entity';
 import type { NfseEmissionsRepository } from './nfse-emissions.repository';
@@ -31,6 +33,9 @@ import { signDps } from './nfse-signer';
 import { buildDpsXml } from './nfse-xml.builder';
 import { layoutForAmbiente } from './nfse-layout';
 import { validateDpsXml } from './nfse-xsd.validator';
+
+const ADDRESS_NOT_USED =
+  'endereco do tomador: este servico nao o utiliza (remova cmun, cep, logradouro, numero, bairro e compl)';
 
 /** Alfabeto do codigo de confirmacao: sem 0/O/1/I/L, para nao haver duvida ao digitar. */
 const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -81,15 +86,6 @@ export interface NfseServiceOptions {
   /** Leitura dos perfis fiscais (testes injetam um falso; em producao e o arquivo configurado). */
   readonly loadProfiles?: (settings: NfseSettings) => ParsedProfiles;
   readonly inlineWaitMs?: number;
-}
-
-/**
- * Dados do pedido que o texto do comando ainda NAO carrega. O comando Telegram nao os informa nesta versao;
- * sem eles, uma emissao que depende deles (endereco do tomador) e recusada.
- */
-export interface NfseRequestExtras {
-  /** Endereco nacional do tomador; validado por validateTomadorEndereco. */
-  readonly tomadorEndereco?: unknown;
 }
 
 export type RequestResult =
@@ -265,12 +261,13 @@ export class NfseService {
   private resolveFiscalInput(
     settings: NfseSettings,
     input: NfseEmissionInput,
-    extras: NfseRequestExtras,
+    address: NfseTomadorEndereco | null,
   ):
     | { readonly ok: true; readonly input: NfseEmissionInput }
     | { readonly ok: false; readonly errors: readonly string[] } {
     if (settings.opSimpNac !== 1) {
-      return { ok: true, input };
+      // ME/EPP e MEI nao usam perfil nem endereco: dado pessoal que nao e necessario nao e aceito.
+      return address === null ? { ok: true, input } : { ok: false, errors: [ADDRESS_NOT_USED] };
     }
     let loaded: ParsedProfiles;
     try {
@@ -290,18 +287,18 @@ export class NfseService {
     if (!snapshot.ok) {
       return { ok: false, errors: snapshot.errors };
     }
-    let tomadorEndereco = null;
-    if (snapshot.snapshot.exigeEnderecoTomador) {
-      if (extras.tomadorEndereco === undefined) {
-        return { ok: false, errors: ['endereco do tomador: obrigatorio para este servico'] };
-      }
-      const address = validateTomadorEndereco(extras.tomadorEndereco);
-      if (!address.ok) {
-        return { ok: false, errors: address.errors };
-      }
-      tomadorEndereco = address.endereco;
+    if (snapshot.snapshot.exigeEnderecoTomador && address === null) {
+      return {
+        ok: false,
+        errors: [
+          'endereco do tomador: este servico exige (informe cmun, cep, logradouro, numero, bairro e, se houver, compl)',
+        ],
+      };
     }
-    return { ok: true, input: { ...input, tomadorEndereco, fiscal: snapshot.snapshot } };
+    if (!snapshot.snapshot.exigeEnderecoTomador && address !== null) {
+      return { ok: false, errors: [ADDRESS_NOT_USED] };
+    }
+    return { ok: true, input: { ...input, tomadorEndereco: address, fiscal: snapshot.snapshot } };
   }
 
   /** O perfil gravado no pedido ainda e o vigente, aprovado e integro? (revogacao e alteracao valem na hora) */
@@ -327,12 +324,7 @@ export class NfseService {
     }
   }
 
-  async request(
-    usuarioId: string,
-    canal: string,
-    rawArgs: string,
-    extras: NfseRequestExtras = {},
-  ): Promise<RequestResult> {
+  async request(usuarioId: string, canal: string, rawArgs: string): Promise<RequestResult> {
     const settings = this.settings();
     if (typeof settings === 'string') {
       return { kind: settings };
@@ -345,7 +337,11 @@ export class NfseService {
     if (!base.ok) {
       return { kind: 'invalid', errors: base.errors };
     }
-    const fiscal = this.resolveFiscalInput(settings, base.input, extras);
+    const address = parseAddressArgs(parsed.fields);
+    if (!address.ok) {
+      return { kind: 'invalid', errors: address.errors };
+    }
+    const fiscal = this.resolveFiscalInput(settings, base.input, address.endereco);
     if (!fiscal.ok) {
       return { kind: 'invalid', errors: fiscal.errors };
     }
@@ -371,9 +367,10 @@ export class NfseService {
         const dps = buildDpsXml(built.input, settings, numero, this.now(), layout);
         return {
           dpsId: dps.dpsId,
-          resumoHash: hashText(
-            summarizeInput(built.input, { ambiente: settings.ambiente, numero }),
-          ),
+          resumoHash: confirmationFingerprint(built.input, {
+            ambiente: settings.ambiente,
+            numero,
+          }),
         };
       },
     });
@@ -439,9 +436,10 @@ export class NfseService {
     if (typeof input !== 'object' || input === null) {
       return { kind: 'not_found' };
     }
-    const summaryHash = hashText(
-      summarizeInput(input, { ambiente: settings.ambiente, numero: row.numeroDps }),
-    );
+    const summaryHash = confirmationFingerprint(input, {
+      ambiente: settings.ambiente,
+      numero: row.numeroDps,
+    });
     if (!safeEqual(summaryHash, row.resumoHash)) {
       return { kind: 'not_found' };
     }

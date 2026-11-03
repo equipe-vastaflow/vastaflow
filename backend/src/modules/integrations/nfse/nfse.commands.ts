@@ -18,6 +18,8 @@ export const NFSE_USAGE = [
   'Emissao de NFS-e. Envie TODOS os campos em uma mensagem:',
   '/nfse tomador=<CPF ou CNPJ> nome="<nome do tomador>" valor=<valor> servico=<codigo nacional, 6 digitos> desc="<descricao>" iss=<1 ou 4> ret=<1, 2 ou 3> local=<IBGE, 7 digitos>',
   'Opcionais: aliq=<percentual> competencia=<AAAA-MM-DD>. Optante ME/EPP: totsn=<percentual>.',
+  'Empresa nao optante: o servico precisa de um PERFIL FISCAL aprovado pela contadora (os codigos fiscais vem do perfil; voce nao os digita). Sem perfil aprovado nao ha emissao.',
+  'Se o perfil exigir, informe o endereco do tomador: cmun=<IBGE, 7 digitos> cep=<CEP> logradouro="<rua>" numero=<numero> bairro="<bairro>" e, se houver, compl="<complemento>".',
   'Nada e preenchido por padrao: tributacao e local da prestacao sao decisao sua.',
 ].join('\n');
 
@@ -56,6 +58,8 @@ const INTERNAL_REASONS: Record<string, string> = {
   certificado_indisponivel: 'certificado digital indisponivel',
   certificado_diverge_do_prestador: 'o certificado nao e do prestador configurado',
   configuracao_alterada: 'a configuracao mudou depois do pedido',
+  perfil_fiscal_indisponivel:
+    'o perfil fiscal foi revogado, alterado ou substituido depois do pedido (crie um novo pedido)',
   xsd_invalido: 'a DPS gerada nao passou na validacao do leiaute',
   xsd_assinado_invalido: 'a DPS assinada nao passou na validacao do leiaute',
   contrato_nao_confirmado: 'a integracao com a Sefin ainda nao foi liberada para este ambiente',
@@ -135,6 +139,7 @@ export class NfseRequestCommandHandler implements CommandHandler {
             'CONFIRA os dados. Para EMITIR, envie exatamente:',
             `/nfse_confirmar ${String(result.numero)} ${result.code}`,
             `O codigo vale so para este pedido, nesta conversa, por ${String(result.expiresInMinutes)} minutos, e so uma vez. Um novo /nfse cancela este pedido.`,
+            'Se QUALQUER dado fiscal mudar depois deste pedido (perfil fiscal, configuracao ou dados), o codigo perde a validade: nada sera emitido e sera preciso criar um novo pedido.',
             'Depois de emitida, a NFS-e so se cancela pelo portal nfse.gov.br.',
           ].join('\n'),
           'pedido_criado',

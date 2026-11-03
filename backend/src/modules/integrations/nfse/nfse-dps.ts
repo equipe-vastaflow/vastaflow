@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { NfseFiscalSnapshot } from './nfse-fiscal-profile';
+import { canonicalJson, type NfseFiscalSnapshot } from './nfse-fiscal-profile';
 import { moneyToCents, normalizeMoney, type NfseSettings } from './nfse-settings';
 
 /**
@@ -67,6 +67,13 @@ const KEYS = [
   'aliq',
   'totsn',
   'competencia',
+  // Endereco nacional do tomador, so quando o perfil fiscal o exige (ver `parseAddressArgs`).
+  'cmun',
+  'cep',
+  'logradouro',
+  'numero',
+  'bairro',
+  'compl',
 ] as const;
 type FieldKey = (typeof KEYS)[number];
 
@@ -409,6 +416,61 @@ export function validateTomadorEndereco(raw: unknown): AddressResult {
   return { ok: true, endereco: { cMun, cep, logradouro, numero, complemento, bairro } };
 }
 
+/** Nomes dos argumentos do comando para cada campo do endereco (as mensagens citam o que a pessoa digitou). */
+const ADDRESS_ARG: Record<string, string> = {
+  cMun: 'cmun',
+  cep: 'cep',
+  logradouro: 'logradouro',
+  numero: 'numero',
+  complemento: 'compl',
+  bairro: 'bairro',
+};
+const ADDRESS_ARG_NAMES = ['cmun', 'cep', 'logradouro', 'numero', 'bairro', 'compl'] as const;
+
+export type AddressArgs =
+  | { readonly ok: true; readonly endereco: NfseTomadorEndereco | null }
+  | { readonly ok: false; readonly errors: readonly string[] };
+
+/**
+ * Endereco do tomador a partir dos argumentos do comando (`cmun=`, `cep=`, `logradouro=`, `numero=`, `bairro=`,
+ * `compl=`). Nenhum informado = sem endereco (`null`). Qualquer um informado exige os obrigatorios: endereco
+ * pela metade nao e aceito. CEP aceita `30000-000` e `30.000-000`. Mensagens citam o NOME do argumento.
+ */
+export function parseAddressArgs(fields: Partial<Record<FieldKey, string>>): AddressArgs {
+  if (ADDRESS_ARG_NAMES.every((key) => fields[key] === undefined)) {
+    return { ok: true, endereco: null };
+  }
+  const result = validateTomadorEndereco({
+    cMun: fields.cmun?.trim() ?? '',
+    cep: (fields.cep ?? '').replace(/[.\-\s]/g, ''),
+    logradouro: fields.logradouro ?? '',
+    numero: fields.numero ?? '',
+    complemento: fields.compl ?? '',
+    bairro: fields.bairro ?? '',
+  });
+  if (result.ok) {
+    return { ok: true, endereco: result.endereco };
+  }
+  const rename = (message: string): string =>
+    message.replace(
+      /endereco do tomador: (\w+)/,
+      (_whole, key: string) => `endereco do tomador: ${ADDRESS_ARG[key] ?? key}`,
+    );
+  return { ok: false, errors: result.errors.map(rename) };
+}
+
+/**
+ * Impressao digital da CONFIRMACAO: resumo mostrado + TODO o conteudo fiscal gravado no pedido (inclusive o que o
+ * resumo nao exibe: endereco completo, indicadores, valores calculados). E o que fica guardado ao criar o pedido
+ * e e reconferido ao confirmar: qualquer alteracao fiscal depois do pedido a invalida.
+ */
+export function confirmationFingerprint(
+  input: NfseEmissionInput,
+  context: { readonly ambiente: 'restrita' | 'producao'; readonly numero: number },
+): string {
+  return hashText(`${summarizeInput(input, context)}\n${canonicalJson(input)}`);
+}
+
 /** Referencia curta (8 hex) de um conteudo: amarra ao hash do resumo o que o resumo nao mostra por inteiro. */
 export function shortRef(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value), 'utf8').digest('hex').slice(0, 8);
@@ -453,7 +515,7 @@ function fiscalSummaryLines(input: NfseEmissionInput): string[] {
   lines.push(`Total aproximado de tributos: ${totText}`);
   if (input.tomadorEndereco !== null && input.tomadorEndereco !== undefined) {
     lines.push(
-      `Endereco do tomador: municipio ${input.tomadorEndereco.cMun} (ref. ${shortRef(input.tomadorEndereco)})`,
+      `Endereco do tomador: municipio ${input.tomadorEndereco.cMun}, CEP ${input.tomadorEndereco.cep.slice(0, 5)}-*** (ref. ${shortRef(input.tomadorEndereco)})`,
     );
   }
   return lines;

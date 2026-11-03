@@ -161,7 +161,19 @@ describe('Arquitetura da NFS-e', () => {
     expect(fonte('nfse-settings.ts')).toContain('perfisFiscaisPath');
   });
 
-  it('o comando do Telegram nao conhece perfis fiscais nem o endereco do tomador (esta etapa nao o altera)', () => {
-    expect(fonte('nfse.commands.ts')).not.toMatch(/perfil|fiscal|tomadorEndereco|Extras/i);
+  it('o comando do Telegram e fino: so fala com o servico, sem regra fiscal, perfil, XML nem acesso a configuracao', () => {
+    const imports = importsDe(
+      NFSE.find(({ arquivo }) => arquivo === 'nfse.commands.ts')?.codigo ?? '',
+    )
+      .filter((origem) => origem.startsWith('./'))
+      .sort();
+    // Nenhum modulo de perfil, builder, configuracao ou transporte: so o estado da emissao e o servico.
+    expect(imports).toEqual(['./nfse-emission.entity', './nfse.service']);
+    expect(fonte('nfse.commands.ts')).not.toMatch(/process\.env|config\.get|certPfx|prestadorCnpj/);
+  });
+
+  it('o comando nao concede permissao: nfse:emit e nfse:read so existem no ADMIN por padrao', () => {
+    const catalogo = readFileSync(join(__dirname, '..', '..', 'roles', 'role-defaults.ts'), 'utf8');
+    expect(semComentarios(catalogo)).not.toMatch(/Nfse(Emit|Read)|nfse:(emit|read)/);
   });
 });

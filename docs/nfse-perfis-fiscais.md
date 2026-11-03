@@ -2,7 +2,8 @@
 
 > **Estado: estrutura implementada (etapa 2). Nenhum perfil existe no repositório, e nenhum código ou valor é padrão.**
 > A emissão para empresa não optante só acontece com um **perfil fiscal completo, válido e aprovado pela contadora**.
-> `NFSE_ENABLED` segue `false`. O comando `/nfse` do Telegram **não foi alterado** (ver "Limitações").
+> `NFSE_ENABLED` segue `false`. O comando `/nfse` do Telegram (etapa 3) seleciona o perfil pelo `servico=` e recebe o endereço do
+> tomador por argumentos: ver [`nfse.md`](nfse.md), seção 4.
 
 ## 1. Para que serve
 
@@ -106,10 +107,11 @@ Regras de uso (todas testadas):
 
 ## 6. Limitações (o que ainda impede uma emissão real)
 
-- **O comando `/nfse` não informa o endereço do tomador** (nem outros dados que o perfil possa exigir). O serviço aceita o
-  endereço por um parâmetro próprio (`NfseRequestExtras`), mas o Telegram não o envia nesta etapa: um perfil com
-  `exigeEndereco: true` **recusa o pedido** ("endereco do tomador: obrigatorio para este servico"). Passar a coletar o
-  endereço é a etapa do comando.
+- **O endereço do tomador agora vem por argumentos do `/nfse`** (`cmun`, `cep`, `logradouro`, `numero`, `bairro`, `compl`). Com
+  `exigeEndereco: true` o pedido é recusado sem ele; com `false`, o endereço informado é recusado. Outros dados que um perfil
+  possa vir a exigir (`dest`, `imovel`...) continuam **sem** campo no comando.
+- **O texto do comando passa pelo Telegram** (e pelo n8n, no modo `n8n`): o endereço e o documento do tomador trafegam como o
+  resto do comando. Não é ponta a ponta, como já consta em `docs/nfse.md`, seção 6.
 - **Perfil real, certificado e permissões:** nada disso existe ainda (ver `docs/nfse.md`, seção 8).
 - **Calculadora do IBS/CBS:** a Sefin valida CST, classificação e valores contra a Calculadora oficial (erros E1000 e
   correlatos). O VastaFlow **não consulta a Calculadora**: acerto ou erro só se vê na produção restrita.

@@ -87,6 +87,37 @@ Campos de `/nfse` (**todos obrigatórios, nada é presumido**): `tomador` (CPF/C
 Opcionais: `aliq` (≤ 5%), `competencia`; ME/EPP exige `totsn`. Imunidade/exportação (`iss` 2 e 3) e substituição **não são
 suportadas** (exigem dados que não existem aqui).
 
+**Empresa não optante (perfil fiscal).** O `servico=` seleciona o **perfil fiscal aprovado** do serviço
+([`nfse-perfis-fiscais.md`](nfse-perfis-fiscais.md)): os códigos fiscais (`cTribMun`, NBS, CST, `cClassTrib`, `cIndOp`),
+as retenções federais e o total de tributos **vêm do perfil**, não são digitados. Sem perfil aprovado, íntegro e único para
+o código, **não há pedido**. O perfil limita o que `iss=` e `ret=` podem valer.
+
+**Endereço do tomador** (quando o perfil exige; senão é **recusado**, por ser dado pessoal desnecessário):
+
+| Argumento | Conteúdo |
+| --- | --- |
+| `cmun=` | código IBGE do município, 7 dígitos |
+| `cep=` | CEP, 8 dígitos (aceita `30000-000` e `30.000-000`) |
+| `logradouro=` | até 255 caracteres, entre aspas se tiver espaço |
+| `numero=` | até 60 caracteres (`S/N` vale) |
+| `bairro=` | até 60 caracteres |
+| `compl=` | opcional, até 156 caracteres |
+
+Exemplo (dados **fictícios**), em uma única mensagem:
+
+```
+/nfse tomador=<CPF ou CNPJ> nome="<nome>" valor=1500,50 servico=<cTribNac> desc="<descrição>" iss=1 ret=1 local=<IBGE>
+      cmun=<IBGE> cep=<CEP> logradouro="<rua>" numero=<nº> bairro="<bairro>" compl="<complemento>"
+```
+
+Tudo é validado **antes** de criar o pedido; as mensagens citam o **nome do argumento**, nunca o valor digitado. Endereço
+incompleto não é aceito. ME/EPP e MEI **não** informam endereço (o argumento é recusado).
+
+O **resumo** para conferência traz: tomador (documento mascarado), serviço, valor, ISSQN e retenção do ISS, local, competência e,
+no não optante, o **perfil fiscal** (id, versão, aprovador, data e referência do conteúdo), os **códigos**, o **IBS/CBS** (CST,
+`cClassTrib`, `cIndOp`, `indDest`), os **tributos federais** (PIS/COFINS e retenções em R$), o **total aproximado de tributos** e o
+município e CEP parcial do tomador. A resposta repete que **qualquer mudança fiscal depois do pedido invalida o código**.
+
 ```
 AGUARDANDO_CONFIRMACAO ─► ENVIANDO ─► AUTORIZADA
         │                     ├──────► REJEITADA   (código oficial E####; nada emitido)
@@ -95,8 +126,21 @@ AGUARDANDO_CONFIRMACAO ─► ENVIANDO ─► AUTORIZADA
 ```
 
 Confirmação **vinculada**: o código é aleatório (8 caracteres, 5 bits cada), amarrado à pessoa, ao **canal** de origem e àquele
-pedido; vale por 10 min (configurável 2–30) e **uma vez**; só o hash é gravado. O resumo exibido é gravado como hash e
-reconferido antes de assinar. Um novo `/nfse` cancela o pedido pendente anterior. Um "sim" solto nunca confirma.
+pedido; vale por 10 min (configurável 2–30) e **uma vez**; só o hash é gravado. O que se grava é a **impressão digital da
+confirmação**: o resumo exibido **mais todo o conteúdo fiscal do pedido** (inclusive o que o resumo não mostra: endereço completo,
+indicadores, valores calculados). Ela é reconferida antes de assinar. Um novo `/nfse` cancela o pedido pendente anterior. Um "sim"
+solto nunca confirma.
+
+**O que invalida uma confirmação (nada é enviado e é preciso um novo `/nfse`):**
+
+- alteração do pedido gravado (qualquer campo fiscal, visível ou não no resumo): o código passa a responder "pedido não encontrado";
+- perfil fiscal **revogado, alterado sem nova aprovação ou substituído por versão nova** depois do pedido
+  (`NAO_ENVIADA`, `perfil_fiscal_indisponivel`);
+- configuração fiscal alterada (município emissor, CNPJ, série, regime): o `Id` da DPS muda (`configuracao_alterada`);
+- prazo vencido, código usado, outra pessoa ou outro canal.
+
+**Permissões:** `nfse:emit` e `nfse:read` **continuam só no ADMIN**. Nenhum perfil (Gestor inclusive) as recebe por padrão
+nem por estes comandos; conceder é decisão da cliente, fora do código.
 
 ## 5. Proteção contra duplicidade (cada item tem teste, e os principais foram mutados)
 
