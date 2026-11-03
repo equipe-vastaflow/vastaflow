@@ -209,7 +209,8 @@ Perfil fiscal só é utilizável se o gerador de DPS consegue atendê-lo (tabela
 `docs/nfse-perfis-fiscais.md`, seção 5.1, com as pendências que dependem da contadora).
 
 Sem cancelamento (`/nfse_cancelar`), sem substituição, sem imunidade/exportação, sem Calculadora do IBS/CBS (o não optante
-emite só com perfil fiscal aprovado e o comando do Telegram ainda não coleta o endereço do tomador), sem CNPJ alfanumérico, sem
+emite só com perfil fiscal aprovado; o `/nfse` recebe o endereço do tomador por `cmun`, `cep`, `logradouro`, `numero` e
+`bairro`, e `compl` é opcional), sem CNPJ alfanumérico, sem
 DANFSe/PDF, sem envio de arquivo por chat, sem retentativa automática (de propósito), Oracle nunca executado, mTLS e TLS
 com a Sefin real nunca exercitados (os testes usam servidor em loopback), `NT 005` (previsto para 2026) pode alterar o leiaute,
 e a rotação do certificado exige reiniciar o backend (o certificado é aberto uma vez por processo).

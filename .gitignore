@@ -26,6 +26,8 @@ out/
 # engano - nao como lugar previsto para guarda-los.
 *.pem
 *.key
+# Arquivo avulso na raiz (nome sugere credencial): nunca versionar.
+/vastaflow-senha.tar
 *.pfx
 *.p12
 *.crt
