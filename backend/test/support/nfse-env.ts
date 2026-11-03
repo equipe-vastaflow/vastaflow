@@ -18,7 +18,9 @@ writeFileSync(pfxPath, pki.pfx);
 export const NFSE_TEST_CERTIFICATE_PEM = pki.certificatePem;
 
 process.env.NFSE_ENABLED = 'true';
-process.env.NFSE_AMBIENTE = 'restrita';
+// O gerador de DPS ainda so produz o leiaute de PRODUCAO (versionamento, etapa 1): o fluxo e exercitado com
+// ele, contra a Sefin FALSA em loopback. A restrita entra aqui quando o builder for adaptado.
+process.env.NFSE_AMBIENTE = 'producao';
 process.env.NFSE_API_BASE_URL = `http://127.0.0.1:${String(FAKE_SEFIN_PORT)}`;
 process.env.NFSE_CERT_PFX_PATH = pfxPath;
 process.env.NFSE_CERT_PFX_PASSWORD = pki.password;

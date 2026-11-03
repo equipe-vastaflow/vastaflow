@@ -128,14 +128,17 @@ describe('Arquitetura da NFS-e', () => {
     expect([...donos]).toEqual(['backend']);
   });
 
-  it('o pacote de esquemas inclui a DPS, os tipos e a assinatura XML', () => {
-    expect(readdirSync(join(__dirname, 'xsd')).sort()).toEqual(
-      expect.arrayContaining([
-        'DPS_v1.01.xsd',
-        'tiposComplexos_v1.01.xsd',
-        'tiposSimples_v1.01.xsd',
-        'xmldsig-core-schema.xsd',
-      ]),
-    );
-  });
+  it.each(['producao-2026-02-09', 'restrita-2026-10-20'])(
+    'o pacote de esquemas %s inclui a DPS, os tipos e a assinatura XML',
+    (pasta) => {
+      expect(readdirSync(join(__dirname, 'xsd', pasta)).sort()).toEqual(
+        expect.arrayContaining([
+          'DPS_v1.01.xsd',
+          'tiposComplexos_v1.01.xsd',
+          'tiposSimples_v1.01.xsd',
+          'xmldsig-core-schema.xsd',
+        ]),
+      );
+    },
+  );
 });

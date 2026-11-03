@@ -20,6 +20,7 @@ import type { NfseEmissionsRepository } from './nfse-emissions.repository';
 import { resolveNfseSettings, type NfseEnv, type NfseSettings } from './nfse-settings';
 import { signDps } from './nfse-signer';
 import { buildDpsXml } from './nfse-xml.builder';
+import { layoutForAmbiente } from './nfse-layout';
 import { validateDpsXml } from './nfse-xsd.validator';
 
 /** Alfabeto do codigo de confirmacao: sem 0/O/1/I/L, para nao haver duvida ao digitar. */
@@ -270,7 +271,8 @@ export class NfseService {
 
     // Falha de leiaute e defeito NOSSO: detectada ja no pedido, antes de a pessoa confirmar.
     const dps = buildDpsXml(built.input, settings, row.numeroDps, this.now());
-    const xsd = await validateDpsXml(dps.xml);
+    const layout = layoutForAmbiente(settings.ambiente).id;
+    const xsd = await validateDpsXml(dps.xml, layout);
     if (!xsd.valid) {
       await this.repository.expire(row.id);
       return { kind: 'internal' };
@@ -440,11 +442,12 @@ export class NfseService {
         // A configuracao mudou depois do pedido: o que foi confirmado nao e mais o que seria emitido.
         return await finish(NfseEmissionStatus.NaoEnviada, { erroCodigo: 'configuracao_alterada' });
       }
-      if (!(await validateDpsXml(dps.xml)).valid) {
+      const layout = layoutForAmbiente(settings.ambiente).id;
+      if (!(await validateDpsXml(dps.xml, layout)).valid) {
         return await finish(NfseEmissionStatus.NaoEnviada, { erroCodigo: 'xsd_invalido' });
       }
       const signed = signDps(dps.xml, certificate);
-      if (!(await validateDpsXml(signed)).valid) {
+      if (!(await validateDpsXml(signed, layout)).valid) {
         return await finish(NfseEmissionStatus.NaoEnviada, { erroCodigo: 'xsd_assinado_invalido' });
       }
 

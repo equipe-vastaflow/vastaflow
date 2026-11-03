@@ -22,7 +22,10 @@ const authorizedBody = (chave = CHAVE): string =>
 
 const CONFIG = {
   NFSE_ENABLED: true,
-  NFSE_AMBIENTE: 'restrita',
+  // O gerador de DPS ainda so produz o leiaute de PRODUCAO (etapa 1 do versionamento): o fluxo e exercitado
+  // com esse leiaute, contra servidor de TESTE (nada sai pela rede). A restrita (leiaute de 20/10/2026)
+  // entra aqui quando o builder for adaptado.
+  NFSE_AMBIENTE: 'producao',
   // Servidor de teste: o transporte e injetado, nada sai pela rede.
   NFSE_API_BASE_URL: 'http://nfse-fake:9',
   NFSE_CERT_PFX_PATH: '/run/secrets/ficticio.pfx',
@@ -160,7 +163,7 @@ describe('NFS-e - servico (maquina de estados, idempotencia, incerteza)', () => 
       }
       expect(result.numero).toBe(1);
       expect(result.expiresInMinutes).toBe(10);
-      expect(result.summary).toContain('HOMOLOGACAO');
+      expect(result.summary).toContain('PRODUCAO');
       expect(result.summary).toContain('R$ 1.500,50');
       expect(result.summary).not.toContain('52998224725');
       const row = await h.row(1);
@@ -217,7 +220,7 @@ describe('NFS-e - servico (maquina de estados, idempotencia, incerteza)', () => 
           numero: 1,
           status: NfseEmissionStatus.Autorizada,
           chaveAcesso: CHAVE,
-          ambiente: 'homologacao',
+          ambiente: 'producao',
         },
       });
       expect(h.posts()).toHaveLength(1);
@@ -483,13 +486,22 @@ describe('NFS-e - servico (maquina de estados, idempotencia, incerteza)', () => 
       expect(h.calls).toHaveLength(0);
     });
 
-    it('Sefin real sem o contrato de troca confirmado: NAO_ENVIADA, nenhuma chamada', async () => {
-      h.config = { ...CONFIG, NFSE_API_BASE_URL: undefined, NFSE_WIRE_CONTRACT_CONFIRMED: false };
-      const { numero, code } = await h.createRequest();
-      expect(await h.service.confirm(USER, 'telegram', String(numero), code)).toMatchObject({
-        emission: { status: NfseEmissionStatus.NaoEnviada, erroCodigo: 'contrato_nao_confirmado' },
-      });
+    // O portao do contrato de troca e coberto no cliente (`nfse-api.client.spec.ts`) e na configuracao
+    // (`nfse-settings.spec.ts`: producao exige o contrato confirmado). Pelo servico ele so seria alcancavel na
+    // restrita, e la o pedido ja falha antes, pelo leiaute (teste abaixo) - ate o gerador ser adaptado.
+    it('restrita (leiaute de 20/10/2026): o gerador atual ainda nao o produz, entao o pedido e recusado e nada e enviado', async () => {
+      h.config = { ...CONFIG, NFSE_AMBIENTE: 'restrita', NFSE_API_BASE_URL: undefined };
+
+      expect(await h.service.request(USER, 'telegram', ARGS)).toEqual({ kind: 'internal' });
+
       expect(h.calls).toHaveLength(0);
+      expect((await h.row(1))?.status).toBe(NfseEmissionStatus.Expirada);
+    });
+
+    it('producao com a mesma DPS: o leiaute de producao a aceita (so o ambiente muda o pacote)', async () => {
+      h.config = { ...CONFIG, NFSE_AMBIENTE: 'producao' };
+
+      expect((await h.service.request(USER, 'telegram', ARGS)).kind).toBe('created');
     });
 
     it('banco fora do ar ao gravar o resultado: o chat recebe "incerta", sem rejeicao nao tratada', async () => {

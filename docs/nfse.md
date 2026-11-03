@@ -13,7 +13,7 @@ Fonte: portal oficial `gov.br/nfse` → Documentação Técnica → Documentaç�
 | Documento | Versão | Uso |
 | --- | --- | --- |
 | Manual de Contribuintes — Emissor Público Nacional (API) | v1.2, out/2025 | rotas, fluxo, ambientes |
-| Esquemas XSD (`NFSe-ESQUEMAS_XSD`) | **v1.01, 09/02/2026** | geração e validação da DPS (cópia em `backend/src/modules/integrations/nfse/xsd/`) |
+| Esquemas XSD (`NFSe-ESQUEMAS_XSD`) | **v1.01, 09/02/2026** | geração e validação da DPS (cópia em `backend/src/modules/integrations/nfse/xsd/producao-2026-02-09/`; o pacote da produção restrita de 20/10/2026 fica ao lado, ver [`nfse-leiautes.md`](nfse-leiautes.md)) |
 | Anexo I — DPS/NFS-e (leiaute e regras de negócio) | v1.01, 09/02/2026 | campos, regras E####, assinatura, certificado |
 | Anexo II — Pedido de Registro de Evento | v1.01, 22/01/2026 | eventos (cancelamento) |
 | Anexo A — Município IBGE | v1.00, 10/12/2025 | Belo Horizonte = `3106200` |
@@ -44,7 +44,7 @@ do JSON**. Nada foi inventado: o formato de troca está isolado em `nfse-wire.ts
 
 ### Defeito no esquema oficial
 O `TSSerieDPS` (`tiposSimples_v1.01.xsd`) usa `^0{0,4}\d{1,5}$`. Em XSD `^` e `$` são **caracteres literais**; assim o
-padrão não casa com valor algum. O validador remove as âncoras **só na cópia em memória**; o arquivo em `xsd/` permanece
+padrão não casa com valor algum. O validador remove as âncoras **só na cópia em memória**; o arquivo em `xsd/producao-2026-02-09/` permanece
 como publicado. Vale reportar ao suporte da NFS-e Nacional.
 
 ## 3. Arquitetura
@@ -65,7 +65,7 @@ módulos de negócio — há teste de arquitetura). Telegram e WhatsApp chegam p
 | `nfse-settings.ts` | configuração e validação (`NFSE_*`); nada de padrão tributário |
 | `nfse-dps.ts` | argumentos, validação fiscal (CPF/CNPJ, valor decimal exato, códigos), resumo |
 | `nfse-xml.builder.ts` | DPS no leiaute v1.01 (ordem do `xs:sequence`, sem prefixo, UTF-8, escape) |
-| `nfse-xsd.validator.ts` | validação contra o XSD oficial (xmllint/WASM) |
+| `nfse-layout.ts` / `nfse-xsd.validator.ts` | leiaute por ambiente (produção × restrita, ver [`nfse-leiautes.md`](nfse-leiautes.md)) e validação contra o XSD oficial do leiaute (xmllint/WASM) |
 | `nfse-certificate.ts` / `nfse-signer.ts` | abre o `.pfx` em memória, confere CNPJ do certificado, assina (XMLDSig) |
 | `nfse-wire.ts` | formato de troca com a Sefin (**não confirmado**, conservador: na dúvida = incerta) |
 | `nfse-api.client.ts` | único ponto de rede: mTLS, destino fixo, sem redirecionamento, prazo, limite de resposta |

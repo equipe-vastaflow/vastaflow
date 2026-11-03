@@ -60,7 +60,7 @@ describe('NFS-e - identificador e data', () => {
 describe('NFS-e - DPS contra o esquema OFICIAL v1.01', () => {
   it('ME/EPP com tomador CPF: valida', async () => {
     const { xml } = buildDpsXml(input(), SETTINGS, 7, NOW);
-    expect(await validateDpsXml(xml)).toEqual({ valid: true, errors: [] });
+    expect(await validateDpsXml(xml, 'producao-2026-02')).toEqual({ valid: true, errors: [] });
   });
 
   it('MEI com tomador CNPJ, aliquota e nao retido: valida', async () => {
@@ -78,7 +78,7 @@ describe('NFS-e - DPS contra o esquema OFICIAL v1.01', () => {
     expect(xml).toContain('<CNPJ>11222333000181</CNPJ><xNome>');
     expect(xml).toContain('<indTotTrib>0</indTotTrib>');
     expect(xml).toContain('<pAliq>2.50</pAliq>');
-    expect((await validateDpsXml(xml)).errors).toEqual([]);
+    expect((await validateDpsXml(xml, 'producao-2026-02')).errors).toEqual([]);
   });
 
   it('nao optante (sem IBS/CBS) gera XML valido no esquema, mas a configuracao o bloqueia', async () => {
@@ -88,7 +88,10 @@ describe('NFS-e - DPS contra o esquema OFICIAL v1.01', () => {
     if (!built.ok) {
       throw new Error(built.errors.join(','));
     }
-    expect((await validateDpsXml(buildDpsXml(built.input, settings, 1, NOW).xml)).valid).toBe(true);
+    expect(
+      (await validateDpsXml(buildDpsXml(built.input, settings, 1, NOW).xml, 'producao-2026-02'))
+        .valid,
+    ).toBe(true);
   });
 
   it('o numero e a serie saem sem zeros a esquerda onde o esquema pede, e o Id com zeros', () => {
@@ -103,7 +106,7 @@ describe('NFS-e - DPS contra o esquema OFICIAL v1.01', () => {
       nome: 'A</xNome><CPF>00000000000</CPF>"\'<b>',
     });
     const { xml } = buildDpsXml(hostile, SETTINGS, 1, NOW);
-    expect(await validateDpsXml(xml)).toEqual({ valid: true, errors: [] });
+    expect(await validateDpsXml(xml, 'producao-2026-02')).toEqual({ valid: true, errors: [] });
     // O valor do servico continua o informado, e existe UM so elemento de cada.
     expect(xml.match(/<vServ>/g)).toHaveLength(1);
     expect(xml).toContain('<vServ>1500.50</vServ>');
@@ -150,21 +153,24 @@ describe('NFS-e - DPS contra o esquema OFICIAL v1.01', () => {
       ['versao invalida', xml.replace('versao="1.01"', 'versao="9.99"')],
     ];
     for (const [name, broken] of cases) {
-      const result = await validateDpsXml(broken);
+      const result = await validateDpsXml(broken, 'producao-2026-02');
       expect({ name, valid: result.valid }).toEqual({ name, valid: false });
     }
   });
 
   it('as mensagens do validador citam o esquema, nao os dados da pessoa', async () => {
     const { xml } = buildDpsXml(input({ nome: 'NOME-SIGILOSO-123' }), SETTINGS, 7, NOW);
-    const result = await validateDpsXml(xml.replace('<tpAmb>2</tpAmb>', '<tpAmb>3</tpAmb>'));
+    const result = await validateDpsXml(
+      xml.replace('<tpAmb>2</tpAmb>', '<tpAmb>3</tpAmb>'),
+      'producao-2026-02',
+    );
     expect(JSON.stringify(result.errors)).not.toContain('NOME-SIGILOSO-123');
   });
 });
 
 describe('NFS-e - pacote oficial de esquemas', () => {
   it('os arquivos .xsd sao os publicados (v1.01, 09/02/2026) e o unico ajuste e em memoria', () => {
-    const dir = join(__dirname, 'xsd');
+    const dir = join(__dirname, 'xsd', 'producao-2026-02-09');
     const files = readdirSync(dir).filter((name) => name.endsWith('.xsd'));
     expect(files).toEqual(
       expect.arrayContaining([

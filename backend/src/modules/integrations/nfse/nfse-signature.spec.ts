@@ -71,11 +71,11 @@ describe('certificado (PKCS#12) e assinatura da DPS', () => {
   it('assina a DPS, o XML assinado continua valido no esquema oficial e a assinatura confere', async () => {
     const cert = openPfx(pki.pfx, pki.password);
     const unsigned = unsignedDps();
-    expect((await validateDpsXml(unsigned)).valid).toBe(true);
+    expect((await validateDpsXml(unsigned, 'producao-2026-02')).valid).toBe(true);
     const signed = signDps(unsigned, cert);
     expect(signed).toContain('<Signature');
     expect(signed.indexOf('</infDPS>')).toBeLessThan(signed.indexOf('<Signature'));
-    expect((await validateDpsXml(signed)).errors).toEqual([]);
+    expect((await validateDpsXml(signed, 'producao-2026-02')).errors).toEqual([]);
     expect(verifyDpsSignature(signed, cert.certificatePem)).toBe(true);
   });
 
