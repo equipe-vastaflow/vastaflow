@@ -59,7 +59,9 @@ type WhatsappEnvKey =
   | 'WHATSAPP_ACCESS_TOKEN'
   | 'WHATSAPP_PHONE_NUMBER_ID'
   | 'WHATSAPP_GRAPH_API_VERSION'
-  | 'WHATSAPP_API_BASE_URL';
+  | 'WHATSAPP_API_BASE_URL'
+  | 'WHATSAPP_TRANSPORT'
+  | 'WHATSAPP_GATEWAY_ACCOUNT';
 
 export function validateWhatsappSettings(env: Partial<Record<WhatsappEnvKey, unknown>>): string[] {
   const problems: string[] = [];
@@ -103,8 +105,37 @@ export function validateWhatsappSettings(env: Partial<Record<WhatsappEnvKey, unk
       problems.push(`WHATSAPP_API_BASE_URL invalida: ${base.problem}`);
     }
   }
+  if (
+    present('WHATSAPP_TRANSPORT') &&
+    !WHATSAPP_TRANSPORTS.includes(env.WHATSAPP_TRANSPORT as WhatsappTransport)
+  ) {
+    problems.push("WHATSAPP_TRANSPORT invalido: use 'meta' ou 'gateway'");
+  }
+  if (
+    present('WHATSAPP_GATEWAY_ACCOUNT') &&
+    !GATEWAY_ACCOUNT_PATTERN.test(String(env.WHATSAPP_GATEWAY_ACCOUNT))
+  ) {
+    problems.push('WHATSAPP_GATEWAY_ACCOUNT invalido: use de 5 a 20 digitos');
+  }
   if (present('WHATSAPP_WEBHOOK_TOKEN') && env.WHATSAPP_WEBHOOK_TOKEN === env.WHATSAPP_APP_SECRET) {
     problems.push('WHATSAPP_WEBHOOK_TOKEN e WHATSAPP_APP_SECRET devem ser diferentes');
   }
   return problems;
 }
+
+/**
+ * Qual transporte entrega as mensagens ao backend. `meta` (padrao, comportamento de sempre): webhook da Cloud API.
+ * `gateway`: o conteiner whatsapp-gateway (Baileys) chama `POST /service/whatsapp/ingest`. Nunca os dois ao mesmo
+ * tempo: o outro responde 404. A troca e reversivel (uma variavel e recriar o backend).
+ */
+export type WhatsappTransport = 'meta' | 'gateway';
+
+export const WHATSAPP_TRANSPORTS: readonly WhatsappTransport[] = ['meta', 'gateway'];
+
+/** Tudo que nao for exatamente `gateway` e `meta`: o padrao seguro e o comportamento anterior. */
+export function resolveWhatsappTransport(raw: unknown): WhatsappTransport {
+  return raw === 'gateway' ? 'gateway' : 'meta';
+}
+
+/** Numero (so digitos) da conta do bot no gateway: o destinatario que toda mensagem de entrada deve ter. */
+export const GATEWAY_ACCOUNT_PATTERN = /^\d{5,20}$/;

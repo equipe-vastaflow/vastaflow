@@ -12,14 +12,24 @@ import {
 } from '../channels/channel-identity';
 import { CHANNEL_LINK_CONFIRMER, type ChannelLinkConfirmer } from '../channels/channel-link';
 import { WhatsappApiClient } from './whatsapp-api.client';
+import { WhatsappIngestController } from './whatsapp-ingest.controller';
 import { WhatsappInboundEvent } from './whatsapp-inbound-event.entity';
 import { WhatsappInboundEventsRepository } from './whatsapp-inbound-events.repository';
 import { WhatsappMessageProcessor } from './whatsapp-message.processor';
-import { WHATSAPP_PROCESSOR, WhatsappController } from './whatsapp.controller';
+import { WHATSAPP_PROCESSOR } from './whatsapp-processor.token';
+import { resolveWhatsappTransport } from './whatsapp-settings';
+import { WHATSAPP_SENDER, WhatsappController } from './whatsapp.controller';
 
 /**
- * Canal WhatsApp (Cloud API OFICIAL da Meta). DESLIGADO por padrao (`WHATSAPP_ENABLED=false`: as
- * rotas respondem 404 e nada e enviado).
+ * Canal WhatsApp. DESLIGADO por padrao (`WHATSAPP_ENABLED=false`: as rotas respondem 404 e nada e enviado).
+ *
+ * Dois TRANSPORTES, um ativo por vez (`WHATSAPP_TRANSPORT`):
+ * - `meta` (padrao): Cloud API oficial, webhook em `/webhooks/whatsapp`;
+ * - `gateway`: conteiner whatsapp-gateway (Baileys), que chama `POST /service/whatsapp/ingest` com credencial de
+ *   servico. Migracao gradual e reversivel: o codigo da Meta segue aqui ate a nova integracao ser validada.
+ *
+ * O PROCESSADOR e unico e nao conhece transporte: devolve o texto da resposta e cada transporte a entrega ao
+ * remetente da mesma mensagem.
  *
  * O webhook da Meta chega DIRETO ao backend - sem n8n no caminho: a assinatura
  * (`X-Hub-Signature-256`) exige o corpo bruto e o App Secret, e o segredo nao deve sair do
@@ -33,10 +43,11 @@ import { WHATSAPP_PROCESSOR, WhatsappController } from './whatsapp.controller';
     ExternalIdentitiesModule,
     AuditModule,
   ],
-  controllers: [WhatsappController],
+  controllers: [WhatsappController, WhatsappIngestController],
   providers: [
     WhatsappApiClient,
     WhatsappInboundEventsRepository,
+    { provide: WHATSAPP_SENDER, useExisting: WhatsappApiClient },
     {
       provide: WHATSAPP_PROCESSOR,
       inject: [
@@ -46,7 +57,6 @@ import { WHATSAPP_PROCESSOR, WhatsappController } from './whatsapp.controller';
         CHANNEL_LINK_CONFIRMER,
         CommandRouter,
         AuditService,
-        WhatsappApiClient,
       ],
       useFactory: (
         config: ConfigService,
@@ -55,16 +65,18 @@ import { WHATSAPP_PROCESSOR, WhatsappController } from './whatsapp.controller';
         linking: ChannelLinkConfirmer,
         router: CommandRouter,
         audit: AuditService,
-        sender: WhatsappApiClient,
       ): WhatsappMessageProcessor =>
         new WhatsappMessageProcessor(
-          () => config.get<string>('WHATSAPP_PHONE_NUMBER_ID') ?? '',
+          // Cada transporte so aceita mensagens destinadas ao SEU numero; so um esta ativo por vez.
+          () =>
+            (resolveWhatsappTransport(config.get<string>('WHATSAPP_TRANSPORT')) === 'gateway'
+              ? config.get<string>('WHATSAPP_GATEWAY_ACCOUNT')
+              : config.get<string>('WHATSAPP_PHONE_NUMBER_ID')) ?? '',
           events,
           identities,
           linking,
           router,
           audit,
-          sender,
           () => Date.now(),
           () => config.get<boolean>('WHATSAPP_REPLY_TO_UNLINKED') === true,
         ),

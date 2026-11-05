@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { ConfigService } from '@nestjs/config';
 import { NotFoundException } from '@nestjs/common';
 import type { Request } from 'express';
+import type { WhatsappSender } from './whatsapp-api.client';
 import type { WhatsappMessageProcessor } from './whatsapp-message.processor';
 import { WhatsappController } from './whatsapp.controller';
 
@@ -68,6 +69,46 @@ describe('Arquitetura do canal WhatsApp', () => {
     expect(cliente).toContain('`Bearer ${token}`');
   });
 
+  it('o PROCESSADOR nao conhece transporte: nao envia, nao importa o cliente da Meta nem o do gateway', () => {
+    const processador = semComentarios(
+      WHATSAPP.find(({ arquivo }) => arquivo === 'whatsapp-message.processor.ts')?.codigo ?? '',
+    );
+
+    expect(processador).not.toMatch(/sendText|WhatsappSender|WhatsappApiError|graph\.facebook/);
+    expect(importsDe(processador).filter((o) => /whatsapp-(api|meta|ingest)/.test(o))).toEqual([]);
+  });
+
+  it('so o cliente da Meta e o seu helper de entrega conhecem a Graph API; o ingest do gateway nao', () => {
+    const comGraph = WHATSAPP.filter(({ codigo }) =>
+      /Graph|graph\.facebook|WhatsappSender/.test(semComentarios(codigo)),
+    ).map(({ arquivo }) => arquivo);
+
+    expect(comGraph).not.toContain('whatsapp-ingest.controller.ts');
+    expect(comGraph).not.toContain('whatsapp-ingest.dto.ts');
+    expect(comGraph).not.toContain('whatsapp-message.processor.ts');
+  });
+
+  it('o DTO do gateway nao declara NENHUM campo de autoridade nem de destino da resposta na ENTRADA', () => {
+    const dto = semComentarios(
+      WHATSAPP.find(({ arquivo }) => arquivo === 'whatsapp-ingest.dto.ts')?.codigo ?? '',
+    );
+    const entrada = dto.slice(0, dto.indexOf('export class WhatsappIngestResponseDto'));
+
+    expect(entrada).not.toMatch(
+      /\b(actorUserId|usuarioId|userRole|role|roles|permissions?|isAdmin|admin|replyTo|reply_to|destination|recipient)\s*[?:]/i,
+    );
+  });
+
+  it('o ingest do gateway devolve o destino a partir do remetente e de mais nada', () => {
+    const controller = semComentarios(
+      WHATSAPP.find(({ arquivo }) => arquivo === 'whatsapp-ingest.controller.ts')?.codigo ?? '',
+    );
+
+    expect(controller).toMatch(/replyTo: result\.reply === null \? null : body\.from/);
+    expect(controller.match(/replyTo/g)).toHaveLength(1);
+    expect(controller).not.toMatch(/process\.env|console\.|\bfetch\b/);
+  });
+
   it('a unica rota publica do canal e /webhooks/whatsapp, so GET e POST', () => {
     const controller = semComentarios(
       WHATSAPP.find(({ arquivo }) => arquivo === 'whatsapp.controller.ts')?.codigo ?? '',
@@ -80,11 +121,14 @@ describe('Arquitetura do canal WhatsApp', () => {
 
 describe('WhatsappController desligado (padrao)', () => {
   const process = jest.fn();
+  const sendText = jest.fn();
   const processor = { process } as unknown as WhatsappMessageProcessor;
+  const sender: WhatsappSender = { sendText };
   const controller = (ligado: boolean | undefined): WhatsappController =>
     new WhatsappController(
       new ConfigService(ligado === undefined ? {} : { WHATSAPP_ENABLED: ligado }),
       processor,
+      sender,
     );
   const req = { query: { 'hub.mode': 'subscribe' }, headers: {} } as unknown as Request;
 
@@ -99,9 +143,11 @@ describe('WhatsappController desligado (padrao)', () => {
 
   it('so o booleano true liga (texto "true" nao)', () => {
     expect(() =>
-      new WhatsappController(new ConfigService({ WHATSAPP_ENABLED: 'true' }), processor).verify(
-        req,
-      ),
+      new WhatsappController(
+        new ConfigService({ WHATSAPP_ENABLED: 'true' }),
+        processor,
+        sender,
+      ).verify(req),
     ).toThrow(NotFoundException);
   });
 });

@@ -21,7 +21,10 @@ import {
   parsePlantaeBaseUrl,
 } from '../modules/integrations/plantae/plantae-settings';
 import { validateNfseSettings } from '../modules/integrations/nfse/nfse-settings';
-import { validateWhatsappSettings } from '../modules/integrations/whatsapp/whatsapp-settings';
+import {
+  resolveWhatsappTransport,
+  validateWhatsappSettings,
+} from '../modules/integrations/whatsapp/whatsapp-settings';
 import { resolveTelegramApiBase } from '../modules/integrations/telegram/telegram-api-base';
 import {
   EVENT_RETENTION_DEFAULT_DAYS,
@@ -549,6 +552,21 @@ export class EnvironmentVariables {
   WHATSAPP_API_BASE_URL?: string;
 
   /**
+   * Transporte do WhatsApp: `meta` (padrao; webhook da Cloud API) ou `gateway` (conteiner whatsapp-gateway, que chama
+   * `POST /service/whatsapp/ingest`). Um so ativo por vez; o outro responde 404.
+   */
+  @Transform(optionalString)
+  @IsOptional()
+  @IsString()
+  WHATSAPP_TRANSPORT?: string;
+
+  /** So `gateway`: numero (digitos) da conta do bot. Mensagens destinadas a outro numero sao ignoradas. */
+  @Transform(optionalString)
+  @IsOptional()
+  @IsString()
+  WHATSAPP_GATEWAY_ACCOUNT?: string;
+
+  /**
    * NFS-e Nacional (Emissor Publico Nacional / Sefin Nacional). DESLIGADA por padrao: com `false`
    * os comandos /nfse* respondem "desligado" e nada e gerado, assinado ou enviado. Ligada, exige a
    * configuracao fiscal completa (sem padrao tributario) - ver `docs/nfse.md`. So o backend le estas
@@ -845,13 +863,17 @@ function validateCrossFieldRules(env: EnvironmentVariables): string[] {
   }
   // WhatsApp: ligado exige configuracao completa e plausivel (mensagens fixas, sem repetir valores).
   if (env.WHATSAPP_ENABLED) {
-    const missing = [
-      'WHATSAPP_WEBHOOK_TOKEN',
-      'WHATSAPP_APP_SECRET',
-      'WHATSAPP_ACCESS_TOKEN',
-      'WHATSAPP_PHONE_NUMBER_ID',
-      'WHATSAPP_GRAPH_API_VERSION',
-    ].filter((key) => !env[key as keyof EnvironmentVariables]);
+    const required =
+      resolveWhatsappTransport(env.WHATSAPP_TRANSPORT) === 'gateway'
+        ? ['WHATSAPP_GATEWAY_ACCOUNT', 'SERVICE_CREDENTIALS_FILE']
+        : [
+            'WHATSAPP_WEBHOOK_TOKEN',
+            'WHATSAPP_APP_SECRET',
+            'WHATSAPP_ACCESS_TOKEN',
+            'WHATSAPP_PHONE_NUMBER_ID',
+            'WHATSAPP_GRAPH_API_VERSION',
+          ];
+    const missing = required.filter((key) => !env[key as keyof EnvironmentVariables]);
     if (missing.length > 0) {
       problems.push(`WHATSAPP_ENABLED=true exige: ${missing.join(', ')}`);
     }

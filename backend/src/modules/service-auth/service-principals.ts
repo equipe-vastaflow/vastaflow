@@ -16,6 +16,11 @@ export enum ServicePrincipalId {
    * `n8n` nao ganha poder de ingestao. Credenciais proprias, rotacao propria.
    */
   N8nTelegram = 'n8n-telegram',
+  /**
+   * O conteiner whatsapp-gateway (transporte Baileys). Principal PROPRIO: a credencial dele nao abre
+   * identidade nem o Telegram, e as de outros principais nao abrem a ingestao do WhatsApp.
+   */
+  WhatsappGateway = 'whatsapp-gateway',
 }
 
 /**
@@ -36,6 +41,12 @@ export enum ServiceScope {
    * servico. Ter este escopo nao permite escolher quem fala.
    */
   TelegramIngest = 'service:telegram:ingest',
+  /**
+   * Entregar ao backend UMA mensagem de texto recebida pelo gateway do WhatsApp e receber a resposta a ser
+   * devolvida ao MESMO remetente. Nao autoriza nada de negocio: o backend identifica a PESSOA vinculada ao
+   * remetente e aplica o RBAC dela; o gateway nunca escolhe quem fala nem para quem se responde.
+   */
+  WhatsappIngest = 'service:whatsapp:ingest',
 }
 
 export interface ServicePrincipalDefinition {
@@ -63,6 +74,10 @@ export const SERVICE_PRINCIPALS: Readonly<Record<ServicePrincipalId, ServicePrin
     [ServicePrincipalId.N8nTelegram]: {
       description: 'n8n - workflow de entrada de mensagens do Telegram',
       scopes: [ServiceScope.TelegramIngest],
+    },
+    [ServicePrincipalId.WhatsappGateway]: {
+      description: 'whatsapp-gateway - transporte do WhatsApp (Baileys)',
+      scopes: [ServiceScope.WhatsappIngest],
     },
   };
 

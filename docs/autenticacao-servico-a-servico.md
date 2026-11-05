@@ -10,6 +10,10 @@
 > `service:telegram:ingest`), e a segunda rota de servico, `POST /service/telegram/ingest`. A secao
 > 6 (ator de negocio) passou a valer **so para esse fluxo** - ver
 > [`telegram-n8n.md`](telegram-n8n.md) e o [ADR 0004](adr/0004-telegram-n8n-envelope-assinado.md).
+>
+> **WhatsApp (2026-11, etapa 1 da migracao para Baileys):** terceiro principal, `whatsapp-gateway` (escopo
+> `service:whatsapp:ingest`), e a rota `POST /service/whatsapp/ingest`. O conteiner do gateway ainda nao existe; ver
+> [`whatsapp.md`](whatsapp.md), secao 1.1.
 
 ## 1. O que existe
 
@@ -176,7 +180,7 @@ Nada disso foi construido nesta fase.
 2. **Lista de endpoints autorizados:** escopos no **codigo**, por principal.
 3. **Revogacao:** arquivo de hashes relido a cada 1 s (secao 5).
 4. **Mais de um principal:** o desenho comporta (enum + mapa). Hoje: `n8n` (identidade) e `n8n-telegram`
-   (ingestao do Telegram), com escopos disjuntos.
+   (ingestao do Telegram), com escopos disjuntos. Desde a etapa 1 do WhatsApp/Baileys ha tambem `whatsapp-gateway` (ingestao do WhatsApp).
 
 ## 10. Fora de escopo
 

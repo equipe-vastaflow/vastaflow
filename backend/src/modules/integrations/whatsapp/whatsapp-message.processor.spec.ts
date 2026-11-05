@@ -1,14 +1,16 @@
-import { Logger } from '@nestjs/common';
 import { AuditAction } from '../../audit/audit-action.enum';
 import type { AuditService } from '../../audit/audit.service';
 import type { AuthenticatedUser } from '../../auth/auth.types';
 import type { CommandRouter } from '../../commands/command-router.service';
 import { CommandChannel, CommandOutcome, type CommandContext } from '../../commands/command.types';
 import { LinkConfirmationOutcome } from '../channels/channel-link';
-import { WhatsappApiError } from './whatsapp-api.client';
 import type { WhatsappInboundEvent } from './whatsapp-inbound-event.entity';
 import type { WhatsappInboundEventsRepository } from './whatsapp-inbound-events.repository';
-import { WhatsappMessageProcessor, WHATSAPP_REPLIES } from './whatsapp-message.processor';
+import {
+  MESSAGE_MAX_FUTURE_SKEW_MS,
+  WhatsappMessageProcessor,
+  WHATSAPP_REPLIES,
+} from './whatsapp-message.processor';
 import type { InboundWhatsappText } from './whatsapp-payload';
 
 const AGORA = 1_790_000_100_000;
@@ -34,7 +36,6 @@ interface Montagem {
     [CommandContext]
   >;
   record: jest.Mock<Promise<void>, [unknown]>;
-  sendText: jest.Mock<Promise<void>, [string, string]>;
 }
 
 function montar(
@@ -62,7 +63,6 @@ function montar(
     }),
   );
   const record = jest.fn((_e: unknown) => Promise.resolve());
-  const sendText = jest.fn((_to: string, _t: string) => Promise.resolve());
   const processor = new WhatsappMessageProcessor(
     () => '1234567890',
     { claim, finish } as unknown as WhatsappInboundEventsRepository,
@@ -70,18 +70,23 @@ function montar(
     { tryConfirm },
     { execute } as unknown as CommandRouter,
     { record } as unknown as AuditService,
-    { sendText },
     () => AGORA,
     () => opcoes.replyToUnlinked === true,
   );
-  return { processor, claim, finish, resolve, tryConfirm, execute, record, sendText };
+  return { processor, claim, finish, resolve, tryConfirm, execute, record };
 }
 
 describe('WhatsappMessageProcessor', () => {
-  it('vinculado e autorizado: executa pelo Command Engine e responde NO MESMO numero', async () => {
+  it('vinculado e autorizado: executa pelo Command Engine e DEVOLVE a resposta (nao envia nada)', async () => {
     const m = montar();
 
-    expect(await m.processor.process(msg())).toBe('EXECUTED');
+    const result = await m.processor.process(msg());
+
+    expect(result).toEqual({
+      outcome: 'EXECUTED',
+      reply: 'Comandos disponiveis',
+      correlationId: 'evt-1',
+    });
 
     expect(m.execute.mock.calls[0]?.[0]).toMatchObject({
       user: USER,
@@ -89,7 +94,6 @@ describe('WhatsappMessageProcessor', () => {
       conversationId: '5511999990000',
       text: '/ajuda',
     });
-    expect(m.sendText).toHaveBeenCalledWith('5511999990000', 'Comandos disponiveis');
   });
 
   it('a auditoria traz a PESSOA e o canal, sem texto, sem numero e sem resposta', async () => {
@@ -120,9 +124,10 @@ describe('WhatsappMessageProcessor', () => {
   it('numero NAO vinculado: UNLINKED, nada executa e, por padrao, NADA e respondido (cliente da empresa nao recebe bot)', async () => {
     const m = montar({ user: null });
 
-    expect(await m.processor.process(msg({ text: '/financeiro' }))).toBe('UNLINKED');
+    const result = await m.processor.process(msg({ text: '/financeiro' }));
+    expect(result.outcome).toBe('UNLINKED');
     expect(m.execute).not.toHaveBeenCalled();
-    expect(m.sendText).not.toHaveBeenCalled();
+    expect(result.reply).toBeNull();
     // A tentativa continua auditada (sem numero e sem texto).
     expect(m.record).toHaveBeenCalledTimes(1);
     expect(m.record.mock.calls[0]?.[0] as Record<string, unknown>).not.toHaveProperty('usuarioId');
@@ -131,9 +136,11 @@ describe('WhatsappMessageProcessor', () => {
   it('com WHATSAPP_REPLY_TO_UNLINKED=true o aviso de vinculo e enviado', async () => {
     const m = montar({ user: null, replyToUnlinked: true });
 
-    expect(await m.processor.process(msg({ text: '/financeiro' }))).toBe('UNLINKED');
+    const result = await m.processor.process(msg({ text: '/financeiro' }));
+
+    expect(result.outcome).toBe('UNLINKED');
     expect(m.execute).not.toHaveBeenCalled();
-    expect(m.sendText).toHaveBeenCalledWith('5511999990000', WHATSAPP_REPLIES.unlinked);
+    expect(result.reply).toBe(WHATSAPP_REPLIES.unlinked);
   });
 
   it('conversa comum de cliente (texto livre, saudacao, pergunta) de numero desconhecido: silencio total', async () => {
@@ -145,25 +152,24 @@ describe('WhatsappMessageProcessor', () => {
       '/ajuda',
       'bom dia',
     ].entries()) {
-      expect(await m.processor.process(msg({ text, messageId: `wamid.cliente${String(i)}` }))).toBe(
-        'UNLINKED',
-      );
+      expect(
+        await m.processor.process(msg({ text, messageId: `wamid.cliente${String(i)}` })),
+      ).toMatchObject({ outcome: 'UNLINKED', reply: null });
     }
-    expect(m.sendText).not.toHaveBeenCalled();
     expect(m.execute).not.toHaveBeenCalled();
   });
 
   it('/vincular de numero desconhecido SEMPRE recebe resposta (comando explicito), mesmo no modo silencioso', async () => {
     const aceito = montar({ user: null, link: LinkConfirmationOutcome.Confirmed });
-    expect(await aceito.processor.process(msg({ text: '/vincular ABCD1234' }))).toBe(
-      'LINK_CONFIRMED',
-    );
-    expect(aceito.sendText).toHaveBeenCalledTimes(1);
+    expect(await aceito.processor.process(msg({ text: '/vincular ABCD1234' }))).toMatchObject({
+      outcome: 'LINK_CONFIRMED',
+      reply: WHATSAPP_REPLIES.linked,
+    });
     const recusado = montar({ user: null, link: LinkConfirmationOutcome.Rejected });
-    expect(await recusado.processor.process(msg({ text: '/vincular ABCD1234' }))).toBe(
-      'LINK_REJECTED',
-    );
-    expect(recusado.sendText).toHaveBeenCalledTimes(1);
+    expect(await recusado.processor.process(msg({ text: '/vincular ABCD1234' }))).toMatchObject({
+      outcome: 'LINK_REJECTED',
+      reply: WHATSAPP_REPLIES.linkRejected,
+    });
   });
 
   it('RBAC: permissao negada vira DENIED com a resposta do motor', async () => {
@@ -171,20 +177,26 @@ describe('WhatsappMessageProcessor', () => {
       result: { outcome: CommandOutcome.PermissionDenied, reply: 'Voce nao tem permissao' },
     });
 
-    expect(await m.processor.process(msg({ text: '/financeiro' }))).toBe('DENIED');
-    expect(m.sendText).toHaveBeenCalledWith('5511999990000', 'Voce nao tem permissao');
+    expect(await m.processor.process(msg({ text: '/financeiro' }))).toMatchObject({
+      outcome: 'DENIED',
+      reply: 'Voce nao tem permissao',
+    });
   });
 
   it('comando desconhecido e erro do handler sao classificados', async () => {
     expect(
-      await montar({
-        result: { outcome: CommandOutcome.UnknownCommand, reply: 'x' },
-      }).processor.process(msg()),
+      (
+        await montar({
+          result: { outcome: CommandOutcome.UnknownCommand, reply: 'x' },
+        }).processor.process(msg())
+      ).outcome,
     ).toBe('UNKNOWN_COMMAND');
     expect(
-      await montar({
-        result: { outcome: CommandOutcome.HandlerError, reply: 'x' },
-      }).processor.process(msg()),
+      (
+        await montar({
+          result: { outcome: CommandOutcome.HandlerError, reply: 'x' },
+        }).processor.process(msg())
+      ).outcome,
     ).toBe('FAILED');
   });
 
@@ -196,9 +208,11 @@ describe('WhatsappMessageProcessor', () => {
     ])('%s', async (link, esperado, resposta) => {
       const m = montar({ link, user: null });
 
-      expect(await m.processor.process(msg({ text: '/vincular ABCD-EFGH-JKLM' }))).toBe(esperado);
+      expect(await m.processor.process(msg({ text: '/vincular ABCD-EFGH-JKLM' }))).toMatchObject({
+        outcome: esperado,
+        reply: resposta,
+      });
       expect(m.execute).not.toHaveBeenCalled();
-      expect(m.sendText).toHaveBeenCalledWith('5511999990000', resposta);
       expect(JSON.stringify(m.record.mock.calls)).not.toContain('ABCD-EFGH-JKLM');
     });
 
@@ -217,7 +231,9 @@ describe('WhatsappMessageProcessor', () => {
       const m = montar({ user: null });
       m.tryConfirm.mockRejectedValue(new Error('db fora'));
 
-      expect(await m.processor.process(msg({ text: '/vincular X' }))).toBe('LINK_REJECTED');
+      expect((await m.processor.process(msg({ text: '/vincular X' }))).outcome).toBe(
+        'LINK_REJECTED',
+      );
     });
   });
 
@@ -225,24 +241,47 @@ describe('WhatsappMessageProcessor', () => {
     it('numero de OUTRO phone_number_id: ignorado, nem reserva', async () => {
       const m = montar();
 
-      expect(await m.processor.process(msg({ phoneNumberId: '999999' }))).toBe('IGNORED');
+      expect((await m.processor.process(msg({ phoneNumberId: '999999' }))).outcome).toBe('IGNORED');
       expect(m.claim).not.toHaveBeenCalled();
     });
 
     it('mensagem com mais de 10 min: descartada sem executar e sem responder', async () => {
       const m = montar();
 
-      expect(await m.processor.process(msg({ timestamp: 1_790_000_100 - 11 * 60 }))).toBe('STALE');
+      expect(await m.processor.process(msg({ timestamp: 1_790_000_100 - 11 * 60 }))).toEqual({
+        outcome: 'STALE',
+        reply: null,
+        correlationId: null,
+      });
       expect(m.claim).not.toHaveBeenCalled();
-      expect(m.sendText).not.toHaveBeenCalled();
+    });
+
+    it('mensagem DO FUTURO alem da tolerancia: descartada (relogio errado nao contorna a idade maxima)', async () => {
+      const m = montar();
+      const adiante = (AGORA + MESSAGE_MAX_FUTURE_SKEW_MS + 2_000) / 1000;
+
+      expect((await m.processor.process(msg({ timestamp: adiante }))).outcome).toBe('STALE');
+      expect(m.claim).not.toHaveBeenCalled();
+      // Dentro da tolerancia (pequena diferenca de relogio) segue normalmente.
+      expect(
+        (
+          await m.processor.process(
+            msg({ timestamp: (AGORA + 30_000) / 1000, messageId: 'wamid.B' }),
+          )
+        ).outcome,
+      ).toBe('EXECUTED');
     });
 
     it('entrega repetida da Meta (mesmo wamid): DUPLICATE, nada executa nem responde', async () => {
       const m = montar({ claimed: false });
 
-      expect(await m.processor.process(msg())).toBe('DUPLICATE');
+      expect(await m.processor.process(msg())).toEqual({
+        outcome: 'DUPLICATE',
+        reply: null,
+        correlationId: null,
+      });
       expect(m.execute).not.toHaveBeenCalled();
-      expect(m.sendText).not.toHaveBeenCalled();
+      expect(m.record).not.toHaveBeenCalled();
     });
 
     it('a reserva acontece ANTES de qualquer execucao', async () => {
@@ -264,19 +303,18 @@ describe('WhatsappMessageProcessor', () => {
 
     it('limite por remetente: 10 passam, o excesso e descartado (sem aviso por padrao); outro numero nao e afetado', async () => {
       const m = montar();
-      const resultados: string[] = [];
+      const resultados: Awaited<ReturnType<WhatsappMessageProcessor['process']>>[] = [];
       for (let i = 0; i < 13; i += 1) {
         resultados.push(await m.processor.process(msg({ messageId: `wamid.${String(i)}` })));
       }
 
-      expect(resultados.filter((r) => r === 'EXECUTED')).toHaveLength(10);
-      expect(resultados.filter((r) => r === 'RATE_LIMITED')).toHaveLength(3);
+      expect(resultados.filter((r) => r.outcome === 'EXECUTED')).toHaveLength(10);
+      expect(resultados.filter((r) => r.outcome === 'RATE_LIMITED')).toHaveLength(3);
       // Padrao silencioso: o excesso e descartado sem aviso a ninguem.
+      expect(resultados.filter((r) => r.reply === WHATSAPP_REPLIES.rateLimited)).toHaveLength(0);
       expect(
-        m.sendText.mock.calls.filter(([, t]) => t === WHATSAPP_REPLIES.rateLimited),
-      ).toHaveLength(0);
-      expect(
-        await m.processor.process(msg({ messageId: 'wamid.outro', from: '5511888880000' })),
+        (await m.processor.process(msg({ messageId: 'wamid.outro', from: '5511888880000' })))
+          .outcome,
       ).toBe('EXECUTED');
     });
   });
@@ -284,80 +322,26 @@ describe('WhatsappMessageProcessor', () => {
   describe('aviso de limite (so com WHATSAPP_REPLY_TO_UNLINKED=true)', () => {
     it('envia UM aviso por janela', async () => {
       const m = montar({ replyToUnlinked: true });
+      const avisos: (string | null)[] = [];
       for (let i = 0; i < 13; i += 1) {
-        await m.processor.process(msg({ messageId: `wamid.aviso${String(i)}` }));
+        avisos.push(
+          (await m.processor.process(msg({ messageId: `wamid.aviso${String(i)}` }))).reply,
+        );
       }
-      expect(
-        m.sendText.mock.calls.filter(([, t]) => t === WHATSAPP_REPLIES.rateLimited),
-      ).toHaveLength(1);
+      expect(avisos.filter((r) => r === WHATSAPP_REPLIES.rateLimited)).toHaveLength(1);
     });
   });
 
   describe('falhas nunca lancam', () => {
-    it('envio falha: segue (log so com a categoria)', async () => {
-      const m = montar();
-      m.sendText.mockRejectedValue(new WhatsappApiError('http', 500));
-
-      expect(await m.processor.process(msg())).toBe('EXECUTED');
-    });
-
-    it('envio falha: o log traz so categoria, status e codigo numerico da Graph API', async () => {
-      const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
-      try {
-        const m = montar();
-        m.sendText.mockRejectedValue(
-          Object.assign(new WhatsappApiError('http', 401, 190), { message: 'SEGREDO-EAAG' }),
-        );
-        await m.processor.process(msg({ text: '/ajuda CODIGO-SECRETO' }));
-
-        const linhas = warn.mock.calls.map(([texto]) => String(texto));
-        expect(linhas).toContain('WhatsApp: resposta nao enviada (http, status 401, codigo 190)');
-        expect(linhas.join(' ')).not.toMatch(/SEGREDO|EAAG|5511999990000|CODIGO-SECRETO|\/ajuda/);
-      } finally {
-        warn.mockRestore();
-      }
-    });
-
-    it('envio falha: o log inclui subcodigo e tipo, sem dados pessoais', async () => {
-      const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
-      try {
-        const m = montar();
-        m.sendText.mockRejectedValue(
-          Object.assign(new WhatsappApiError('http', 400, 10, 2018, 'OAuthException'), {
-            message: 'SEGREDO-EAAG',
-          }),
-        );
-        await m.processor.process(msg({ text: '/ajuda CODIGO-SECRETO' }));
-
-        const linhas = warn.mock.calls.map(([texto]) => String(texto));
-        expect(linhas).toContain(
-          'WhatsApp: resposta nao enviada (http, status 400, codigo 10, subcodigo 2018, tipo OAuthException)',
-        );
-        expect(linhas.join(' ')).not.toMatch(/SEGREDO|EAAG|5511999990000|CODIGO-SECRETO|\/ajuda/);
-      } finally {
-        warn.mockRestore();
-      }
-    });
-
-    it('envio falha sem codigo da Meta: o log mostra so a categoria e o status', async () => {
-      const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
-      try {
-        const m = montar();
-        m.sendText.mockRejectedValue(new WhatsappApiError('http', 500));
-        await m.processor.process(msg());
-        expect(warn.mock.calls.map(([t]) => String(t))).toContain(
-          'WhatsApp: resposta nao enviada (http, status 500)',
-        );
-      } finally {
-        warn.mockRestore();
-      }
-    });
-
     it('banco fora ao reservar: FAILED, nada executa', async () => {
       const m = montar();
       m.claim.mockRejectedValue(new Error('db fora'));
 
-      expect(await m.processor.process(msg())).toBe('FAILED');
+      expect(await m.processor.process(msg())).toEqual({
+        outcome: 'FAILED',
+        reply: null,
+        correlationId: null,
+      });
       expect(m.execute).not.toHaveBeenCalled();
     });
 
@@ -365,7 +349,7 @@ describe('WhatsappMessageProcessor', () => {
       const m = montar();
       m.resolve.mockRejectedValue(new Error('db fora'));
 
-      expect(await m.processor.process(msg())).toBe('UNLINKED');
+      expect((await m.processor.process(msg())).outcome).toBe('UNLINKED');
       expect(m.execute).not.toHaveBeenCalled();
     });
   });
@@ -373,8 +357,55 @@ describe('WhatsappMessageProcessor', () => {
   it('resposta longa e cortada em 4096', async () => {
     const m = montar({ result: { outcome: CommandOutcome.Ok, reply: 'x'.repeat(9000) } });
 
-    await m.processor.process(msg());
+    const result = await m.processor.process(msg());
 
-    expect((m.sendText.mock.calls[0]?.[1] ?? '').length).toBe(4096);
+    expect((result.reply ?? '').length).toBe(4096);
+  });
+
+  describe('contexto do transporte (auditoria)', () => {
+    const registrado = (m: Montagem): Record<string, unknown> =>
+      (m.record.mock.calls[0]?.[0] as { metadados: Record<string, unknown> }).metadados;
+
+    it('padrao (webhook da Meta): origem webhook-meta, sem principal', async () => {
+      const m = montar();
+
+      await m.processor.process(msg());
+
+      expect(registrado(m)).toMatchObject({ origem: 'webhook-meta' });
+      expect(registrado(m)).not.toHaveProperty('principal');
+    });
+
+    it('gateway: registra origem, principal e credencial (sem texto nem numero)', async () => {
+      const m = montar();
+
+      await m.processor.process(msg({ text: '/ajuda SENTINELA' }), {
+        origem: 'gateway-baileys',
+        principal: 'whatsapp-gateway',
+        servicoId: 'gw-1',
+      });
+
+      expect(registrado(m)).toMatchObject({
+        origem: 'gateway-baileys',
+        principal: 'whatsapp-gateway',
+        servicoId: 'gw-1',
+        canal: 'whatsapp',
+        resultado: 'EXECUTED',
+      });
+      const bruto = JSON.stringify(m.record.mock.calls);
+      expect(bruto).not.toContain('SENTINELA');
+      expect(bruto).not.toContain('5511999990000');
+    });
+
+    it('o RBAC e do VINCULADO ao remetente, nao do contexto: o principal do gateway nao entra na decisao', async () => {
+      const m = montar({ user: null });
+
+      await m.processor.process(msg({ text: '/financeiro' }), {
+        origem: 'gateway-baileys',
+        principal: 'whatsapp-gateway',
+        servicoId: 'gw-1',
+      });
+
+      expect(m.execute).not.toHaveBeenCalled();
+    });
   });
 });

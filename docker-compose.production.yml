@@ -270,6 +270,10 @@ services:
       WHATSAPP_GRAPH_API_VERSION: ${WHATSAPP_GRAPH_API_VERSION:-}
       WHATSAPP_API_BASE_URL: ${WHATSAPP_API_BASE_URL:-}
       WHATSAPP_REPLY_TO_UNLINKED: ${WHATSAPP_REPLY_TO_UNLINKED:-false}
+      # Transporte: `meta` (padrao, webhook acima) ou `gateway` (conteiner Baileys, ainda NAO existe: etapa 2).
+      # Em `gateway` o webhook da Meta responde 404 e vale POST /service/whatsapp/ingest (credencial de servico).
+      WHATSAPP_TRANSPORT: ${WHATSAPP_TRANSPORT:-meta}
+      WHATSAPP_GATEWAY_ACCOUNT: ${WHATSAPP_GATEWAY_ACCOUNT:-}
       # NFS-e Nacional. DESLIGADA por padrao (comandos /nfse* respondem "desligado"). Ligada, exige a
       # configuracao fiscal completa (sem padrao tributario). So o backend as recebe (nunca o n8n/frontend).
       # O certificado A1 (.pfx) NAO vai para a imagem: monte-o somente leitura FORA do Git quando existir

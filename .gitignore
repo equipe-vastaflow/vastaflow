@@ -28,6 +28,8 @@ out/
 *.key
 # Arquivo avulso na raiz (nome sugere credencial): nunca versionar.
 /vastaflow-senha.tar
+# Pacote de atualizacao avulso na raiz: nunca versionar.
+/vastaflow-update.tar
 *.pfx
 *.p12
 *.crt

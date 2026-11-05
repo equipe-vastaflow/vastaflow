@@ -712,6 +712,61 @@ describe('validateEnv', () => {
       expect(mensagem).not.toContain('SEGREDO');
     });
 
+    describe('transporte gateway (Baileys)', () => {
+      const gateway: Record<string, string> = {
+        WHATSAPP_ENABLED: 'true',
+        WHATSAPP_TRANSPORT: 'gateway',
+        WHATSAPP_GATEWAY_ACCOUNT: '5511900000000',
+        SERVICE_CREDENTIALS_FILE: '/run/secrets/credentials.json',
+      };
+
+      it('padrao: transporte meta (comportamento de sempre), sem conta de gateway', () => {
+        const env = validateEnv(baseEnv);
+
+        expect(env.WHATSAPP_TRANSPORT).toBeUndefined();
+        expect(env.WHATSAPP_GATEWAY_ACCOUNT).toBeUndefined();
+      });
+
+      it('ligado e completo: passa SEM nenhuma variavel da Meta', () => {
+        expect(validateEnv({ ...baseEnv, ...gateway }).WHATSAPP_ENABLED).toBe(true);
+      });
+
+      it.each(['WHATSAPP_GATEWAY_ACCOUNT', 'SERVICE_CREDENTIALS_FILE'])(
+        'ligado sem %s: o boot e recusado',
+        (faltando) => {
+          const resto = Object.fromEntries(Object.entries(gateway).filter(([k]) => k !== faltando));
+
+          expect(() => validateEnv({ ...baseEnv, ...resto })).toThrow(new RegExp(faltando));
+        },
+      );
+
+      it('desligado, o gateway nao exige nada', () => {
+        expect(() =>
+          validateEnv({ ...baseEnv, WHATSAPP_ENABLED: 'false', WHATSAPP_TRANSPORT: 'gateway' }),
+        ).not.toThrow();
+      });
+
+      it('transporte invalido e conta fora do formato sao recusados, sem repetir o valor', () => {
+        expect(() => validateEnv({ ...baseEnv, WHATSAPP_TRANSPORT: 'telegram' })).toThrow(
+          /WHATSAPP_TRANSPORT/,
+        );
+        let mensagem = '';
+        try {
+          validateEnv({ ...baseEnv, ...gateway, WHATSAPP_GATEWAY_ACCOUNT: '+55 (11) SEGREDO' });
+        } catch (error) {
+          mensagem = (error as Error).message;
+        }
+        expect(mensagem).toMatch(/WHATSAPP_GATEWAY_ACCOUNT/);
+        expect(mensagem).not.toContain('SEGREDO');
+      });
+
+      it('em meta, ligar continua exigindo as variaveis da Meta (nada mudou)', () => {
+        expect(() =>
+          validateEnv({ ...baseEnv, WHATSAPP_ENABLED: 'true', WHATSAPP_TRANSPORT: 'meta' }),
+        ).toThrow(/WHATSAPP_WEBHOOK_TOKEN/);
+      });
+    });
+
     it('base da Graph fora da lista de hosts de teste: recusada', () => {
       expect(() =>
         validateEnv({ ...baseEnv, ...completo, WHATSAPP_API_BASE_URL: 'http://evil.example' }),

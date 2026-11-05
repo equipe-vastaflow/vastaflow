@@ -535,6 +535,7 @@ describe('Auth, usuarios e RBAC (e2e)', () => {
           '/profile',
           '/service/identity',
           '/service/telegram/ingest',
+          '/service/whatsapp/ingest',
           '/settings',
           '/settings/{key}',
           '/users',

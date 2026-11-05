@@ -28,6 +28,51 @@ ver `telegram-n8n.md` secao 14). Os comandos, o RBAC, a auditoria e as respostas
 | Envio (unico ponto de rede) | `whatsapp-api.client.ts` |
 | Idempotencia persistente | `whatsapp-inbound-event.entity.ts`, migration `1791600000000-WhatsappInboundEvents` (MySQL + Oracle nao executado) |
 
+## 1.1 Transporte `gateway` (Baileys) - etapa 1: so o BACKEND esta pronto
+
+> **O conteiner `whatsapp-gateway` ainda NAO existe** (etapa 2). Nada de Baileys foi instalado, nenhum QR foi gerado, nenhuma
+> conta foi conectada. Esta etapa so preparou o backend para receber as mensagens dele. Decisao e arquitetura: auditoria
+> tecnica de 2026-11-04 (gateway separado; n8n fora do caminho; sessao cifrada fora do `mysqldump`).
+
+`WHATSAPP_TRANSPORT` escolhe **um** transporte por vez (padrao `meta`, o comportamento de sempre). A troca e reversivel:
+uma variavel e recriar o backend.
+
+| | `meta` (padrao) | `gateway` |
+| --- | --- | --- |
+| Entrada | `POST /webhooks/whatsapp` (assinatura da Meta) | `POST /service/whatsapp/ingest` (credencial de servico) |
+| A outra entrada | - | o webhook da Meta responde **404** |
+| Resposta | o backend envia pela Graph API | o backend **devolve** o texto; o gateway envia |
+| Ligar exige | variaveis da Meta | `WHATSAPP_GATEWAY_ACCOUNT` e `SERVICE_CREDENTIALS_FILE` |
+
+O **processador e o mesmo** nos dois: idempotencia (`whatsapp_inbound_events`), idade maxima, limite por remetente,
+`/vincular`, identidade, RBAC, Command Engine e auditoria. Ele **nao envia nada**: devolve `{outcome, reply, correlationId}` e
+cada transporte entrega a resposta (Meta: `whatsapp-meta-reply.ts`; gateway: o proprio gateway).
+
+**Contrato `POST /service/whatsapp/ingest`** (principal `whatsapp-gateway`, escopo `service:whatsapp:ingest`, so rede interna):
+
+```
+{ "version": 1, "messageId": "...", "from": "<digitos>", "to": "<digitos>", "chatType": "private",
+  "text": "1 a 4096", "timestamp": <segundos Unix> }
+-> { "correlationId", "outcome", "duplicate", "replyTo", "reply" }
+```
+
+- **Estrito:** qualquer campo a mais (`replyTo`, `actorUserId`, `role`, `permissions`...) e **400**.
+- **Destino da resposta:** `replyTo` e sempre o `from` da mensagem recebida (nunca um valor informado pelo gateway) e e `null`
+  quando nao ha resposta. O gateway so responde a `replyTo` e so quando `reply` nao e `null`.
+- `to` deve ser a conta configurada (`WHATSAPP_GATEWAY_ACCOUNT`); outro destinatario = `IGNORED`, sem reserva nem auditoria.
+- Mensagem com mais de 10 min **ou mais de 5 min no futuro** = `STALE`. Duplicata = `DUPLICATE`, sem resposta.
+- Remetente nao vinculado = silencio (`reply` nulo), como na Meta; so `/vincular` e respondido.
+- Auditoria (`CHANNEL_MESSAGE`): `origem=gateway-baileys`, `principal`, `servicoId`; nunca texto nem numero.
+
+**Confianca no gateway:** ele e quem informa o remetente (`from`) a partir do que o WhatsApp entrega, como a assinatura da Meta
+fazia. Uma credencial de gateway vazada permitiria **se passar por um remetente ja vinculado**. Por isso: principal e escopo
+proprios, rede interna sem porta publicada, rotacao da credencial e limite por remetente. Um gateway comprometido **nao**
+consegue escolher o usuario por um campo, mas pode afirmar um `from`.
+
+Fica para a **etapa 2**: o gateway (Baileys, ESM, conteiner proprio), o estado de autenticacao cifrado, o pareamento por QR, a
+reconexao, os filtros (grupos, `fromMe`, historico) e o servico no Compose. O codigo da Meta **segue no repositorio** ate a
+nova integracao ser validada.
+
 ## 2. O que e aceito e o que e ignorado
 
 - **Aceito:** texto simples (1 a 4096 caracteres) de conversa individual, do **nosso** numero (`phone_number_id`).
@@ -57,6 +102,8 @@ ver `telegram-n8n.md` secao 14). Os comandos, o RBAC, a auditoria e as respostas
 `WHATSAPP_ENABLED`, `WHATSAPP_WEBHOOK_TOKEN` (voce inventa; >=16), `WHATSAPP_APP_SECRET`, `WHATSAPP_ACCESS_TOKEN`,
 `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_GRAPH_API_VERSION` (**sem padrao no codigo**: confira a vigente na Meta),
 `WHATSAPP_API_BASE_URL` (so teste), `WHATSAPP_REPLY_TO_UNLINKED` (padrao `false`). Ligado sem alguma das obrigatorias, o **boot e recusado**. Ver `.env.example`.
+Transporte: `WHATSAPP_TRANSPORT` (`meta` padrao | `gateway`) e, so no gateway, `WHATSAPP_GATEWAY_ACCOUNT` (digitos da conta do bot);
+no gateway as variaveis da Meta **nao** sao exigidas (secao 1.1).
 
 ## 5. O que depende de voce / da Meta (nada disto foi feito)
 

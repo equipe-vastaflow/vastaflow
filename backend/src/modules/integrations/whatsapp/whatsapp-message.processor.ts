@@ -9,7 +9,6 @@ import { CommandChannel, CommandOutcome } from '../../commands/command.types';
 import type { ChannelIdentityResolver } from '../channels/channel-identity';
 import { type ChannelLinkConfirmer, LinkConfirmationOutcome } from '../channels/channel-link';
 import { MESSAGE_MAX_AGE_MS } from '../telegram/telegram-envelope';
-import { WhatsappApiError, type WhatsappSender } from './whatsapp-api.client';
 import { WhatsappEventStatus } from './whatsapp-inbound-event.entity';
 import type { WhatsappInboundEventsRepository } from './whatsapp-inbound-events.repository';
 import { WHATSAPP_TEXT_MAX, type InboundWhatsappText } from './whatsapp-payload';
@@ -31,6 +30,31 @@ export const WHATSAPP_REPLIES = {
 /** Mensagens por minuto por remetente (numero). O excesso e descartado sem executar nada. */
 export const WHATSAPP_USER_RATE_PER_MINUTE = 10;
 
+/** Quanto uma mensagem pode estar ADIANTE do relogio do servidor antes de ser tratada como invalida. */
+export const MESSAGE_MAX_FUTURE_SKEW_MS = 5 * 60_000;
+
+/** Quem entregou a mensagem (vai para a auditoria). `principal` e `servicoId` so existem no canal de servico. */
+export interface WhatsappProcessContext {
+  readonly origem: 'webhook-meta' | 'gateway-baileys';
+  readonly principal?: string;
+  readonly servicoId?: string;
+}
+
+const META_CONTEXT: WhatsappProcessContext = { origem: 'webhook-meta' };
+
+/**
+ * O desfecho de UMA mensagem. O processador NUNCA envia nada: devolve o texto da resposta e quem entrega
+ * (webhook da Meta ou gateway) a leva ao remetente da MESMA mensagem. Nao existe destinatario aqui: a resposta e
+ * sempre para quem escreveu (o remetente da propria mensagem), nunca um valor escolhido por outro campo.
+ */
+export interface WhatsappResult {
+  readonly outcome: WhatsappOutcome;
+  /** Texto fixo ou do Command Engine, no maximo 4096 caracteres; `null` = nao responder. */
+  readonly reply: string | null;
+  /** Id do evento reservado (correlacao com a auditoria); `null` se a mensagem nem chegou a ser reservada. */
+  readonly correlationId: string | null;
+}
+
 export type WhatsappOutcome =
   | 'IGNORED'
   | 'STALE'
@@ -48,8 +72,9 @@ export type WhatsappOutcome =
  * Uma mensagem de texto do WhatsApp, do webhook ate a resposta.
  *
  * Ordem (cada etapa so existe depois da anterior):
- * 1. e do NOSSO numero? (outro `phone_number_id` e ignorado);
- * 2. e recente? (mais de 10 min e descartada sem executar: a Meta reentrega por dias);
+ * 1. e do NOSSO numero? (outro `phone_number_id`/destinatario e ignorado);
+ * 2. e recente? (mais de 10 min, ou adiantada demais no futuro, e descartada sem executar: a Meta reentrega por
+ *    dias e um relogio errado nao pode contornar a idade maxima);
  * 3. RESERVA no banco (indice unico): ja vista = `DUPLICATE`, nada executa;
  * 4. limite por remetente (10/min): excesso descartado; o aviso (uma vez por janela) so sai com
  *    `replyToUnlinked`;
@@ -57,7 +82,10 @@ export type WhatsappOutcome =
  * 6. identidade: o `wa_id` deve estar vinculado a usuario ATIVO (sem vinculo = `UNLINKED`, nada roda e,
  *    por padrao, NADA e respondido: ver `replyToUnlinked`);
  * 7. RBAC do Command Engine para ESSA pessoa;
- * 8. auditoria (`CHANNEL_MESSAGE`, sem texto/numero) e resposta pela Cloud API.
+ * 8. auditoria (`CHANNEL_MESSAGE`, sem texto/numero) e devolucao do TEXTO da resposta.
+ *
+ * Esta classe NAO conhece transporte: nao fala com a Meta nem com o gateway. Devolve `WhatsappResult` e
+ * quem a chamou entrega a resposta ao remetente da mensagem.
  *
  * Nunca lanca. At-most-once, como no Telegram: se cair depois da reserva, a mensagem NAO e
  * reexecutada. Sem logar texto, resposta, numero ou token.
@@ -73,7 +101,6 @@ export class WhatsappMessageProcessor {
     private readonly linking: ChannelLinkConfirmer,
     private readonly router: CommandRouter,
     private readonly audit: AuditService,
-    private readonly sender: WhatsappSender,
     private readonly now: () => number = (): number => Date.now(),
     /**
      * Responder a quem NAO esta vinculado (e o aviso de limite)? PADRAO NAO. Num numero que tambem atende
@@ -84,40 +111,52 @@ export class WhatsappMessageProcessor {
     private readonly replyToUnlinked: () => boolean = (): boolean => false,
   ) {}
 
-  async process(message: InboundWhatsappText): Promise<WhatsappOutcome> {
+  async process(
+    message: InboundWhatsappText,
+    context: WhatsappProcessContext = META_CONTEXT,
+  ): Promise<WhatsappResult> {
     try {
-      return await this.run(message);
+      return await this.run(message, context);
     } catch (error) {
       this.logger.error(
         `WhatsApp: falha ao processar (${error instanceof Error ? error.name : typeof error})`,
       );
-      return 'FAILED';
+      return { outcome: 'FAILED', reply: null, correlationId: null };
     }
   }
 
-  private async run(message: InboundWhatsappText): Promise<WhatsappOutcome> {
+  private async run(
+    message: InboundWhatsappText,
+    context: WhatsappProcessContext,
+  ): Promise<WhatsappResult> {
     if (message.phoneNumberId !== this.phoneNumberId()) {
-      return 'IGNORED';
+      return { outcome: 'IGNORED', reply: null, correlationId: null };
     }
-    if (this.now() - message.timestamp * 1000 > MESSAGE_MAX_AGE_MS) {
-      this.logger.warn('WhatsApp: mensagem antiga descartada (nao executada)');
-      return 'STALE';
+    const age = this.now() - message.timestamp * 1000;
+    if (age > MESSAGE_MAX_AGE_MS || -age > MESSAGE_MAX_FUTURE_SKEW_MS) {
+      this.logger.warn('WhatsApp: mensagem fora da janela de tempo descartada (nao executada)');
+      return { outcome: 'STALE', reply: null, correlationId: null };
     }
 
     const event = await this.events.claim(message.phoneNumberId, message.messageId);
     if (event === null) {
       this.logger.warn('WhatsApp: entrega duplicada ignorada');
-      return 'DUPLICATE';
+      return { outcome: 'DUPLICATE', reply: null, correlationId: null };
     }
+    const done = (outcome: WhatsappOutcome, reply: string | null): WhatsappResult => ({
+      outcome,
+      reply,
+      correlationId: event.id,
+    });
 
     const decision = this.limiter.take(message.from);
     if (!decision.allowed) {
       await this.events.finish(event.id, WhatsappEventStatus.Concluido, 'RATE_LIMITED', null);
       this.logger.warn('WhatsApp: limite por remetente excedido; mensagem descartada');
-      if (decision.firstRejection && this.replyToUnlinked()) {
-        await this.reply(message.from, WHATSAPP_REPLIES.rateLimited);
-      }
-      return 'RATE_LIMITED';
+      return done(
+        'RATE_LIMITED',
+        decision.firstRejection && this.replyToUnlinked() ? WHATSAPP_REPLIES.rateLimited : null,
+      );
     }
 
     const identity = { channel: CHANNEL, externalId: message.from };
@@ -127,17 +166,13 @@ export class WhatsappMessageProcessor {
       const outcome =
         link === LinkConfirmationOutcome.Confirmed ? 'LINK_CONFIRMED' : 'LINK_REJECTED';
       await this.events.finish(event.id, WhatsappEventStatus.Concluido, outcome, null);
-      await this.reply(message.from, linkReply(link));
-      return outcome;
+      return done(outcome, linkReply(link));
     }
 
     const user = await this.resolve(identity);
     if (user === null) {
-      await this.finishAndAudit(event.id, 'UNLINKED', 'NAO_VINCULADO', null, null);
-      if (this.replyToUnlinked()) {
-        await this.reply(message.from, WHATSAPP_REPLIES.unlinked);
-      }
-      return 'UNLINKED';
+      await this.finishAndAudit(event.id, context, 'UNLINKED', 'NAO_VINCULADO', null, null);
+      return done('UNLINKED', this.replyToUnlinked() ? WHATSAPP_REPLIES.unlinked : null);
     }
 
     const result = await this.router.execute({
@@ -149,13 +184,13 @@ export class WhatsappMessageProcessor {
     const { outcome, authorization } = classify(result.outcome);
     await this.finishAndAudit(
       event.id,
+      context,
       outcome,
       authorization,
       user.id,
       registeredName(message.text, result.outcome),
     );
-    await this.reply(message.from, clamp(result.reply));
-    return outcome;
+    return done(outcome, clamp(result.reply));
   }
 
   private async confirmLink(
@@ -184,6 +219,7 @@ export class WhatsappMessageProcessor {
 
   private async finishAndAudit(
     eventId: string,
+    context: WhatsappProcessContext,
     outcome: Exclude<
       WhatsappOutcome,
       'IGNORED' | 'STALE' | 'DUPLICATE' | 'RATE_LIMITED' | 'LINK_CONFIRMED' | 'LINK_REJECTED'
@@ -209,42 +245,12 @@ export class WhatsappMessageProcessor {
         autorizacao: authorization,
         comando: command,
         correlacao: eventId,
-        origem: 'webhook-meta',
+        origem: context.origem,
+        ...(context.principal === undefined ? {} : { principal: context.principal }),
+        ...(context.servicoId === undefined ? {} : { servicoId: context.servicoId }),
       },
     });
   }
-
-  private async reply(to: string, text: string): Promise<void> {
-    try {
-      await this.sender.sendText(to, text);
-    } catch (error) {
-      this.logger.warn(`WhatsApp: resposta nao enviada (${describeSendFailure(error)})`);
-    }
-  }
-}
-
-/**
- * Motivo do envio que falhou, so com valores numericos e a categoria fixa: `http, status 400,
- * codigo 10, subcodigo 33, tipo OAuthException`. Nunca mensagem da Meta, URL, token, destinatario ou texto.
- */
-function describeSendFailure(error: unknown): string {
-  if (!(error instanceof WhatsappApiError)) {
-    return 'desconhecido';
-  }
-  const parts: string[] = [error.kind];
-  if (error.httpStatus !== undefined) {
-    parts.push(`status ${String(error.httpStatus)}`);
-  }
-  if (error.graphCode !== undefined) {
-    parts.push(`codigo ${String(error.graphCode)}`);
-  }
-  if (error.graphSubcode !== undefined) {
-    parts.push(`subcodigo ${String(error.graphSubcode)}`);
-  }
-  if (error.graphType !== undefined) {
-    parts.push(`tipo ${error.graphType}`);
-  }
-  return parts.join(', ');
 }
 
 function linkReply(outcome: LinkConfirmationOutcome): string {
