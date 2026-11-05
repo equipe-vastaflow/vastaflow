@@ -15,6 +15,7 @@ import type {
   WaSocketFactory,
   WaSocketPort,
 } from './ports.js';
+import { SessionUnavailableError } from './ports.js';
 import {
   decideReconnect,
   DEFAULT_RECONNECT,
@@ -82,6 +83,7 @@ export class Gateway {
   private queue: (() => Promise<void>)[] = [];
   private draining = false;
   private readonly counters: Record<string, number> = {};
+  private stopWaiters: ((reason: StopReason) => void)[] = [];
   private readonly seen = new SeenIds();
   private readonly limiter: ReplyLimiter;
   private readonly reconnectConfig: ReconnectConfig;
@@ -93,6 +95,11 @@ export class Gateway {
     this.reconnectConfig = deps.reconnect ?? DEFAULT_RECONNECT;
     this.stableAfterMs = deps.stableAfterMs ?? 60_000;
     this.random = deps.random ?? Math.random;
+    // O armazenamento avisa quando nao consegue mais guardar/ler a sessao com seguranca (trava perdida, dado ilegivel,
+    // falha de escrita): o gateway PARA, em vez de seguir usando chaves que nao foram persistidas.
+    deps.sessions.onFatal((reason) => {
+      this.halt(reason);
+    });
   }
 
   status(): GatewayStatus {
@@ -110,6 +117,16 @@ export class Gateway {
     }
     this.deps.logger.event('iniciando');
     await this.connect();
+  }
+
+  /** Resolve quando o gateway PARA (por pedido ou por motivo de seguranca); ja resolvido se ja parou. */
+  waitUntilStopped(): Promise<StopReason> {
+    if (this.state === 'stopped') {
+      return Promise.resolve(this.stopReason ?? 'parado');
+    }
+    return new Promise<StopReason>((resolve) => {
+      this.stopWaiters.push(resolve);
+    });
   }
 
   /** Para de vez (pedido de quem opera). Nao apaga a sessao. */
@@ -134,10 +151,13 @@ export class Gateway {
     let session: SessionHandle;
     try {
       session = await this.deps.sessions.open();
-    } catch {
-      // Sem sessao nao ha o que reconectar: parar e deixar claro (nunca girar em falso).
-      this.deps.logger.event('sessao-indisponivel');
-      this.halt('sessao-indisponivel');
+    } catch (error) {
+      // Sem sessao nao ha o que reconectar: parar e deixar claro (nunca girar em falso). O motivo vem do
+      // armazenamento (outra instancia em uso, dado ilegivel...) e nunca de texto de erro do driver.
+      const reason =
+        error instanceof SessionUnavailableError ? error.reason : 'sessao-indisponivel';
+      this.deps.logger.event('sessao-indisponivel', { motivo: reason });
+      this.halt(reason);
       return;
     }
     // `stop()` pode ter sido chamado enquanto a sessao abria.
@@ -239,7 +259,16 @@ export class Gateway {
     this.queue = [];
     this.socket?.close();
     this.socket = null;
+    // Solta a trava da sessao (a proxima instancia pode assumir). Falha ao soltar so e contada: a trava expira sozinha.
+    void this.deps.sessions.close().catch(() => {
+      this.count('falha-fechar-sessao');
+    });
     this.deps.logger.event('parado', { motivo: reason });
+    const waiters = this.stopWaiters;
+    this.stopWaiters = [];
+    for (const resolve of waiters) {
+      resolve(reason);
+    }
   }
 
   private onMessages(batch: MessagesBatch, socket: WaSocketPort): void {

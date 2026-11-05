@@ -17,7 +17,9 @@ export type LogEvent =
   | 'falha-enviar'
   | 'fila-cheia'
   | 'config-invalida'
-  | 'sessao-indisponivel';
+  | 'sessao-indisponivel'
+  | 'sessao-verificada'
+  | 'conexao-desabilitada';
 
 export type LogFields = Readonly<Record<string, string | number | boolean | null>>;
 

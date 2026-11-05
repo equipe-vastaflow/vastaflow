@@ -12,6 +12,8 @@ import type {
   WaSocketFactory,
   WaSocketPort,
 } from '../ports.js';
+import { SessionUnavailableError } from '../ports.js';
+import type { StopReason } from '../reconnect-policy.js';
 
 /** Dados 100% FICTICIOS. Nenhuma conta real, nenhum numero real. */
 export const ACCOUNT = '5511900000000';
@@ -102,12 +104,18 @@ export class FakeSessionStore implements SessionStore {
   opens = 0;
   saves = 0;
   invalidated = 0;
-  failOpen = false;
+  closes = 0;
+  failOpen: StopReason | boolean = false;
+  private fatalHandlers: ((reason: StopReason) => void)[] = [];
 
   open(): Promise<SessionHandle> {
     this.opens += 1;
-    if (this.failOpen) {
-      return Promise.reject(new Error('sem sessao'));
+    if (this.failOpen !== false) {
+      return Promise.reject(
+        this.failOpen === true
+          ? new Error('sem sessao')
+          : new SessionUnavailableError(this.failOpen),
+      );
     }
     return Promise.resolve({
       state: { creds: {}, keys: {} },
@@ -121,6 +129,20 @@ export class FakeSessionStore implements SessionStore {
   invalidate(): Promise<void> {
     this.invalidated += 1;
     return Promise.resolve();
+  }
+
+  close(): Promise<void> {
+    this.closes += 1;
+    return Promise.resolve();
+  }
+
+  onFatal(handler: (reason: StopReason) => void): void {
+    this.fatalHandlers.push(handler);
+  }
+
+  /** Simula o armazenamento avisando de um erro fatal. */
+  triggerFatal(reason: StopReason): void {
+    for (const h of this.fatalHandlers) h(reason);
   }
 }
 

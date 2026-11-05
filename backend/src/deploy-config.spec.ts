@@ -152,6 +152,23 @@ describe('Implantacao - backup e restauracao', () => {
     expect(backup).toContain('| encrypt_to');
   });
 
+  it('a sessao do WhatsApp fica FORA do backup: so os dados de autenticacao, so essas duas tabelas', () => {
+    const ignoradas = [...backup.matchAll(/--ignore-table="?\$MYSQL_DATABASE\.(\w+)"?/g)].map(
+      (m) => m[1],
+    );
+
+    expect(ignoradas.sort()).toEqual(['whatsapp_auth_lock', 'whatsapp_auth_state']);
+    // A estrutura vai VAZIA (a tabela `migrations` registra a migration; sem as tabelas a restauracao quebraria).
+    expect(backup).toMatch(
+      /mysqldump \$COMMON --no-data "\$MYSQL_DATABASE" whatsapp_auth_state whatsapp_auth_lock/,
+    );
+    // O dump completo continua sendo do banco inteiro, com falha propagada entre os dois dumps.
+    expect(backup).toMatch(/set -e;[^']*--databases "\$MYSQL_DATABASE"/);
+    expect(backup).toContain('--single-transaction');
+    // Nenhuma outra tabela de negocio, auditoria ou NFS-e e excluida.
+    expect(backup).not.toMatch(/--ignore-table="\$MYSQL_DATABASE\.(?!whatsapp_auth_)/);
+  });
+
   it('dumps consistentes, com falha propagada (pipefail) e saida vazia recusada', () => {
     expect(backup).toContain('set -euo pipefail');
     expect(backup).toContain('--single-transaction');

@@ -98,9 +98,12 @@ require_nonempty() {
   [ -s "$1" ] || { echo "ERRO: ${1##*/} saiu vazio; backup abortado." >&2; exit 4; }
 }
 
+# A sessao do WhatsApp (whatsapp_auth_state/whatsapp_auth_lock: credenciais e chaves Signal, mesmo cifradas) NAO entra no backup:
+# so essas duas tabelas perdem os DADOS (a estrutura vai, vazia, para a restauracao nao ficar sem elas, ja que a tabela
+# `migrations` as registra); todas as demais seguem completas. Perder a sessao custa um novo pareamento por QR.
 echo "[1/5] MySQL (mysqldump --single-transaction)..."
 "${COMPOSE[@]}" exec -T mysql sh -c \
-  'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysqldump -uroot --single-transaction --quick --routines --triggers --events --hex-blob --set-gtid-purged=OFF --default-character-set=utf8mb4 --databases "$MYSQL_DATABASE"' \
+  'set -e; export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"; COMMON="-uroot --single-transaction --quick --hex-blob --set-gtid-purged=OFF --default-character-set=utf8mb4"; mysqldump $COMMON --routines --triggers --events --ignore-table="$MYSQL_DATABASE.whatsapp_auth_state" --ignore-table="$MYSQL_DATABASE.whatsapp_auth_lock" --databases "$MYSQL_DATABASE"; mysqldump $COMMON --no-data "$MYSQL_DATABASE" whatsapp_auth_state whatsapp_auth_lock' \
   | gzip -9 | encrypt_to "$WORK/mysql.sql.gz.gpg"
 require_nonempty "$WORK/mysql.sql.gz.gpg"
 

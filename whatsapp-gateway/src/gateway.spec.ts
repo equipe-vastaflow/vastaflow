@@ -761,3 +761,118 @@ describe('Gateway - conexao, conta e reconexao', () => {
     assert.equal(m.farm.sockets.length, 1);
   });
 });
+
+describe('Gateway - integracao com o armazenamento da sessao', () => {
+  for (const motivo of ['sessao-em-uso', 'sessao-ilegivel', 'trava-perdida'] as const) {
+    it(`sessao nao abre por "${motivo}": o gateway PARA com esse motivo, sem socket e sem reconexao`, async () => {
+      const m = montar();
+      m.sessions.failOpen = motivo;
+
+      await m.gateway.start();
+
+      assert.equal(m.gateway.status().state, 'stopped');
+      assert.equal(m.gateway.status().stopReason, motivo);
+      assert.equal(m.farm.sockets.length, 0);
+      assert.equal(m.scheduler.active, 0);
+      assert.equal(m.sessions.closes, 1, 'solta a trava ao parar');
+    });
+  }
+
+  for (const motivo of ['trava-perdida', 'sessao-ilegivel', 'falha-gravar-sessao'] as const) {
+    it(`erro fatal do armazenamento ("${motivo}") com a conexao aberta: PARA, fecha o socket e nao encaminha mais nada`, async () => {
+      const m = montar();
+      await m.abrir();
+      const socket = m.farm.last;
+
+      m.sessions.triggerFatal(motivo);
+      socket.emitMessages([textMessage({ id: 'DEPOIS' })]);
+      await flush();
+
+      assert.equal(m.gateway.status().state, 'stopped');
+      assert.equal(m.gateway.status().stopReason, motivo);
+      assert.equal(socket.closed, true);
+      assert.equal(m.ingest.calls.length, 0);
+      assert.equal(m.scheduler.active, 0);
+      assert.equal(m.sessions.closes, 1);
+    });
+  }
+
+  it('erro fatal durante uma reconexao agendada cancela a reconexao', async () => {
+    const m = montar();
+    await m.abrir();
+    m.farm.last.emitConnection({ connection: 'close', closeStatusCode: DISCONNECT.connectionLost });
+    await flush();
+    assert.equal(m.scheduler.active, 1);
+
+    m.sessions.triggerFatal('trava-perdida');
+
+    assert.equal(m.scheduler.active, 0);
+    assert.equal(m.gateway.status().stopReason, 'trava-perdida');
+  });
+
+  it('stop() solta a trava da sessao', async () => {
+    const m = montar();
+    await m.abrir();
+
+    m.gateway.stop();
+
+    assert.equal(m.sessions.closes, 1);
+    assert.equal(m.sessions.invalidated, 0, 'parar NAO apaga a sessao');
+  });
+
+  it('loggedOut apaga a sessao E solta a trava; connectionReplaced solta a trava SEM apagar', async () => {
+    const a = montar();
+    await a.abrir();
+    a.farm.last.emitConnection({ connection: 'close', closeStatusCode: DISCONNECT.loggedOut });
+    await flush();
+    assert.equal(a.sessions.invalidated, 1);
+    assert.equal(a.sessions.closes, 1);
+
+    const b = montar();
+    await b.abrir();
+    b.farm.last.emitConnection({
+      connection: 'close',
+      closeStatusCode: DISCONNECT.connectionReplaced,
+    });
+    await flush();
+    assert.equal(b.sessions.invalidated, 0);
+    assert.equal(b.sessions.closes, 1);
+  });
+
+  it('a reconexao reabre a sessao (e reconfere a trava) a cada tentativa', async () => {
+    const m = montar();
+    await m.abrir();
+
+    m.farm.last.emitConnection({ connection: 'close', closeStatusCode: DISCONNECT.connectionLost });
+    await flush();
+    m.scheduler.runNext();
+    await flush();
+
+    assert.equal(m.sessions.opens, 2);
+  });
+
+  it('reconexao que encontra a sessao em uso por OUTRA instancia para (nao disputa)', async () => {
+    const m = montar();
+    await m.abrir();
+    m.farm.last.emitConnection({ connection: 'close', closeStatusCode: DISCONNECT.connectionLost });
+    await flush();
+    m.sessions.failOpen = 'sessao-em-uso';
+
+    m.scheduler.runNext();
+    await flush();
+
+    assert.equal(m.gateway.status().stopReason, 'sessao-em-uso');
+    assert.equal(m.farm.sockets.length, 1);
+  });
+
+  it('waitUntilStopped resolve com o motivo (e ja resolvido se ja parou)', async () => {
+    const m = montar();
+    await m.abrir();
+    const espera = m.gateway.waitUntilStopped();
+
+    m.sessions.triggerFatal('trava-perdida');
+
+    assert.equal(await espera, 'trava-perdida');
+    assert.equal(await m.gateway.waitUntilStopped(), 'trava-perdida');
+  });
+});

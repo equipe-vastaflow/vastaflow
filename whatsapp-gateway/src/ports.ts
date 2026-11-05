@@ -1,3 +1,5 @@
+import type { StopReason } from './reconnect-policy.js';
+
 /**
  * PORTAS do gateway: tudo que o nucleo precisa do mundo externo, sem nenhuma dependencia do Baileys. O adaptador real
  * (`baileys-socket.ts`) implementa `WaSocketPort`; os testes usam um socket falso.
@@ -53,15 +55,30 @@ export interface SessionHandle {
 }
 
 /**
- * ARMAZENAMENTO DA SESSAO (credenciais + chaves Signal). A implementacao definitiva e da ETAPA 3 (cifrada, em tabela
- * propria, com trava de instancia unica). Aqui so existe o contrato:
- * - `open()`: devolve o estado atual (ou um vazio, para novo pareamento). Deve ser seguro contra duas instancias;
- * - `save()` do handle: chamado a cada `creds.update`, sem perder escrita;
- * - `invalidate()`: apaga a sessao (chamado em `loggedOut`: a conta foi desvinculada e o estado nao serve mais).
+ * ARMAZENAMENTO DA SESSAO (credenciais + chaves Signal). Implementacao: `EncryptedSessionStore` (AES-256-GCM, tabela
+ * propria, trava de instancia unica). Contrato:
+ * - `open()`: toma a trava da sessao e devolve o estado atual (ou um novo, se a sessao nunca existiu). Idempotente
+ *   (reconexoes). Lanca `SessionUnavailableError` com o motivo quando nao pode abrir (outra instancia usa a sessao,
+ *   dados ilegiveis...): NUNCA recria uma sessao por cima de uma existente;
+ * - `save()` do handle: chamado a cada `creds.update`;
+ * - `invalidate()`: apaga SO esta sessao (chamado em `loggedOut`);
+ * - `close()`: solta a trava (parada do gateway);
+ * - `onFatal()`: o armazenamento avisa quando perdeu a trava ou nao consegue gravar/ler o estado com seguranca; o
+ *   gateway PARA (reconectar com estado nao persistido corromperia a sessao).
  */
 export interface SessionStore {
   open(): Promise<SessionHandle>;
   invalidate(): Promise<void>;
+  close(): Promise<void>;
+  onFatal(handler: (reason: StopReason) => void): void;
+}
+
+/** O armazenamento nao pode abrir a sessao; `reason` vira o motivo de parada do gateway. */
+export class SessionUnavailableError extends Error {
+  constructor(readonly reason: StopReason) {
+    super(`sessao indisponivel: ${reason}`);
+    this.name = 'SessionUnavailableError';
+  }
 }
 
 export type WaSocketFactory = (session: SessionHandle) => WaSocketPort;

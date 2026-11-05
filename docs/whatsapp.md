@@ -69,9 +69,10 @@ fazia. Uma credencial de gateway vazada permitiria **se passar por um remetente 
 proprios, rede interna sem porta publicada, rotacao da credencial e limite por remetente. Um gateway comprometido **nao**
 consegue escolher o usuario por um campo, mas pode afirmar um `from`.
 
-**Etapa 2 (gateway):** o servico `whatsapp-gateway/` existe e esta testado com socket falso, mas **nao conecta nenhuma conta** e
-nao esta no Compose: ver [`whatsapp-gateway.md`](whatsapp-gateway.md). Ficam para as proximas etapas o estado de autenticacao
-cifrado, o pareamento por QR e o servico no Compose. O codigo da Meta **segue no repositorio** ate a nova integracao ser
+**Etapas 2 e 3 (gateway):** o servico `whatsapp-gateway/` existe, com o estado de autenticacao cifrado (AES-256-GCM, tabela
+propria criada por migration do backend, trava de instancia unica, fora do backup), testado com socket e banco falsos, mas
+**nao conecta nenhuma conta** e nao esta no Compose: ver [`whatsapp-gateway.md`](whatsapp-gateway.md). Ficam para as proximas
+etapas a comprovacao em MySQL real/Docker, o pareamento por QR e o servico no Compose. O codigo da Meta **segue no repositorio** ate a nova integracao ser
 validada.
 
 ## 2. O que e aceito e o que e ignorado

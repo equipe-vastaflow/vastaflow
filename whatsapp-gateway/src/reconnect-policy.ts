@@ -10,6 +10,10 @@ export type StopReason =
   | 'tentativas-esgotadas'
   | 'conta-diferente' // a conta conectada nao e a configurada
   | 'sessao-indisponivel'
+  | 'sessao-em-uso' // outra instancia detem a trava desta sessao
+  | 'sessao-ilegivel' // chave de cifra errada, estado corrompido ou inconsistente: NUNCA recriar a sessao
+  | 'trava-perdida' // a trava de instancia unica foi perdida
+  | 'falha-gravar-sessao' // nao foi possivel persistir o estado com seguranca
   | 'parado'; // stop() pedido por quem opera
 
 export type ReconnectDecision =

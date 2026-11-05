@@ -26,12 +26,12 @@ describe('Arquitetura do gateway', () => {
     assert.ok(FONTES.length >= 10);
   });
 
-  it('SO o adaptador importa o Baileys; o nucleo nao conhece a biblioteca', () => {
+  it('SO os adaptadores (socket e codec do estado) importam o Baileys; o nucleo nao conhece a biblioteca', () => {
     const importam = FONTES.filter(({ codigo }) =>
       importsDe(codigo).some((o) => o.startsWith('@whiskeysockets/baileys')),
     ).map(({ arquivo }) => arquivo);
 
-    assert.deepEqual(importam, ['baileys-socket.ts']);
+    assert.deepEqual(importam, ['baileys-auth-codec.ts', 'baileys-socket.ts']);
   });
 
   it('SO o cliente do backend usa fetch/rede HTTP; ninguem mais abre conexao', () => {

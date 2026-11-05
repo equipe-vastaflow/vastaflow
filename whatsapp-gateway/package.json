@@ -17,7 +17,8 @@
     "start": "node dist/main.js"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "7.0.0-rc14"
+    "@whiskeysockets/baileys": "7.0.0-rc14",
+    "mysql2": "3.24.6"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

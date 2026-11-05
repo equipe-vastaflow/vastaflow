@@ -9,7 +9,7 @@
 
 | Fonte | Como | Arquivo (cifrado) |
 | --- | --- | --- |
-| MySQL (negócio, usuários, auditoria, vínculos, `nfse_emissions` com XML da NFS-e) | `mysqldump --single-transaction --routines --triggers --events` | `mysql.sql.gz.gpg` |
+| MySQL (negócio, usuários, auditoria, vínculos, `nfse_emissions` com XML da NFS-e; **sem os dados** de `whatsapp_auth_state`/`whatsapp_auth_lock`, a sessão cifrada do WhatsApp: só a estrutura, vazia, para a restauração — ver [`whatsapp-gateway.md`](whatsapp-gateway.md), seção 7) | `mysqldump --single-transaction --routines --triggers --events` | `mysql.sql.gz.gpg` |
 | PostgreSQL do n8n (workflows, credenciais cifradas do n8n) | `pg_dump --format=custom` | `n8n-postgres.pgdump.gpg` |
 | Documentos privados (volume `vastaflow-documents`) | `tar` do volume, **depois** dos bancos | `documents.tar.gz.gpg` |
 | Estado do n8n (volume `vastaflow-n8n-state`) | `tar` do volume | `n8n-state.tar.gz.gpg` |

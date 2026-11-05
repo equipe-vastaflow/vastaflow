@@ -1,9 +1,11 @@
-# WhatsApp Gateway (Baileys) - etapa 2
+# WhatsApp Gateway (Baileys) - etapas 2 e 3
 
-> **Estado: o gateway existe e esta TESTADO com socket FALSO. Nenhuma conta foi conectada, nenhum QR Code foi gerado,
-> nenhuma mensagem real foi enviada ou recebida, o servico NAO esta no Compose de producao e `WHATSAPP_ENABLED`
-> continua `false`.** Mesmo montado com configuracao valida, o gateway **nao consegue conectar**: o armazenamento da
-> sessao (etapa 3) ainda nao existe e o placeholder recusa abrir.
+> **Estado: o gateway e o armazenamento cifrado da sessao existem e estao TESTADOS com socket e banco FALSOS. Nenhuma conta
+> foi conectada, nenhum QR Code foi gerado, nenhuma mensagem real foi enviada ou recebida, o servico NAO esta no Compose
+> de producao e `WHATSAPP_ENABLED` continua `false`.** A conexao com o WhatsApp tem um interruptor proprio
+> (`GATEWAY_CONNECT_ENABLED`, desligado por padrao): sem ele o processo apenas VERIFICA configuracao, chave e banco e sai.
+> **A persistencia, a trava de instancia unica e a recuperacao NAO foram comprovadas contra um MySQL real nem em Docker**
+> (secao 7.9).
 >
 > Decisao e arquitetura: auditoria de 2026-11-04 (gateway separado, sem n8n no caminho, backend como unico cerebro).
 > Lado do backend (etapa 1): [`whatsapp.md`](whatsapp.md), secao 1.1.
@@ -32,7 +34,8 @@ O gateway **nao abre porta**, **nao tem rota**, **nao envia nada por iniciativa 
 | Pacote | `@whiskeysockets/baileys` **7.0.0-rc14** (exata; tag `latest` do npm; `legacy` = 6.7.24) |
 | Node | biblioteca exige `>=20`; o projeto usa `>=24.15.0` (mesma base do backend: `node:24.15.0-bookworm-slim`) |
 | Modulo | Baileys e **ESM** (`"type": "module"`); o gateway tambem (e por isso e um servico separado do backend CommonJS) |
-| Dependencias nativas | **nenhuma**: 64 pacotes de runtime, sem `.node`, sem `os`/`cpu`, sem `optionalDependencies` |
+| Dependencias nativas | **nenhuma**: pacotes de runtime sem `.node`, sem `os`/`cpu`, sem `optionalDependencies` |
+| `mysql2` 3.24.6 | driver do MySQL do armazenamento da sessao; JavaScript puro (exato) |
 | `libsignal` 6.0.0 | JavaScript puro, vem do npm (nao de `git`); nao precisa de `git` na imagem |
 | `whatsapp-rust-bridge` 0.5.4 | ponte em **WASM** embutida; sem binario por plataforma |
 | `sharp` | peer **nao opcional** do Baileys, usado so em midia. **Nao e instalado** (`legacy-peer-deps=true` no `.npmrc`); o gateway so trata texto e a biblioteca carrega normalmente sem ele |
@@ -51,7 +54,11 @@ checar sem Docker (ausencia de binarios nativos, lockfile reprodutivel) nao ha m
 
 | Arquivo | Papel |
 | --- | --- |
-| `baileys-socket.ts` | **unico** que importa o Baileys; adapta o socket real a `WaSocketPort` (logger silencioso, sem historico, sem QR) |
+| `baileys-socket.ts`, `baileys-auth-codec.ts` | **unicos** que importam o Baileys: o socket real (logger silencioso, sem historico, sem QR) e o codec do estado de autenticacao (`BufferJSON`) |
+| `session-crypto.ts` | AES-256-GCM com contexto autenticado; leitura estrita da chave |
+| `encrypted-session-store.ts` | `SessionStore` real: cifra, fila de escrita, trava de instancia unica, falha fechada |
+| `mysql-session-repository.ts` | unico acesso ao MySQL (SQL parametrizado, so as 2 tabelas, trava pelo relogio do banco) |
+| `session-repository.ts` | porta do repositorio (e `LeaseLostError`) |
 | `ports.ts` | portas: `WaSocketPort`, `SessionStore`, `IngestClient`, `Clock`, `Scheduler` (o nucleo nao conhece a biblioteca) |
 | `gateway.ts` | orquestracao: conexao, fila, filtros, encaminhamento, resposta, reconexao |
 | `message-filter.ts` | decide o que vira chamada ao backend (puro) |
@@ -60,9 +67,8 @@ checar sem Docker (ausencia de binarios nativos, lockfile reprodutivel) nao ha m
 | `reply-limiter.ts`, `seen-ids.ts` | limite global de respostas; primeira barreira contra id repetido |
 | `logger.ts` | log JSON de vocabulario fixo (sem texto, numero, JID, token) |
 | `config.ts` | variaveis de ambiente (so aqui e em `main.ts`); erros sem repetir valores |
-| `session-store.ts` | placeholder que **recusa** abrir sessao (ate a etapa 3) |
-| `main.ts` | composicao; sai com codigo 1 enquanto nao houver sessao |
-| `testing/fakes.ts` | socket, relogio, agendador, sessao e backend FALSOS |
+| `main.ts` | composicao; sem `GATEWAY_CONNECT_ENABLED=true` so verifica (trava, chave, estado) e sai |
+| `testing/` | socket, relogio, agendador, sessao, backend e BANCO em memoria FALSOS |
 
 ## 4. O que o gateway aceita e ignora
 
@@ -144,23 +150,98 @@ foi verificado. O gateway nunca monta um destino a partir de `from` nem da respo
 - A seguranca desta regra **nao esta comprovada para o WhatsApp real**: so para o comportamento descrito nos testes com
   socket falso e na versao 7.0.0-rc14 (release candidate).
 
-## 7. Contrato com a etapa 3 (armazenamento da sessao)
+## 7. Armazenamento da sessao (etapa 3): cifrado, persistente, de instancia unica
 
-`SessionStore` (em `ports.ts`) e a **unica** interface que a etapa 3 precisa implementar:
+> **Estado: implementado e testado com banco FICTICIO em memoria.** NAO foi validado contra um MySQL real nem em Docker
+> (ver 7.8). Nenhuma conta foi conectada e nenhum QR foi gerado.
 
-```ts
-interface SessionStore {
-  open(): Promise<SessionHandle>;   // { state, save() }  - estado de autenticacao (opaco) e como salva-lo
-  invalidate(): Promise<void>;      // loggedOut: apagar a sessao
-}
-```
+### 7.1 O que e guardado e onde
+O estado de autenticacao do Baileys = credenciais (`creds`) + chaves Signal (pre-keys, sessoes, sender keys, chaves de
+sincronizacao...). Quem le isso **controla a conta do WhatsApp**. Fica em duas tabelas criadas pela **migration do backend**
+(`1791800000000-WhatsappAuthState`, MySQL e Oracle; o backend NAO tem entity nem codigo que as leia, e um teste garante):
 
-Requisitos da implementacao definitiva (nada disso existe ainda): credenciais **e** chaves Signal em tabela propria,
-**cifradas** (AES-256-GCM, chave fora do banco), escrita serializada e transacional, **trava de instancia unica** (duas
-instancias com a mesma sessao causam `connectionReplaced` e risco para a conta), usuario de banco restrito a essa tabela,
-tabela **fora do `mysqldump`**. `useMultiFileAuthState` **nao** sera usado em producao. O estado nunca vai a log, Git ou
-imagem. Nesta etapa `NotImplementedSessionStore` **recusa** abrir, de proposito: nenhuma conta pode conectar sem um lugar
-seguro para a sessao.
+| Tabela | Conteudo |
+| --- | --- |
+| `whatsapp_auth_state` | uma linha por item: `(session_id, item_type, item_id)` -> `payload` (BLOB cifrado) |
+| `whatsapp_auth_lock` | UMA linha por sessao: dono, validade da trava (relogio do banco) e geracao |
+
+Nada de arquivos: `useMultiFileAuthState` nao e usado (o proprio Baileys o descreve no codigo-fonte como nao indicado para
+producao: muitos arquivos soltos, sem trava, sem cifra). O gateway nao escreve em disco.
+
+### 7.2 Cifra (`session-crypto.ts`)
+- **AES-256-GCM**, envelope `versao(1) | nonce(12) | texto cifrado | tag(16)`; nonce **aleatorio a cada gravacao**.
+- A tag autentica tambem o **contexto** (sessao, tipo e id do item): copiar uma linha para outro lugar (ou outra sessao)
+  **nao decifra**.
+- A chave e **exclusiva do gateway** (`GATEWAY_AUTH_ENCRYPTION_KEY[_FILE]`), **sem valor padrao**, 32 bytes aleatorios em base64
+  ou 64 hex (`openssl rand -base64 32`). Recusa tamanho errado e chaves fracas (menos de 16 bytes distintos). Nunca aparece em
+  log, erro, `JSON` ou `inspect` (campo privado `#key`, mensagens fixas). **A chave NAO fica no banco nem no backup do banco.**
+- Rotacao da chave **nao esta implementada** (o envelope ja carrega versao para isso).
+
+### 7.3 Escritas e concorrencia (`encrypted-session-store.ts`)
+- Todas as escritas passam por **uma fila FIFO**: ordem preservada, nada se intercala.
+- `creds.update` repetidos sao **juntados** e gravam a fotografia **mais recente** no momento da escrita; um pedido durante a
+  gravacao gera nova gravacao depois dela. As chaves vao em **lote atomico** (tudo ou nada, em transacao).
+- Erro de escrita => `falha-gravar-sessao` e o gateway **para**: seguir usando chaves que nao foram persistidas corromperia a
+  sessao (o ratchet do Signal avanca). O erro do driver (pode citar host/usuario/SQL) **nunca** sobe: so mensagem fixa.
+
+### 7.4 Trava de instancia unica
+- `open()` toma a trava (`acquireLease`); um heartbeat a renova a cada 10 s (validade 30 s). A validade usa o **relogio do
+  banco**, nao o da maquina.
+- **Toda escrita confere a posse da trava na MESMA transacao** (`SELECT ... FOR UPDATE`): um dono antigo, mesmo sem saber que
+  perdeu a trava, **nao grava** (`LeaseLostError`). Trava vencida nao e "ressuscitada" pelo dono antigo.
+- Segunda instancia com a mesma sessao: `sessao-em-uso` (nao disputa, nao toca no banco). Perda da trava (heartbeat falhou
+  duas vezes seguidas, renovacao recusada, escrita recusada): `trava-perdida` e o gateway **para**.
+- Sessoes diferentes (`GATEWAY_SESSION_ID`) nao se bloqueiam.
+
+### 7.5 Falha fechada
+| Situacao | Resultado |
+| --- | --- |
+| Chave de cifra errada | `sessao-ilegivel`; **nada e sobrescrito**; a trava e solta |
+| Credenciais corrompidas, truncadas ou adulteradas | `sessao-ilegivel` |
+| Chaves sem credenciais (estado inconsistente) | `sessao-ilegivel`; **nao** cria credenciais novas por cima |
+| Chave Signal corrompida em tempo de execucao | `sessao-ilegivel`, e o armazenamento passa a recusar tudo |
+| Banco indisponivel ao abrir | `sessao-indisponivel` (nao e fatal: pode tentar de novo) |
+| Sessao nunca existiu | cria credenciais novas e as grava (novo pareamento) |
+
+Depois de um erro fatal o objeto fica **inutilizavel** (o processo precisa reiniciar). Uma sessao valida **nunca** e recriada
+por causa de um erro de chave ou de leitura: isso a destruiria por um erro de configuracao.
+
+### 7.6 Logout definitivo (`loggedOut`)
+`invalidate()` apaga **somente as linhas da propria sessao** em `whatsapp_auth_state` (nunca outras sessoes, a linha da
+trava, outras tabelas ou configuracoes) e o gateway para. Novo uso exige novo pareamento.
+
+### 7.7 Banco, backup e segredos
+- **Usuario de banco restrito** (criado por quem administra o MySQL; o backend/migration nao cria usuarios):
+  ```sql
+  CREATE USER 'whatsapp_gateway'@'%' IDENTIFIED BY '<senha forte, so no arquivo de segredo>';
+  GRANT SELECT, INSERT, UPDATE, DELETE ON `<banco>`.`whatsapp_auth_state` TO 'whatsapp_gateway'@'%';
+  GRANT SELECT, INSERT, UPDATE, DELETE ON `<banco>`.`whatsapp_auth_lock`  TO 'whatsapp_gateway'@'%';
+  ```
+  Sem `DROP`, `ALTER`, `CREATE`, `TRUNCATE` e **sem acesso a nenhuma outra tabela** (financeiro, auditoria, NFS-e...).
+- **Backup (`scripts/backup.sh`)**: as duas tabelas ficam **sem dados** no `mysqldump` (so a estrutura vai, vazia, porque a
+  tabela `migrations` as registra; sem elas a restauracao quebraria). Todas as demais tabelas seguem completas. Resultado: um
+  backup roubado ou restaurado **nao contem a sessao**; restaurar exige novo pareamento por QR. O `.env`/arquivos de segredo
+  que o backup guarda (cifrados com GPG) podem conter a **chave** de cifra, mas sem a sessao ela nao abre nada.
+- **Segredos** (chave de cifra, senha do banco, credencial de servico): arquivos montados somente leitura
+  (`GATEWAY_*_FILE`), **nunca** no Git, em imagem, em argumento de linha de comando ou em log. O `.gitignore` do gateway bloqueia
+  `creds.json`, `auth_info*/`, `*.session` e `.env*`.
+- A chave de cifra **nao deve ficar so no mesmo lugar** que o banco; guarde-a no cofre/gerenciador de segredos de quem opera.
+  **Perder a chave = perder a sessao** (novo pareamento), nunca perder dados do VastaFlow.
+
+### 7.8 Verificacao sem conexao
+Sem `GATEWAY_CONNECT_ENABLED=true` o processo **so verifica** e sai: valida a configuracao, toma a trava, confere que a chave
+decifra o estado (ou que a sessao ainda e `vazia`), solta a trava e termina com codigo 0. **Nao abre socket e nao fala com o
+WhatsApp.** E o comando para validar o armazenamento no Docker antes de qualquer pareamento.
+
+### 7.9 O que ainda PRECISA ser comprovado (nao esta comprovado)
+- **MySQL real**: `mysql-session-repository.integration.spec.ts` existe (aplica o DDL REAL da migration, cria usuario restrito,
+  testa trava, corrida pela primeira trava, expiracao pelo relogio do banco, atomicidade, dono antigo sem escrita, ida e volta
+  binaria, privilegios, concorrencia e recuperacao com o codec real). Ele fica **desligado** sem `GATEWAY_TEST_MYSQL_ROOT_URL`
+  e **nao foi executado** com sucesso nesta etapa (ver o relatorio da etapa: o MySQL descartavel local nao iniciou).
+- **Docker**: persistencia entre `docker restart`/recriacao do conteiner, `docker build` da imagem, rede interna com o
+  MySQL, montagem dos segredos somente leitura, e o `backup.sh`/restauracao reais com as duas tabelas vazias.
+- **Falhas reais de rede**: queda do MySQL no meio de uma escrita e comportamento do pool.
+- **Oracle**: o DDL existe, mas o acesso do gateway so esta implementado para MySQL; nunca executado.
 
 ## 8. Execucao local e testes
 
@@ -171,16 +252,21 @@ cd whatsapp-gateway
 npm ci                 # versoes exatas, scripts de instalacao desligados
 npm run typecheck && npm run lint && npm run format:check
 npm run build
-npm test               # 185 testes, socket FALSO, nenhuma conta, nenhuma rede externa
+npm test               # socket e banco FALSOS, nenhuma conta, nenhuma rede externa
 ```
 
 Os testes usam um servidor HTTP **local** em loopback no lugar do backend e dados ficticios. `baileys-contract.spec.ts`
 importa a biblioteca real **sem conectar** para conferir versao exata, codigos de `DisconnectReason` e formato de JID.
 
-Execucao do processo (sem conta, so para ver a configuracao): o gateway valida as variaveis (ver
-`whatsapp-gateway/.env.example`), monta tudo e **para** com `sessao-indisponivel` (codigo 1). Isso e o comportamento esperado
-nesta etapa. A credencial de servico real nunca vai em argumento de linha de comando: use arquivo
-(`GATEWAY_SERVICE_TOKEN_FILE`).
+Execucao do processo (**verificacao**, sem conta e sem conexao com o WhatsApp): defina as variaveis de
+`whatsapp-gateway/.env.example` (segredos em ARQUIVO) e rode `node dist/main.js`. Sem `GATEWAY_CONNECT_ENABLED=true` ele valida
+a configuracao, toma a trava, confere que a chave decifra o estado, solta a trava e termina (codigo 0, eventos
+`sessao-verificada` e `conexao-desabilitada`). Com a chave errada, a sessao ocupada ou o banco fora, termina com codigo 1 e
+um motivo fixo no log. Nunca passe segredo em argumento de linha de comando.
+
+Teste de integracao contra um MySQL DESCARTAVEL (fora do `npm test`): defina `GATEWAY_TEST_MYSQL_ROOT_URL`
+(`mysql://root@127.0.0.1:<porta>`; nunca o banco da VPS) e rode
+`node --test dist-test/mysql-session-repository.integration.spec.js` depois de `npm test`.
 
 ## 9. Riscos de seguranca e operacao
 
@@ -192,11 +278,17 @@ nesta etapa. A credencial de servico real nunca vai em argumento de linha de com
 - **Release candidate:** fixar versao; atualizar so com testes e ensaio.
 - **Privacidade:** o texto das mensagens passa pelo gateway; ele **nao** o registra (log de vocabulario fixo, com testes) e
   nao tem armazenamento. Atualizar a politica de privacidade antes de usar com pessoas reais.
-- **Nao validado:** conexao real, QR, `remoteJidAlt`/LID, comportamento do WhatsApp, imagem Docker.
+- **Sessao em banco:** quem tiver a chave E o banco controla a conta do WhatsApp. Por isso a cifra, o usuario de banco restrito, a
+  exclusao do backup e segredos so em arquivo. O gateway e o backup do `.env` (GPG) podem guardar a chave; a sessao, nao.
+- **Nao validado:** conexao real, QR, `remoteJidAlt`/LID, comportamento do WhatsApp, imagem Docker, **MySQL real e Docker para o
+  armazenamento (secao 7.9)**.
 
 ## 10. Proximas etapas
 
-3. `SessionStore` definitivo (tabela cifrada, migration no backend, trava de instancia unica, fora do backup).
-4. Pareamento por QR (CLI administrativa, QR so no terminal do operador, nunca em log) e servico no Compose (endurecido,
-   sem portas), com `docker build` validado.
-5. Teste real com numero dedicado e novo (checklist), decisao sobre LID, e so entao ligar para um usuario ADMIN.
+3. (feita, nao comprovada em MySQL real/Docker) `SessionStore` definitivo: tabela cifrada, migration no backend, trava de
+   instancia unica, fora do backup.
+4. **Comprovar a etapa 3**: rodar o teste de integracao contra um MySQL real, `docker build`, persistencia entre reinicios do
+   conteiner, trava com duas instancias, backup/restauracao com as duas tabelas vazias.
+5. Pareamento por QR (CLI administrativa, QR so no terminal do operador, nunca em log) e servico no Compose (endurecido, sem
+   portas, segredos em arquivo, usuario de banco restrito).
+6. Teste real com numero dedicado e novo (checklist), decisao sobre LID, e so entao ligar para um usuario ADMIN.

@@ -1,24 +1,38 @@
 import assert from 'node:assert/strict';
+import { randomBytes } from 'node:crypto';
 import { describe, it } from 'node:test';
 import { ConfigError, loadConfig, type EnvReader } from './config.js';
 
-/** Token FICTICIO no formato exigido (prefixo + 43 caracteres base64url). */
+/** Segredos 100% FICTICIOS, gerados no proprio teste. */
 const TOKEN = `vfs_${'A'.repeat(43)}`;
+const KEY = randomBytes(32);
+const DB_PASSWORD = 'senha-do-banco-ficticia-123';
+
+const FILES: Record<string, string> = {
+  '/run/secrets/token': `${TOKEN}\n`,
+  '/run/secrets/dbpass': `${DB_PASSWORD}\n`,
+  '/run/secrets/authkey': `${KEY.toString('base64')}\n`,
+};
+const read = (path: string): string => {
+  const content = FILES[path];
+  if (content === undefined) throw new Error('nao existe');
+  return content;
+};
+
 const BASE: EnvReader = {
   GATEWAY_BACKEND_URL: 'http://backend:3000',
   GATEWAY_SERVICE_TOKEN_FILE: '/run/secrets/token',
   GATEWAY_ACCOUNT: '5511900000000',
+  GATEWAY_DB_HOST: 'mysql',
+  GATEWAY_DB_NAME: 'vastaflow',
+  GATEWAY_DB_USER: 'whatsapp_gateway',
+  GATEWAY_DB_PASSWORD_FILE: '/run/secrets/dbpass',
+  GATEWAY_AUTH_ENCRYPTION_KEY_FILE: '/run/secrets/authkey',
 };
-const files =
-  (conteudo: string) =>
-  (path: string): string => {
-    if (path !== '/run/secrets/token') throw new Error('nao existe');
-    return conteudo;
-  };
 
-const problemas = (env: EnvReader, read = files(`${TOKEN}\n`)): string[] => {
+const problemas = (env: EnvReader, reader = read): string[] => {
   try {
-    loadConfig(env, read);
+    loadConfig(env, reader);
     return [];
   } catch (error) {
     assert.ok(error instanceof ConfigError);
@@ -27,34 +41,67 @@ const problemas = (env: EnvReader, read = files(`${TOKEN}\n`)): string[] => {
 };
 
 describe('loadConfig', () => {
-  it('configuracao valida: token do arquivo (sem a quebra de linha) e padroes seguros', () => {
-    const config = loadConfig(BASE, files(`${TOKEN}\n`));
+  it('configuracao valida: segredos dos arquivos (sem quebra de linha) e padroes seguros', () => {
+    const config = loadConfig(BASE, read);
 
-    assert.deepEqual(config, {
-      backendUrl: 'http://backend:3000',
-      serviceToken: TOKEN,
-      account: '5511900000000',
-      ingestTimeoutMs: 10_000,
-      sendTimeoutMs: 15_000,
-      maxRepliesPerMinute: 20,
-      maxQueue: 100,
+    assert.equal(config.serviceToken, TOKEN);
+    assert.deepEqual(config.encryptionKey, KEY);
+    assert.deepEqual(config.db, {
+      host: 'mysql',
+      port: 3306,
+      database: 'vastaflow',
+      user: 'whatsapp_gateway',
+      password: DB_PASSWORD,
     });
+    assert.equal(config.backendUrl, 'http://backend:3000');
+    assert.equal(config.account, '5511900000000');
+    assert.equal(config.sessionId, 'principal');
+    assert.equal(config.connectEnabled, false, 'conectar e DESLIGADO por padrao');
+    assert.equal(config.ingestTimeoutMs, 10_000);
+    assert.equal(config.sendTimeoutMs, 15_000);
+    assert.equal(config.maxRepliesPerMinute, 20);
+    assert.equal(config.maxQueue, 100);
   });
 
-  it('o token pode vir de variavel (so desenvolvimento), mas o arquivo tem precedencia', () => {
-    const outro = `vfs_${'B'.repeat(43)}`;
+  it('segredos podem vir de variavel (so desenvolvimento), mas o arquivo tem precedencia', () => {
+    const outroToken = `vfs_${'B'.repeat(43)}`;
+    const semArquivos: EnvReader = {
+      ...BASE,
+      GATEWAY_SERVICE_TOKEN_FILE: undefined,
+      GATEWAY_DB_PASSWORD_FILE: undefined,
+      GATEWAY_AUTH_ENCRYPTION_KEY_FILE: undefined,
+      GATEWAY_SERVICE_TOKEN: outroToken,
+      GATEWAY_DB_PASSWORD: 'outra-senha',
+      GATEWAY_AUTH_ENCRYPTION_KEY: KEY.toString('hex'),
+    };
+
+    const config = loadConfig(semArquivos, read);
+    assert.equal(config.serviceToken, outroToken);
+    assert.equal(config.db.password, 'outra-senha');
+    assert.deepEqual(config.encryptionKey, KEY);
 
     assert.equal(
-      loadConfig(
-        { ...BASE, GATEWAY_SERVICE_TOKEN_FILE: undefined, GATEWAY_SERVICE_TOKEN: outro },
-        files(''),
-      ).serviceToken,
-      outro,
-    );
-    assert.equal(
-      loadConfig({ ...BASE, GATEWAY_SERVICE_TOKEN: outro }, files(TOKEN)).serviceToken,
+      loadConfig({ ...BASE, GATEWAY_SERVICE_TOKEN: outroToken }, read).serviceToken,
       TOKEN,
     );
+  });
+
+  it('GATEWAY_CONNECT_ENABLED: so "true" liga; vazio/false desligam; outro valor e recusado', () => {
+    assert.equal(
+      loadConfig({ ...BASE, GATEWAY_CONNECT_ENABLED: 'true' }, read).connectEnabled,
+      true,
+    );
+    assert.equal(
+      loadConfig({ ...BASE, GATEWAY_CONNECT_ENABLED: 'false' }, read).connectEnabled,
+      false,
+    );
+    assert.equal(loadConfig({ ...BASE, GATEWAY_CONNECT_ENABLED: '' }, read).connectEnabled, false);
+    for (const ruim of ['1', 'TRUE', 'sim', 'yes']) {
+      assert.match(
+        problemas({ ...BASE, GATEWAY_CONNECT_ENABLED: ruim }).join('|'),
+        /GATEWAY_CONNECT_ENABLED/,
+      );
+    }
   });
 
   for (const [nome, over, esperado] of [
@@ -77,7 +124,11 @@ describe('loadConfig', () => {
       { GATEWAY_BACKEND_URL: 'http://203.0.113.10:3000' },
       /https, ou http apenas/,
     ],
-    ['sem credencial', { GATEWAY_SERVICE_TOKEN_FILE: undefined }, /credencial de servico ausente/],
+    [
+      'sem credencial de servico',
+      { GATEWAY_SERVICE_TOKEN_FILE: undefined },
+      /credencial de servico ausente/,
+    ],
     ['conta com letras', { GATEWAY_ACCOUNT: '55abc' }, /GATEWAY_ACCOUNT/],
     ['conta curta', { GATEWAY_ACCOUNT: '1234' }, /GATEWAY_ACCOUNT/],
     ['conta ausente', { GATEWAY_ACCOUNT: undefined }, /GATEWAY_ACCOUNT/],
@@ -88,11 +139,46 @@ describe('loadConfig', () => {
       /GATEWAY_MAX_REPLIES_PER_MINUTE/,
     ],
     ['fila fora da faixa', { GATEWAY_MAX_QUEUE: '0' }, /GATEWAY_MAX_QUEUE/],
+    ['sessao com maiusculas', { GATEWAY_SESSION_ID: 'Principal' }, /GATEWAY_SESSION_ID/],
+    ['sessao com espaco', { GATEWAY_SESSION_ID: 'a b' }, /GATEWAY_SESSION_ID/],
+    ['banco sem host', { GATEWAY_DB_HOST: undefined }, /GATEWAY_DB_HOST/],
+    [
+      'host do banco com caracteres estranhos',
+      { GATEWAY_DB_HOST: 'mysql;drop' },
+      /GATEWAY_DB_HOST/,
+    ],
+    ['banco sem nome', { GATEWAY_DB_NAME: undefined }, /GATEWAY_DB_NAME/],
+    ['nome do banco invalido', { GATEWAY_DB_NAME: 'a-b' }, /GATEWAY_DB_NAME/],
+    ['banco sem usuario', { GATEWAY_DB_USER: undefined }, /GATEWAY_DB_USER/],
+    ['porta do banco invalida', { GATEWAY_DB_PORT: '70000' }, /GATEWAY_DB_PORT/],
+    ['sem senha do banco', { GATEWAY_DB_PASSWORD_FILE: undefined }, /senha do banco ausente/],
+    [
+      'SEM chave de cifra (nao ha padrao)',
+      { GATEWAY_AUTH_ENCRYPTION_KEY_FILE: undefined },
+      /chave de cifra da sessao ausente/,
+    ],
   ] as const) {
     it(`recusa: ${nome}`, () => {
       assert.match(problemas({ ...BASE, ...over }).join('|'), esperado);
     });
   }
+
+  it('chave de cifra: formato e forca sao conferidos (tamanho, texto simples, repeticao)', () => {
+    for (const ruim of [
+      'curta',
+      randomBytes(16).toString('base64'),
+      Buffer.alloc(32, 0).toString('base64'),
+      Buffer.alloc(32, 7).toString('hex'),
+      'a'.repeat(64),
+      'frase-secreta-longa-mas-nao-e-chave-de-32-bytes',
+    ]) {
+      const lista = problemas(
+        { ...BASE, GATEWAY_AUTH_ENCRYPTION_KEY_FILE: undefined, GATEWAY_AUTH_ENCRYPTION_KEY: ruim },
+        read,
+      );
+      assert.match(lista.join('|'), /chave de cifra da sessao invalida/, ruim);
+    }
+  });
 
   it('aceita https em qualquer host e http em loopback', () => {
     for (const url of [
@@ -105,31 +191,61 @@ describe('loadConfig', () => {
     }
   });
 
-  it('arquivo de credencial ilegivel ou com formato invalido', () => {
+  it('arquivo de segredo ilegivel, vazio ou com formato invalido', () => {
     assert.match(
       problemas(BASE, () => {
         throw new Error('x');
       }).join('|'),
       /ilegivel/,
     );
-    assert.match(problemas(BASE, files('qualquer-coisa')).join('|'), /formato invalido/);
-    assert.match(problemas(BASE, files('')).join('|'), /ausente/);
+    assert.match(
+      problemas(BASE, (p) => (p === '/run/secrets/token' ? 'qualquer-coisa' : read(p))).join('|'),
+      /formato invalido/,
+    );
+    assert.match(
+      problemas(BASE, (p) => (p === '/run/secrets/token' ? '' : read(p))).join('|'),
+      /ausente/,
+    );
+    assert.match(
+      problemas(BASE, (p) => (p === '/run/secrets/authkey' ? '   \n' : read(p))).join('|'),
+      /chave de cifra da sessao ausente/,
+    );
   });
 
-  it('lista TODOS os problemas de uma vez e NUNCA repete valores (token, URL, conta)', () => {
-    const segredo = 'vfs_SEGREDO-CURTO';
+  it('lista TODOS os problemas de uma vez e NUNCA repete valores (token, senha, chave, URL, conta)', () => {
+    const segredos = {
+      token: 'vfs_SEGREDO-CURTO',
+      senha: 'senha-secreta-do-banco',
+      chave: 'chave-secreta-curta',
+      url: 'http://u:senha-na-url@api.exemplo.com',
+      conta: 'conta-errada',
+      host: 'host;secreto',
+    };
     const lista = problemas(
       {
-        GATEWAY_BACKEND_URL: 'http://u:senha-secreta@api.exemplo.com',
-        GATEWAY_SERVICE_TOKEN: segredo,
-        GATEWAY_ACCOUNT: 'conta-errada',
+        GATEWAY_BACKEND_URL: segredos.url,
+        GATEWAY_SERVICE_TOKEN: segredos.token,
+        GATEWAY_ACCOUNT: segredos.conta,
+        GATEWAY_DB_HOST: segredos.host,
+        GATEWAY_DB_NAME: 'vastaflow',
+        GATEWAY_DB_USER: 'u',
+        GATEWAY_DB_PASSWORD: segredos.senha,
+        GATEWAY_AUTH_ENCRYPTION_KEY: segredos.chave,
       },
-      files(''),
+      () => '',
     );
 
-    assert.ok(lista.length >= 3);
+    assert.ok(lista.length >= 5);
     const texto = lista.join('|');
-    for (const proibido of ['senha-secreta', 'SEGREDO-CURTO', 'api.exemplo.com', 'conta-errada']) {
+    for (const proibido of [
+      'SEGREDO-CURTO',
+      'senha-secreta',
+      'chave-secreta',
+      'senha-na-url',
+      'api.exemplo.com',
+      'conta-errada',
+      'host;secreto',
+    ]) {
       assert.ok(!texto.includes(proibido), `vazou: ${proibido}`);
     }
   });

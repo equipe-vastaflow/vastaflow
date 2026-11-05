@@ -11,6 +11,7 @@ import { SystemSettings1790303010994 as MysqlSystemSettings } from './mysql/1790
 import { TelegramInboundEvents1791500000000 as MysqlTelegramInboundEvents } from './mysql/1791500000000-TelegramInboundEvents';
 import { WhatsappInboundEvents1791600000000 as MysqlWhatsappInboundEvents } from './mysql/1791600000000-WhatsappInboundEvents';
 import { NfseEmissions1791700000000 as MysqlNfseEmissions } from './mysql/1791700000000-NfseEmissions';
+import { WhatsappAuthState1791800000000 as MysqlWhatsappAuthState } from './mysql/1791800000000-WhatsappAuthState';
 import { ExternalIdentityLinks1790798470956 as OracleExternalIdentityLinks } from './oracle/1790798470956-ExternalIdentityLinks';
 import { FinancialEntries1790136699120 as OracleFinancialEntries } from './oracle/1790136699120-FinancialEntries';
 import { Documents1791257785308 as OracleDocuments } from './oracle/1791257785308-Documents';
@@ -22,6 +23,7 @@ import { SystemSettings1790303010994 as OracleSystemSettings } from './oracle/17
 import { TelegramInboundEvents1791500000000 as OracleTelegramInboundEvents } from './oracle/1791500000000-TelegramInboundEvents';
 import { WhatsappInboundEvents1791600000000 as OracleWhatsappInboundEvents } from './oracle/1791600000000-WhatsappInboundEvents';
 import { NfseEmissions1791700000000 as OracleNfseEmissions } from './oracle/1791700000000-NfseEmissions';
+import { WhatsappAuthState1791800000000 as OracleWhatsappAuthState } from './oracle/1791800000000-WhatsappAuthState';
 
 type MigrationClass = new () => MigrationInterface;
 
@@ -46,6 +48,7 @@ export const MIGRATIONS: Record<DatabaseType, MigrationClass[]> = {
     MysqlTelegramInboundEvents,
     MysqlWhatsappInboundEvents,
     MysqlNfseEmissions,
+    MysqlWhatsappAuthState,
   ],
   oracle: [
     OracleInitialSchema,
@@ -59,5 +62,6 @@ export const MIGRATIONS: Record<DatabaseType, MigrationClass[]> = {
     OracleTelegramInboundEvents,
     OracleWhatsappInboundEvents,
     OracleNfseEmissions,
+    OracleWhatsappAuthState,
   ],
 };

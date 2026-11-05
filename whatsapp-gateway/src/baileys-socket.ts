@@ -5,6 +5,7 @@ import makeWASocket, {
   isJidNewsletter,
   isJidStatusBroadcast,
   jidDecode,
+  makeCacheableSignalKeyStore,
   type AuthenticationState,
 } from '@whiskeysockets/baileys';
 import type { ConnectionUpdate, MessagesBatch, WaSocketFactory, WaSocketPort } from './ports.js';
@@ -76,7 +77,12 @@ function phoneDigits(jid: unknown): string | null {
 
 export function createBaileysSocketFactory(): WaSocketFactory {
   return (session): WaSocketPort => {
-    const auth = asAuthState(session.state);
+    const state = asAuthState(session.state);
+    // Cache em memoria na frente do armazenamento cifrado: o Baileys le as mesmas chaves muitas vezes por mensagem.
+    const auth = {
+      creds: state.creds,
+      keys: makeCacheableSignalKeyStore(state.keys, silentLogger),
+    };
     const sock = makeWASocket({
       auth,
       logger: silentLogger,

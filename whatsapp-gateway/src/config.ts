@@ -1,7 +1,9 @@
+import { parseEncryptionKey } from './session-crypto.js';
+
 /**
  * Configuracao do gateway, lida SO aqui (e em `main.ts`). Mensagens de erro FIXAS: nenhum valor informado - em
- * especial o token - e repetido. Segredo vem de ARQUIVO (`..._FILE`, montado somente leitura) ou, em desenvolvimento,
- * de variavel; nunca de argumento de linha de comando.
+ * especial token, senha do banco e chave de cifra - e repetido. Segredo vem de ARQUIVO (`..._FILE`, montado somente
+ * leitura) ou, so em desenvolvimento, de variavel; nunca de argumento de linha de comando, e NUNCA tem valor padrao.
  */
 export interface GatewayConfig {
   readonly backendUrl: string;
@@ -12,6 +14,22 @@ export interface GatewayConfig {
   readonly sendTimeoutMs: number;
   readonly maxRepliesPerMinute: number;
   readonly maxQueue: number;
+  /** Identificador da sessao no banco (varias contas no futuro = varias sessoes). */
+  readonly sessionId: string;
+  /**
+   * Interruptor da conexao com o WhatsApp. PADRAO `false`: o processo so valida a configuracao, a chave e o banco
+   * (verificacao) e sai. Ligar e decisao da etapa de pareamento/teste real.
+   */
+  readonly connectEnabled: boolean;
+  readonly db: {
+    readonly host: string;
+    readonly port: number;
+    readonly database: string;
+    readonly user: string;
+    readonly password: string;
+  };
+  /** Chave AES-256 (32 bytes) que cifra a sessao. Exclusiva do gateway. */
+  readonly encryptionKey: Uint8Array;
 }
 
 export class ConfigError extends Error {
@@ -24,6 +42,9 @@ export class ConfigError extends Error {
 /** Mesmo formato da credencial de servico do backend: prefixo `vfs_` + 43 caracteres base64url. */
 const TOKEN_FORMAT = /^vfs_[A-Za-z0-9_-]{43}$/;
 const ACCOUNT_FORMAT = /^\d{5,20}$/;
+const SESSION_ID_FORMAT = /^[a-z0-9-]{1,32}$/;
+const DB_NAME_FORMAT = /^[A-Za-z0-9_]{1,64}$/;
+const DB_HOST_FORMAT = /^[A-Za-z0-9.-]{1,253}$/;
 /** Hosts em texto claro aceitos: nome simples do Docker (sem ponto) ou loopback. */
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]']);
 
@@ -79,6 +100,37 @@ function intInRange(
 }
 
 /**
+ * Segredo por ARQUIVO (preferido) ou variavel. Devolve `''` e registra o problema (sem o valor) se faltar ou ilegivel.
+ * O arquivo tem precedencia sobre a variavel.
+ */
+function readSecret(
+  env: EnvReader,
+  base: string,
+  readFile: (path: string) => string,
+  label: string,
+  problems: string[],
+): string {
+  const file = env[`${base}_FILE`];
+  if (file !== undefined && file.trim() !== '') {
+    try {
+      const value = readFile(file.trim()).trim();
+      if (value === '') {
+        problems.push(`${label} ausente`);
+      }
+      return value;
+    } catch {
+      problems.push(`${base}_FILE ilegivel`);
+      return '';
+    }
+  }
+  const value = (env[base] ?? '').trim();
+  if (value === '') {
+    problems.push(`${label} ausente (${base}_FILE)`);
+  }
+  return value;
+}
+
+/**
  * @param readFile leitura do arquivo de segredo (injetada: o teste nao toca o disco).
  * @throws {ConfigError} com TODOS os problemas, sem repetir valores.
  */
@@ -90,26 +142,68 @@ export function loadConfig(env: EnvReader, readFile: (path: string) => string): 
     problems.push(backend.problem);
   }
 
-  let token = '';
-  const tokenFile = env.GATEWAY_SERVICE_TOKEN_FILE;
-  if (tokenFile !== undefined && tokenFile.trim() !== '') {
-    try {
-      token = readFile(tokenFile.trim()).trim();
-    } catch {
-      problems.push('GATEWAY_SERVICE_TOKEN_FILE ilegivel');
-    }
-  } else if (env.GATEWAY_SERVICE_TOKEN !== undefined) {
-    token = env.GATEWAY_SERVICE_TOKEN.trim();
-  }
-  if (token === '' && !problems.includes('GATEWAY_SERVICE_TOKEN_FILE ilegivel')) {
-    problems.push('credencial de servico ausente (GATEWAY_SERVICE_TOKEN_FILE)');
-  } else if (token !== '' && !TOKEN_FORMAT.test(token)) {
+  const token = readSecret(
+    env,
+    'GATEWAY_SERVICE_TOKEN',
+    readFile,
+    'credencial de servico',
+    problems,
+  );
+  if (token !== '' && !TOKEN_FORMAT.test(token)) {
     problems.push('credencial de servico em formato invalido');
   }
 
   const account = (env.GATEWAY_ACCOUNT ?? '').trim();
   if (!ACCOUNT_FORMAT.test(account)) {
     problems.push('GATEWAY_ACCOUNT deve ter de 5 a 20 digitos');
+  }
+
+  const sessionId = (env.GATEWAY_SESSION_ID ?? 'principal').trim();
+  if (!SESSION_ID_FORMAT.test(sessionId)) {
+    problems.push(
+      'GATEWAY_SESSION_ID deve ter de 1 a 32 caracteres: letras minusculas, digitos e hifen',
+    );
+  }
+
+  const connect = (env.GATEWAY_CONNECT_ENABLED ?? '').trim();
+  if (connect !== '' && connect !== 'true' && connect !== 'false') {
+    problems.push("GATEWAY_CONNECT_ENABLED deve ser 'true' ou 'false'");
+  }
+
+  // ---- banco da sessao ----
+  const dbHost = (env.GATEWAY_DB_HOST ?? '').trim();
+  if (!DB_HOST_FORMAT.test(dbHost)) {
+    problems.push('GATEWAY_DB_HOST ausente ou invalido');
+  }
+  const dbName = (env.GATEWAY_DB_NAME ?? '').trim();
+  if (!DB_NAME_FORMAT.test(dbName)) {
+    problems.push('GATEWAY_DB_NAME ausente ou invalido');
+  }
+  const dbUser = (env.GATEWAY_DB_USER ?? '').trim();
+  if (dbUser === '' || dbUser.length > 80) {
+    problems.push('GATEWAY_DB_USER ausente ou invalido');
+  }
+  const dbPort = intInRange(env.GATEWAY_DB_PORT, 3306, 1, 65_535, 'GATEWAY_DB_PORT', problems);
+  const dbPassword = readSecret(env, 'GATEWAY_DB_PASSWORD', readFile, 'senha do banco', problems);
+
+  // ---- chave de cifra da sessao: obrigatoria, sem padrao, formato estrito ----
+  const rawKey = readSecret(
+    env,
+    'GATEWAY_AUTH_ENCRYPTION_KEY',
+    readFile,
+    'chave de cifra da sessao',
+    problems,
+  );
+  let encryptionKey: Uint8Array = Buffer.alloc(0);
+  if (rawKey !== '') {
+    const parsed = parseEncryptionKey(rawKey);
+    if (parsed === null) {
+      problems.push(
+        'chave de cifra da sessao invalida (use 32 bytes aleatorios em base64 ou 64 caracteres hexadecimais)',
+      );
+    } else {
+      encryptionKey = parsed;
+    }
   }
 
   const config: GatewayConfig = {
@@ -141,6 +235,10 @@ export function loadConfig(env: EnvReader, readFile: (path: string) => string): 
       problems,
     ),
     maxQueue: intInRange(env.GATEWAY_MAX_QUEUE, 100, 1, 1_000, 'GATEWAY_MAX_QUEUE', problems),
+    sessionId,
+    connectEnabled: connect === 'true',
+    db: { host: dbHost, port: dbPort, database: dbName, user: dbUser, password: dbPassword },
+    encryptionKey,
   };
   if (problems.length > 0) {
     throw new ConfigError(problems);
