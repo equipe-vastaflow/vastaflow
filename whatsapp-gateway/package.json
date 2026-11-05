@@ -1,0 +1,32 @@
+{
+  "name": "@vastaflow/whatsapp-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Transporte do WhatsApp (Baileys) do VastaFlow: so conecta e encaminha ao backend. Sem regra de negocio.",
+  "type": "module",
+  "engines": {
+    "node": ">=24.15.0"
+  },
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint \"src/**/*.ts\" --max-warnings 0",
+    "format:check": "prettier --check \"src/**/*.ts\"",
+    "test": "tsc -p tsconfig.json && node --test \"dist-test/**/*.spec.js\"",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "7.0.0-rc14"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "26.6.2",
+    "eslint": "10.11.0",
+    "eslint-config-prettier": "10.1.8",
+    "globals": "17.12.0",
+    "prettier": "3.9.8",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.70.1"
+  }
+}

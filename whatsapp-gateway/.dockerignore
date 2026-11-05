@@ -1,0 +1,11 @@
+node_modules
+dist
+dist-test
+.env
+.env.*
+!.env.example
+*.session
+auth_info*
+creds.json
+Dockerfile
+.dockerignore

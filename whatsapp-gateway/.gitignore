@@ -1,0 +1,10 @@
+node_modules/
+dist/
+dist-test/
+# Sessao, credenciais e chaves nunca no Git (a sessao so existira cifrada, fora daqui: etapa 3).
+*.session
+auth_info*/
+creds.json
+.env
+.env.*
+!.env.example
