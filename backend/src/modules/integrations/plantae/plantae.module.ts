@@ -12,7 +12,7 @@ import { PlantaeProvider } from './plantae.provider';
 import { PlantaeService } from './plantae.service';
 
 /**
- * Integracao com a API externa do Plantae: SOMENTE leitura, SOMENTE homologacao.
+ * Integracao com a API externa do Plantae: SOMENTE leitura, hosts fixos (homologacao e producao).
  *
  * Camadas, de baixo para cima, sem ciclo:
  *

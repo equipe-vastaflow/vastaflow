@@ -18,6 +18,7 @@ import {
   todayInTimeZone,
   validatePeriod,
 } from './plantae-dates';
+import type { PlantaeEnvironment } from './plantae.constants';
 import { PlantaeApiError, PlantaeInputError } from './plantae-errors';
 import { resolvePlantaeSettings } from './plantae-settings';
 import type { PlantaeService } from './plantae.service';
@@ -32,6 +33,28 @@ export const PLANTAE_CHAT_SHOW_PAYEE_KEY = 'PLANTAE_CHAT_SHOW_PAYEE_NAME';
 /** Primeira linha de TODA resposta com dados: o ambiente e de TESTE. */
 export const HOMOLOGATION_BANNER =
   'HOMOLOGACAO - dados de teste do Plantae, nao sao os dados definitivos da empresa.';
+
+/**
+ * Producao (`web.plantae.agr.br`): dados REAIS. NUNCA e rotulada de homologacao. O aviso diz so o que e verdade: sao
+ * dados reais da empresa e o comando apenas consulta. (A classificacao do host como producao ainda depende de
+ * confirmacao escrita do fornecedor - docs/integracao-plantae.md, secao 11.)
+ */
+export const PRODUCTION_BANNER = 'PRODUCAO - dados reais da empresa no Plantae. Somente consulta.';
+
+/** Ambiente nao identificado (nao deveria chegar a uma resposta): nao afirma homologacao nem producao. */
+export const UNKNOWN_ENVIRONMENT_BANNER = 'Plantae - ambiente nao identificado. Somente consulta.';
+
+/** Aviso da primeira linha de TODA resposta, conforme o ambiente do host configurado. */
+export function bannerFor(environment: PlantaeEnvironment | null): string {
+  switch (environment) {
+    case 'homologation':
+      return HOMOLOGATION_BANNER;
+    case 'production':
+      return PRODUCTION_BANNER;
+    default:
+      return UNKNOWN_ENVIRONMENT_BANNER;
+  }
+}
 
 /** Janela padrao de `/contas_pagar` sem argumentos: hoje + 7 dias (8 dias, extremos incluidos). */
 export const DEFAULT_WINDOW_DAYS = 7;
@@ -107,7 +130,7 @@ export const CONTAS_PAGAR_MESSAGES = {
  */
 export class AccountsPayableCommandHandler implements CommandHandler {
   readonly name = 'contas_pagar';
-  readonly description = 'Contas a pagar pendentes no Plantae (consulta, homologacao)';
+  readonly description = 'Contas a pagar pendentes no Plantae (somente consulta)';
   readonly permission = PermissionCode.PlantaeRead;
   // Auditoria opt-in do motor: grava QUEM executou e o desfecho, sem texto nem dado
   // de negocio (ver `CommandRouter.recordAudit`).
@@ -174,7 +197,11 @@ export class AccountsPayableCommandHandler implements CommandHandler {
       const hasMore = pending.length > shown.length ? true : page.pagination.hasMore;
       const showPayee = this.config.get<unknown>(PLANTAE_CHAT_SHOW_PAYEE_KEY) === true;
       return commandOk(
-        formatReply(period, shown, hasMore, { showPayee, ignored }),
+        formatReply(period, shown, hasMore, {
+          showPayee,
+          ignored,
+          environment: resolvePlantaeSettings(this.config).environment,
+        }),
         shown.length === 0 ? 'vazio' : 'ok',
       );
     } catch (error) {
@@ -298,6 +325,8 @@ interface ReplyOptions {
   readonly showPayee: boolean;
   /** Itens devolvidos pelo Plantae que NAO eram pendentes e foram descartados. */
   readonly ignored: number;
+  /** Ambiente do host configurado: define o aviso da primeira linha. */
+  readonly environment: PlantaeEnvironment | null;
 }
 
 function formatReply(
@@ -306,7 +335,7 @@ function formatReply(
   hasMore: boolean | null,
   options: ReplyOptions,
 ): string {
-  const head = `${HOMOLOGATION_BANNER}\nContas a pagar pendentes (Plantae)\nVencimento: ${formatDate(period.from)} a ${formatDate(period.to)}`;
+  const head = `${bannerFor(options.environment)}\nContas a pagar pendentes (Plantae)\nVencimento: ${formatDate(period.from)} a ${formatDate(period.to)}`;
   const note =
     options.ignored > 0
       ? [`Obs.: ${String(options.ignored)} item(ns) fora do status pendente foram ignorados.`]

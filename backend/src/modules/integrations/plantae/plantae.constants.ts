@@ -10,19 +10,21 @@ export const PLANTAE_TIMEOUT_MS_KEY = 'PLANTAE_TIMEOUT_MS';
 /** Caminho fixo da API externa. Na colecao oficial, `{{baseUrl}}` = host + este caminho. */
 export const PLANTAE_API_PATH = '/api/v1/external';
 
-export type PlantaeEnvironment = 'homologation';
+export type PlantaeEnvironment = 'homologation' | 'production';
 
 /**
- * Hosts que o VastaFlow aceita como Plantae, e o ambiente de cada um.
+ * Hosts que o VastaFlow aceita como Plantae, e o ambiente de cada um. LISTA FECHADA: exatamente estes dois, e nenhum
+ * outro (nem subdominio, nem prefixo, nem o dominio raiz). Acrescentar um host e uma mudanca de codigo revisada - nunca
+ * uma variavel de ambiente que alguem troque por engano e aponte a integracao para o lugar errado.
  *
- * SO homologacao. Nao existe entrada de producao de proposito: a Plantae ainda
- * nao liberou nem informou um endereco de producao, e inventar um aqui poderia
- * apontar a integracao para um servidor que nao e o dela. Quando a liberacao
- * oficial vier, acrescentar o host AQUI e uma mudanca de codigo, revisada - nao
- * uma variavel de ambiente que alguem troque por engano.
+ * - `rc.plantae.agr.br`: HOMOLOGACAO (dados de teste; copia do ambiente da cliente).
+ * - `web.plantae.agr.br`: PRODUCAO (dados REAIS). Endereco enviado oficialmente pelo fornecedor; a classificacao como
+ *   producao ainda precisa de CONFIRMACAO ESCRITA do fornecedor (ver docs/integracao-plantae.md, secao 11). Enquanto isso
+ *   o codigo trata os dados como reais e nunca os rotula como homologacao.
  */
 export const PLANTAE_ENVIRONMENTS: Readonly<Record<string, PlantaeEnvironment>> = {
   'rc.plantae.agr.br': 'homologation',
+  'web.plantae.agr.br': 'production',
 };
 
 /** Endpoints da colecao oficial. Exatamente estes oito, todos GET. */

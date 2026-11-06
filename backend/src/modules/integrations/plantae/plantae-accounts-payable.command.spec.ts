@@ -4,6 +4,9 @@ import { PermissionCode } from '../../permissions/permission-code.enum';
 import {
   CHAT_PAGE_SIZE,
   HOMOLOGATION_BANNER,
+  PRODUCTION_BANNER,
+  UNKNOWN_ENVIRONMENT_BANNER,
+  bannerFor,
   CONTAS_PAGAR_MESSAGES,
   CONTAS_PAGAR_USAGE,
   AccountsPayableCommandHandler,
@@ -21,10 +24,14 @@ function config(values: Record<string, unknown>): { get: <T>(k: string) => T | u
   return { get: <T>(key: string): T | undefined => values[key] as T };
 }
 
+const HOMOLOGACAO_URL = 'https://rc.plantae.agr.br/api/v1/external';
+const PRODUCAO_URL = 'https://web.plantae.agr.br/api/v1/external';
+
 const LIGADO = {
   PLANTAE_CHAT_COMMANDS_ENABLED: true,
   PLANTAE_ENABLED: true,
   PLANTAE_ORGANIZATION_CONFIRMED: true,
+  PLANTAE_BASE_URL: HOMOLOGACAO_URL,
 };
 
 function contexto(text = '/contas_pagar'): CommandContext {
@@ -490,6 +497,48 @@ describe('Fase 6: prontidao do comando financeiro no chat', () => {
       }
       expect(HOMOLOGATION_BANNER).toContain('HOMOLOGACAO');
       expect(HOMOLOGATION_BANNER).toContain('nao sao os dados definitivos');
+    });
+
+    it('PRODUCAO (web.plantae.agr.br): o aviso e o de producao e NUNCA diz homologacao', async () => {
+      const producao = { ...LIGADO, PLANTAE_BASE_URL: PRODUCAO_URL };
+      const cheia = await montar(producao).handler.handle(contextoDe());
+      const vazia = await montar(producao, () => Promise.resolve(pagina([]))).handler.handle(
+        contextoDe(),
+      );
+
+      for (const r of [cheia, vazia]) {
+        expect(r.reply.split('\n')[0]).toBe(PRODUCTION_BANNER);
+        expect(r.reply).not.toMatch(/HOMOLOGACAO|dados de teste|nao sao os dados definitivos/i);
+      }
+      expect(PRODUCTION_BANNER).toContain('PRODUCAO');
+      expect(PRODUCTION_BANNER).toContain('dados reais');
+    });
+
+    it('HOMOLOGACAO (rc.plantae.agr.br) segue com o aviso de teste e sem a palavra producao', async () => {
+      const r = await montar(LIGADO).handler.handle(contextoDe());
+
+      expect(r.reply.split('\n')[0]).toBe(HOMOLOGATION_BANNER);
+      expect(r.reply).not.toMatch(/PRODUCAO/i);
+    });
+
+    it('ambiente desconhecido nao afirma homologacao nem producao', () => {
+      expect(bannerFor(null)).toBe(UNKNOWN_ENVIRONMENT_BANNER);
+      expect(UNKNOWN_ENVIRONMENT_BANNER).not.toMatch(/HOMOLOGACAO|PRODUCAO/i);
+      expect(bannerFor('homologation')).toBe(HOMOLOGATION_BANNER);
+      expect(bannerFor('production')).toBe(PRODUCTION_BANNER);
+    });
+
+    it('o aviso vem do host configurado, nao de um valor fixo: trocar a URL troca o aviso', async () => {
+      const h = await montar(LIGADO).handler.handle(contextoDe());
+      const p = await montar({ ...LIGADO, PLANTAE_BASE_URL: PRODUCAO_URL }).handler.handle(
+        contextoDe(),
+      );
+
+      expect(h.reply.split('\n')[0]).not.toBe(p.reply.split('\n')[0]);
+    });
+
+    it('a descricao do comando (lista de /ajuda) nao fixa um ambiente', () => {
+      expect(montar(LIGADO).handler.description).not.toMatch(/homolog|producao/i);
     });
 
     it('falhas nao trazem valores (nao ha dado de homologacao para parecer definitivo)', async () => {

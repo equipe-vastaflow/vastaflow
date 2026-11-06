@@ -131,8 +131,9 @@ export class PlantaeController {
   @ApiOperation({
     summary: 'Estado da integracao com o Plantae',
     description:
-      'Local: nao chama o Plantae. `environment` e `homologation` (o unico ambiente aceito ' +
-      'hoje). Nao devolve URL nem credencial.',
+      'Local: nao chama o Plantae. `environment` e `homologation` (rc.plantae.agr.br) ou `production` ' +
+      '(web.plantae.agr.br, dados reais), conforme o host configurado; `null` se nao configurado. ' +
+      'Nao devolve URL nem credencial.',
   })
   @ApiOkResponse({ description: 'Estado operacional' })
   async status(): Promise<IntegrationStatusReport & { environment: string | null }> {

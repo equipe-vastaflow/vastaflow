@@ -35,7 +35,7 @@ export type BaseUrlResult =
  * NUNCA e repetida no erro):
  * - HTTPS obrigatorio;
  * - sem usuario/senha, porta, query string ou fragmento;
- * - host na lista de ambientes conhecidos (so homologacao);
+ * - host na lista FECHADA de ambientes conhecidos (`PLANTAE_ENVIRONMENTS`: homologacao e producao);
  * - caminho exatamente `/api/v1/external` (uma barra final e tolerada).
  */
 export function parsePlantaeBaseUrl(raw: string): BaseUrlResult {

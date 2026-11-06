@@ -694,9 +694,9 @@ export class EnvironmentVariables {
   NFSE_PRODUCAO_AUTORIZACAO?: string;
 
   /**
-   * URL base da API. SO aceita o host de HOMOLOGACAO conhecido (`rc.plantae.agr.br`),
-   * em HTTPS, no caminho `/api/v1/external`. Uma URL de producao so entra depois da
-   * liberacao oficial da Plantae, por mudanca de codigo - ver `plantae.constants.ts`.
+   * URL base da API. SO aceita os DOIS hosts conhecidos - `rc.plantae.agr.br` (homologacao) e
+   * `web.plantae.agr.br` (producao, dados reais) -, em HTTPS, no caminho `/api/v1/external`.
+   * Qualquer outro host e recusado; acrescentar um e mudanca de codigo - ver `plantae.constants.ts`.
    * Se informada, e validada SEMPRE (mesmo com a integracao desligada): um valor
    * errado e erro de configuracao, nao algo a descobrir na primeira consulta.
    */

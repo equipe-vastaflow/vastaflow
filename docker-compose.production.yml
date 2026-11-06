@@ -224,7 +224,7 @@ services:
       # token. So o backend recebe esta variavel (por isso nao esta no anchor
       # compartilhado com `migrate`). Ver docs/autenticacao-servico-a-servico.md.
       SERVICE_CREDENTIALS_FILE: /etc/vastaflow/service-auth/credentials.json
-      # Plantae (Fase 4): API externa SOMENTE de leitura, so homologacao. DESLIGADO
+      # Plantae (Fase 4): API externa SOMENTE de leitura (hosts fixos: homologacao e producao). DESLIGADO
       # por padrao: sem PLANTAE_ENABLED=true nada e chamado. So o backend recebe
       # estas variaveis - NUNCA o n8n, o `migrate` ou o frontend. O token fica no
       # `.env` (fora do Git); note que variavel de ambiente aparece em

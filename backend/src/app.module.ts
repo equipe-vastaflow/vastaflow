@@ -82,7 +82,7 @@ import { UsersModule } from './modules/users/users.module';
     // assinado, idempotencia persistente, identidade, RBAC e Command Engine.
     TelegramIngestModule,
 
-    // Plantae (API externa, SOMENTE leitura, so homologacao): consultas GET para
+    // Plantae (API externa, SOMENTE leitura, hosts fixos de homologacao e producao): consultas GET para
     // ADMIN humano. Desligado por padrao (PLANTAE_ENABLED). Nao grava nada.
     PlantaeModule,
     WhatsappModule,

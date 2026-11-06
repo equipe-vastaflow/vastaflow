@@ -10,8 +10,9 @@
 > o que continua so "conforme a colecao" esta em
 > [Premissas nao verificadas](#6-premissas-nao-verificadas).
 >
-> Somente **homologacao** (`rc.plantae.agr.br`). **Nao ha producao**: o endereco
-> de producao nao foi informado e nenhum foi inventado.
+> Hosts aceitos (lista fechada): **homologacao** (`rc.plantae.agr.br`) e **producao** (`web.plantae.agr.br`, enviado
+> oficialmente pelo fornecedor; classificacao ainda a **confirmar por escrito**). Tudo que foi validado no real foi na
+> homologacao; **o host de producao nunca foi consultado** (secao 11).
 >
 > Fonte unica dos contratos: a colecao Postman oficial "Plantae API Externa"
 > (fornecida pela equipe do Plantae). Ela **nao** esta neste repositorio e nao
@@ -87,7 +88,7 @@ Todas **desligadas/vazias por padrao**. So o **backend** as recebe (nunca o n8n,
 | Variavel | Padrao | Regra |
 | --- | --- | --- |
 | `PLANTAE_ENABLED` | `false` | So `true` liga. Desligado, nada e chamado |
-| `PLANTAE_BASE_URL` | vazio | **Fail-fast**: HTTPS, sem usuario/senha/porta/query/fragmento, host **exatamente** `rc.plantae.agr.br`, caminho `/api/v1/external`. Validada **mesmo desligado** |
+| `PLANTAE_BASE_URL` | vazio | **Fail-fast**: HTTPS, sem usuario/senha/porta/query/fragmento, host **exatamente** `rc.plantae.agr.br` (homologacao) **ou** `web.plantae.agr.br` (producao), caminho `/api/v1/external`. Validada **mesmo desligado** |
 | `PLANTAE_API_TOKEN` | vazio | Segredo. 8 a 512 caracteres ASCII imprimiveis, sem espaco (impede injecao no cabecalho). Ausente = `NOT_CONFIGURED` (a aplicacao sobe) |
 | `PLANTAE_TIMEOUT_MS` | 15000 | 1000 a 60000 |
 
@@ -96,10 +97,9 @@ Estados (`GET /integrations/plantae/status`, local): `DISABLED` (desligado),
 **nao** impede o boot: o registro so guarda a referencia; o health check
 (`GET /me`) so roda quando alguem pede e e reaproveitado por 60 s.
 
-**Producao.** O host de producao nao existe no codigo (`PLANTAE_ENVIRONMENTS`
-contem so a homologacao). Quando a Plantae liberar, acrescentar o host la e uma
-**mudanca de codigo revisada** - de proposito, para nao ser uma variavel que
-alguem troque por engano e aponte a integracao para o lugar errado.
+**Hosts.** `PLANTAE_ENVIRONMENTS` (lista fechada) contem exatamente `rc.plantae.agr.br` (homologacao) e
+`web.plantae.agr.br` (producao); acrescentar outro e uma **mudanca de codigo revisada** - de proposito, para nao ser uma
+variavel que alguem troque por engano e aponte a integracao para o lugar errado. Ver a secao 11.
 
 ## 4. Seguranca e dados pessoais
 
@@ -407,7 +407,7 @@ se `PLANTAE_ENABLED=true` e `PLANTAE_CHAT_COMMANDS_ENABLED=true` sem ele.
 | Valor | o **valor da parcela**, na **moeda do titulo**, formatado a partir do **texto decimal** (sem `float`, sem arredondar, **sem somar**, **sem converter moeda**) |
 | Pagamento parcial | `total_pago` diferente de zero => linha marcada **"JA TEVE PAGAMENTO PARCIAL (confira no Plantae)"**. **Nao** se calcula nem se exibe saldo: a semantica de `saldo_atual` nao e documentada |
 | Itens | no maximo **5**; se o Plantae devolver mais, mostra 5 e avisa que ha mais (nunca varre a organizacao) |
-| Homologacao | **toda** resposta comeca por "HOMOLOGACAO - dados de teste do Plantae, nao sao os dados definitivos da empresa." |
+| Aviso do ambiente | **toda** resposta comeca por um aviso do ambiente do host: homologacao -> "HOMOLOGACAO - dados de teste do Plantae, nao sao os dados definitivos da empresa."; producao -> "PRODUCAO - dados reais da empresa no Plantae. Somente consulta." |
 | Favorecido | **oculto por padrao** (`PLANTAE_CHAT_SHOW_PAYEE_NAME=false`); a linha traz a referencia curta `ref <parcela_id>`. Ligado: nome abreviado (28 car.), sem quebra de linha |
 | Nunca sai | CPF/CNPJ, dados bancarios, observacao, descricao, documento, rateio, payload bruto |
 | Erros | frase fixa por categoria; **nenhum valor inventado**; 429/5xx/timeout nao geram numeros |
@@ -418,7 +418,7 @@ se `PLANTAE_ENABLED=true` e `PLANTAE_CHAT_COMMANDS_ENABLED=true` sem ele.
 2. **RBAC** do Command Engine: `plantae:read` (so ADMIN por padrao) - o OPERADOR e negado **antes** do handler, sem Plantae.
 3. `PLANTAE_CHAT_COMMANDS_ENABLED=true`.
 4. `PLANTAE_ORGANIZATION_CONFIRMED=true`.
-5. `PLANTAE_ENABLED=true` (e a chave/URL de homologacao validas).
+5. `PLANTAE_ENABLED=true` (e a chave/URL de um dos dois hosts validas).
 6. Periodo valido; **3 consultas/min por pessoa**; limite do Telegram de **10 msg/min por remetente**; limitador do Plantae
    (60/min por chave, conservador); **uma pagina**; prazo de **20 s**; sem retry automatico.
 
@@ -462,3 +462,62 @@ Rollback: `PLANTAE_CHAT_COMMANDS_ENABLED=false` (e/ou `PLANTAE_ENABLED=false`), 
 - Erros reais 401/403/429/5xx do Plantae nunca foram observados; testados com simulacao.
 - Resposta financeira passa pelo n8n em claro (trafego interno) e pelos servidores do Telegram (nao ponta a ponta).
 - Politica de divulgacao do favorecido e decisao do negocio (hoje: oculto).
+
+## 11. Host de PRODUCAO (`web.plantae.agr.br`): suporte adicionado, SEM nenhuma consulta real
+
+> **Estado: o codigo aceita o host; NADA foi consultado, nenhuma flag foi ligada e o token nao foi usado nem configurado.**
+> O fornecedor enviou oficialmente `https://web.plantae.agr.br/api/v1/external`. O endereco *aparenta* ser de producao, mas
+> essa classificacao **ainda precisa de confirmacao escrita do fornecedor**. Ate la, o VastaFlow trata os dados desse host
+> como **reais** (nunca como teste) e nao o rotula de homologacao.
+
+### 11.1 O que mudou no codigo
+- `PLANTAE_ENVIRONMENTS` (lista **fechada**, `plantae.constants.ts`) tem exatamente dois hosts: `rc.plantae.agr.br` ->
+  `homologation` e `web.plantae.agr.br` -> `production`. Qualquer outro host (dominio raiz, `www`, subdominio, prefixo,
+  FQDN com ponto final, homografo, IP, `localhost`) **derruba o boot**, mesmo com a integracao desligada, sem repetir a URL.
+- Inalterado e testado para os dois hosts: HTTPS obrigatorio; caminho **exato** `/api/v1/external` (barra final tolerada);
+  sem usuario/senha, porta, query ou fragmento; TLS sempre verificado (nao existe opcao que o enfraqueca);
+  `redirect: 'manual'` (3xx e erro, nunca e seguido, o token nunca sai para outro host); `links.next` so e validado (host
+  **do ambiente configurado**, https, caminho) e nunca seguido - um link para o **outro** ambiente e recusado.
+- O **aviso** da primeira linha de `/contas_pagar` agora depende do ambiente: homologacao -> o aviso de teste de sempre;
+  producao -> `PRODUCAO - dados reais da empresa no Plantae. Somente consulta.`; ambiente desconhecido -> nao afirma nenhum.
+  A descricao do comando em `/ajuda` ficou neutra (nao cita ambiente).
+- `GET /integrations/plantae/status` devolve `environment: homologation | production` (ou `null` se nao configurado), sem
+  URL nem token. A auditoria (`PLANTAE_QUERIED`) registra o `ambiente` correto.
+- **Padroes inalterados**: `PLANTAE_ENABLED`, `PLANTAE_CHAT_COMMANDS_ENABLED`, `PLANTAE_ORGANIZATION_CONFIRMED` e
+  `PLANTAE_CHAT_SHOW_PAYEE_NAME` seguem `false`; ligar o chat com a integracao ativa sem o atestado continua recusando o boot
+  (nos dois hosts). O compose continua repassando as variaveis so ao backend. `PLANTAE_BASE_URL` no `.env.example` continua
+  sendo o de homologacao (exemplo).
+
+### 11.2 O contrato de producao NAO esta verificado
+- Tudo que foi confirmado "no real" (secao 7.1) foi na **homologacao**. **Nao ha evidencia** de que `web.plantae.agr.br`
+  use o mesmo contrato (campos, formatos, paginacao, limites, mensagens de erro). Presume-se, pela colecao oficial unica,
+  mas **nao se sabe**. O codigo ja e defensivo: resposta fora do contrato vira erro explicito (`PLANTAE_INVALID_RESPONSE`),
+  nunca dado aproximado.
+- **Os escopos do token nao sao presumidos.** O codigo nao assume escopo nenhum: `403` e `401` viram categorias de erro
+  proprias. A chave de homologacao tinha 3 escopos; a de producao pode ter outros. O primeiro `GET /me` mostra os escopos
+  reais (o `/contas_pagar` precisa, na pratica, do de lancamentos - `financial-entries:read`, nome inferido).
+- O mapeamento rota -> escopo continua nao documentado (secao 6, item 1).
+
+### 11.3 Pendencias para a PRIMEIRA consulta segura (nenhuma foi executada)
+1. **Confirmacao escrita do fornecedor** de que `web.plantae.agr.br` e producao, de que o token pertence a esse ambiente e de
+   quais escopos ele tem. Confirmar tambem que o token enviado **nao foi exposto** (se houver duvida, pedir rotacao).
+2. **Referencia independente da organizacao** (secao 10.2): razao social/CNPJ informado pela cliente por canal proprio, ou
+   confirmacao formal do fornecedor. Producao e **dado real e confidencial** (financeiro e pessoas): tratar tudo que volta
+   como tal; nada de payload em chat, ticket ou Git.
+3. Autorizacao para recriar o backend (o bot do Telegram fica ~1 min sem consumidor) e para a consulta real.
+4. No servidor, por quem administra: `PLANTAE_BASE_URL` (producao), `PLANTAE_API_TOKEN` (so o token, **sem** o prefixo
+   `Bearer `), `PLANTAE_ENABLED=true`; **manter** `PLANTAE_CHAT_COMMANDS_ENABLED=false` e `PLANTAE_ORGANIZATION_CONFIRMED=false`.
+5. `GET /integrations/plantae/status` -> `READY` e `environment: production`; depois **uma** chamada `GET .../me` por ADMIN
+   humano; anotar `organizacao_id` e `scopes`. Se o contrato divergir (`PLANTAE_INVALID_RESPONSE`), **parar**.
+6. Comparar a organizacao com a referencia (`legal-entities`, 1 chamada, `per_page` pequeno). Registrar quem conferiu e contra
+   qual fonte, fora do repositorio. So entao pensar em `PLANTAE_ORGANIZATION_CONFIRMED=true` (atestado do operador, **refeito** se
+   a chave mudar).
+7. Antes de ligar o chat: ADMIN humano existente e vinculado ao Telegram (secao 10.5), e conferir no PostgreSQL do n8n que a
+   resposta financeira nao fica em `execution_data` (secao 10.6).
+8. Lembrar que **Telegram nao e ponta a ponta**: em producao, o texto da resposta financeira passa pelos servidores dele.
+9. Atualizar a politica de privacidade se o uso passar a tratar dados reais em producao.
+10. Egress a partir do Docker nunca foi validado (secao 7.2, item 7): a primeira chamada de dentro do conteiner pode revelar
+    problema de DNS, rede ou TLS.
+
+Rollback: `PLANTAE_CHAT_COMMANDS_ENABLED=false` e/ou `PLANTAE_ENABLED=false`, recriar so o backend; revogar o token na
+Plantae se houve exposicao.
