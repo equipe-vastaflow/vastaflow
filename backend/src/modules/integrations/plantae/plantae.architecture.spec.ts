@@ -1,9 +1,16 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { RequestMethod } from '@nestjs/common';
-import { METHOD_METADATA, MODULE_METADATA, PATH_METADATA } from '@nestjs/common/constants';
+import {
+  HEADERS_METADATA,
+  METHOD_METADATA,
+  MODULE_METADATA,
+  PATH_METADATA,
+} from '@nestjs/common/constants';
+import { PERMISSIONS_KEY } from '../../auth/decorators/require-permissions.decorator';
 import { ROLES_KEY } from '../../auth/decorators/roles.decorator';
 import { IS_PUBLIC_KEY } from '../../auth/decorators/public.decorator';
+import { PermissionCode } from '../../permissions/permission-code.enum';
 import { RoleName } from '../../roles/role-name.enum';
 import { SERVICE_ROUTE_KEY } from '../../service-auth/service-auth.constants';
 import {
@@ -62,6 +69,7 @@ const PERMITIDOS = new Set([
   '../../commands/commands.module',
   '../../permissions/permission-code.enum',
   '../../auth/decorators/current-user.decorator',
+  '../../auth/decorators/require-permissions.decorator',
   '../../auth/decorators/roles.decorator',
   '../../roles/role-name.enum',
   '../../../common/decorators/client-ip.decorator',
@@ -245,8 +253,80 @@ describe('Arquitetura do modulo Plantae', () => {
   });
 
   describe('acesso', () => {
-    it('o controller e restrito a ADMIN', () => {
-      expect(Reflect.getMetadata(ROLES_KEY, PlantaeController)).toEqual([RoleName.Admin]);
+    /** Nome do metodo -> handler, so dos metodos que sao rota (tem caminho). */
+    const rotas = (): Array<[string, object]> =>
+      Object.getOwnPropertyNames(PlantaeController.prototype)
+        .filter((nome) => nome !== 'constructor')
+        .map((nome): [string, object] => [
+          nome,
+          Reflect.get(PlantaeController.prototype, nome) as object,
+        ])
+        .filter(([, handler]) => Reflect.getMetadata(PATH_METADATA, handler) !== undefined);
+
+    it('o controller exige `plantae:read` (e so ela) na classe', () => {
+      expect(Reflect.getMetadata(PERMISSIONS_KEY, PlantaeController)).toEqual([
+        PermissionCode.PlantaeRead,
+      ]);
+    });
+
+    it('NAO ha restricao de perfil residual na classe (o GESTOR autorizado consulta)', () => {
+      expect(Reflect.getMetadata(ROLES_KEY, PlantaeController)).toBeUndefined();
+    });
+
+    it('nenhuma rota sobrescreve a permissao da classe com outra (ou com nenhuma)', () => {
+      for (const [, handler] of rotas()) {
+        expect(Reflect.getMetadata(PERMISSIONS_KEY, handler)).toBeUndefined();
+      }
+    });
+
+    it('SO `/me` e `/fiscal/issued-invoices` sao restritas a ADMIN; as demais nao tem `@Roles`', () => {
+      const comPerfil = rotas()
+        .filter(([, handler]) => Reflect.getMetadata(ROLES_KEY, handler) !== undefined)
+        .map(([nome, handler]) => [nome, Reflect.getMetadata(ROLES_KEY, handler) as unknown])
+        .sort(([a], [b]) => String(a).localeCompare(String(b)));
+
+      expect(comPerfil).toEqual([
+        ['invoices', [RoleName.Admin]],
+        ['me', [RoleName.Admin]],
+      ]);
+    });
+
+    it('as rotas so de ADMIN continuam exigindo `plantae:read` (nada foi removido)', () => {
+      for (const nome of ['me', 'invoices']) {
+        const handler = Reflect.get(PlantaeController.prototype, nome) as object;
+        // Sem metadado proprio de permissao: vale a da classe (`plantae:read`).
+        expect(Reflect.getMetadata(PERMISSIONS_KEY, handler)).toBeUndefined();
+        expect(Reflect.getMetadata(HEADERS_METADATA, handler)).toEqual([
+          { name: 'Cache-Control', value: 'no-store' },
+        ]);
+      }
+      expect(Reflect.getMetadata(PERMISSIONS_KEY, PlantaeController)).toEqual([
+        PermissionCode.PlantaeRead,
+      ]);
+    });
+
+    it('TODA rota responde com `Cache-Control: no-store`', () => {
+      const lista = rotas();
+
+      expect(lista.length).toBe(9);
+      for (const [nome, handler] of lista) {
+        const cabecalhos = Reflect.getMetadata(HEADERS_METADATA, handler) as
+          Array<{ name: string; value: string }> | undefined;
+        expect({ nome, cabecalhos }).toEqual({
+          nome,
+          cabecalhos: [{ name: 'Cache-Control', value: 'no-store' }],
+        });
+      }
+    });
+
+    it('toda resposta com itens passa pelo mascaramento (listagens e extrato)', () => {
+      const controlador = semComentarios(
+        PLANTAE.find(({ arquivo }) => arquivo === 'plantae.controller.ts')?.codigo ?? '',
+      );
+
+      // As duas unicas saidas de itens: `listing` (6 listagens) e `statementResponse`.
+      expect(controlador.match(/data:\s*maskSensitive\(page\.items\)/g)).toHaveLength(2);
+      expect(controlador).not.toMatch(/data:\s*page\.items/);
     });
 
     it('nenhuma rota e publica', () => {

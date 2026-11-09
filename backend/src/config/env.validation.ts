@@ -471,7 +471,7 @@ export class EnvironmentVariables {
   PLANTAE_ENABLED: boolean = false;
 
   /**
-   * Libera o comando `/contas_pagar` nos canais de mensageria (Telegram). Opt-in
+   * Libera os comandos `/contas_pagar` e `/contas_receber` nos canais de mensageria. Opt-in
    * SEPARADO de `PLANTAE_ENABLED`: ligar a integracao para o ADMIN consultar pela
    * API nao deve, sozinho, levar dado financeiro da cliente para uma conversa de
    * Telegram. Desligado por padrao. Mesmo ligado, exige a permissao `plantae:read`.
@@ -483,7 +483,7 @@ export class EnvironmentVariables {
   /**
    * Atestado do operador de que a ORGANIZACAO da chave do Plantae foi conferida com uma referencia
    * INDEPENDENTE (dado da cliente ou confirmacao formal do Plantae) - `GET /me` devolver 200 nao
-   * prova isso. Padrao `false`. Sem ele, `/contas_pagar` nao consulta o Plantae e, ligado o comando
+   * prova isso. Padrao `false`. Sem ele, `/contas_pagar` e `/contas_receber` nao consultam o Plantae e, ligado o comando
    * de chat com a integracao ativa, o boot e recusado. Ver `docs/integracao-plantae.md` (fase 6).
    */
   @Transform(({ value }: TransformInput): boolean => value === 'true' || value === true)
@@ -493,6 +493,7 @@ export class EnvironmentVariables {
   /**
    * Mostra o nome (abreviado) do favorecido em `/contas_pagar`. Padrao `false`: o Telegram nao e
    * ponta a ponta e o projeto nao tem politica que autorize divulgar o favorecido por chat.
+   * NAO vale para `/contas_receber`: o nome do cliente nunca sai pelo chat.
    */
   @Transform(({ value }: TransformInput): boolean => value === 'true' || value === true)
   @IsBoolean({ message: "PLANTAE_CHAT_SHOW_PAYEE_NAME deve ser 'true' ou 'false'" })

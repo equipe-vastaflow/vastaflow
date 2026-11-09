@@ -8,7 +8,11 @@ import { ConfigService } from '@nestjs/config';
 import request from 'supertest';
 import type { AuditLogPageResponseDto } from '../src/modules/audit/dto/audit-log-page-response.dto';
 import type { AuthResponseDto } from '../src/modules/auth/dto/auth-response.dto';
+import { PermissionCode } from '../src/modules/permissions/permission-code.enum';
+import { PermissionsService } from '../src/modules/permissions/permissions.service';
 import { RoleName } from '../src/modules/roles/role-name.enum';
+import { RolesRepository } from '../src/modules/roles/roles.repository';
+import { RolesService } from '../src/modules/roles/roles.service';
 import {
   addCredential,
   EMPTY_CREDENTIALS_FILE,
@@ -78,6 +82,23 @@ function corpoPara(upstreamPath: string): string {
     default:
       return listJson([personJson()], { endpoint: 'people', withLinks: false, withMeta: false });
   }
+}
+
+// Documentos e conta SINTETICOS, diferentes dos zeros das fixtures: provam que nada
+// sai inteiro (um zero mascarado ainda "parece" zero e esconderia um vazamento).
+const CPF = '123.456.789-09';
+const CNPJ = '12.345.678/0001-95';
+const CONTA = '98765-4';
+const CPF_MASCARADO = '***.456.789-**';
+const CNPJ_MASCARADO = '12.345.678/****-**';
+const PROIBIDOS = [CPF, '12345678909', CNPJ, '12345678000195', CONTA, '98765'];
+
+/** O mesmo corpo de `corpoPara`, com CPF, CNPJ e numero de conta sinteticos. */
+function corpoComDocumentos(upstreamPath: string): string {
+  return corpoPara(upstreamPath)
+    .replaceAll('"000.000.000-00"', `"${CPF}"`)
+    .replaceAll('"00.000.000/0000-00"', `"${CNPJ}"`)
+    .replaceAll('"00000-0"', `"${CONTA}"`);
 }
 
 /** URL de um argumento de `fetch`, sem depender de `String(objeto)`. */
@@ -199,7 +220,7 @@ describe('Plantae (e2e)', () => {
     });
 
     it.each([RoleName.Gestor, RoleName.Operador, RoleName.Usuario])(
-      '%s -> 403 em TODAS as rotas, sem chamar o Plantae',
+      '%s sem plantae:read (padrao do perfil) -> 403 em TODAS as rotas, sem chamar o Plantae',
       async (role) => {
         const token = await tokenDe(role);
 
@@ -215,6 +236,131 @@ describe('Plantae (e2e)', () => {
       for (const [, path] of ROTAS) {
         await admin(path).expect(200);
       }
+    });
+
+    describe('GESTOR com plantae:read concedida ao perfil (como em producao)', () => {
+      let gestorToken: string;
+
+      /** Concede ou revoga `plantae:read` no PERFIL GESTOR do banco do teste. */
+      async function plantaeReadNoGestor(acao: 'conceder' | 'revogar'): Promise<void> {
+        const roles = app.get(RolesService, { strict: false });
+        const gestor = await roles.getByName(RoleName.Gestor);
+        if (acao === 'conceder') {
+          const todas = await app.get(PermissionsService, { strict: false }).findAll();
+          const plantaeRead = todas.filter((p) => p.code === String(PermissionCode.PlantaeRead));
+          expect(plantaeRead).toHaveLength(1);
+          await roles.addPermissions(gestor, plantaeRead);
+        } else {
+          gestor.permissions = gestor.permissions.filter(
+            (p) => p.code !== String(PermissionCode.PlantaeRead),
+          );
+          await app.get(RolesRepository, { strict: false }).save(gestor);
+        }
+      }
+
+      beforeAll(async () => {
+        await plantaeReadNoGestor('conceder');
+        gestorToken = await tokenDe(RoleName.Gestor);
+      });
+
+      afterAll(async () => {
+        await plantaeReadNoGestor('revogar');
+      });
+
+      /** Rotas que continuam SO do ADMIN, mesmo para quem tem `plantae:read`. */
+      const SO_ADMIN = ['me', 'issued-invoices'];
+      const LIBERADAS = ROTAS.filter(([nome]) => !SO_ADMIN.includes(nome));
+
+      it('o conjunto liberado ao GESTOR e exatamente o financeiro, organizacao e pessoas', () => {
+        expect(LIBERADAS.map(([nome]) => nome).sort()).toEqual(
+          [
+            'status',
+            'entries',
+            'accounts',
+            'movements',
+            'account-statement',
+            'legal-entities',
+            'people',
+          ].sort(),
+        );
+      });
+
+      it.each(LIBERADAS)(
+        '%s -> 200 (consulta liberada pela permissao, sem ser ADMIN)',
+        async (_nome, path) => {
+          await como(gestorToken, path).expect(200);
+        },
+      );
+
+      it.each(ROTAS.filter(([nome]) => SO_ADMIN.includes(nome)))(
+        '%s continua SO do ADMIN: 403 para o GESTOR, sem chamar o Plantae',
+        async (_nome, path) => {
+          await como(gestorToken, path).expect(403);
+
+          expect(fetchSpy).not.toHaveBeenCalled();
+        },
+      );
+
+      it('/fiscal/issued-invoices: o ADMIN continua consultando (200, mascarado, no-store)', async () => {
+        plantaeResponde((p) => jsonResponse(corpoComDocumentos(p)));
+
+        const response = await admin(`${BASE}/fiscal/issued-invoices?${PERIODO}`).expect(200);
+
+        expect(response.headers['cache-control']).toBe('no-store');
+        for (const proibido of PROIBIDOS) {
+          expect(JSON.stringify(response.body)).not.toContain(proibido);
+        }
+      });
+
+      it('o GESTOR recebe CPF/CNPJ mascarado e Cache-Control no-store', async () => {
+        plantaeResponde((p) => jsonResponse(corpoComDocumentos(p)));
+
+        const response = await como(gestorToken, `${BASE}/people`).expect(200);
+
+        expect(response.headers['cache-control']).toBe('no-store');
+        expect((response.body as { data: Array<{ cpf_cnpj: string }> }).data[0]?.cpf_cnpj).toBe(
+          CPF_MASCARADO,
+        );
+        for (const proibido of PROIBIDOS) {
+          expect(JSON.stringify(response.body)).not.toContain(proibido);
+        }
+      });
+
+      it('a consulta do GESTOR e auditada com o usuario dele', async () => {
+        const eu = await como(gestorToken, '/auth/me').expect(200);
+        const gestorId = (eu.body as { id: string }).id;
+
+        await como(gestorToken, `${BASE}/financial/accounts`).expect(200);
+
+        const logs = await admin('/audit-logs?limit=100').expect(200);
+        // Este GESTOR ja consultou outras rotas nesta suite: filtra tambem pelo endpoint.
+        const evento = (logs.body as AuditLogPageResponseDto).items.find(
+          (item) =>
+            item.acao === 'PLANTAE_QUERIED' &&
+            item.usuarioId === gestorId &&
+            item.metadados?.endpoint === 'financial/accounts',
+        );
+        expect(evento?.metadados).toMatchObject({ resultado: 'ok' });
+      });
+
+      it('OPERADOR e USUARIO continuam 403 (a concessao e so do perfil GESTOR)', async () => {
+        for (const role of [RoleName.Operador, RoleName.Usuario]) {
+          const token = await tokenDe(role);
+          await como(token, `${BASE}/people`).expect(403);
+        }
+
+        expect(fetchSpy).not.toHaveBeenCalled();
+      });
+
+      it('revogar a permissao do perfil fecha o acesso ja na requisicao seguinte', async () => {
+        await plantaeReadNoGestor('revogar');
+        try {
+          await como(gestorToken, `${BASE}/people`).expect(403);
+          expect(fetchSpy).not.toHaveBeenCalled();
+        } finally {
+          await plantaeReadNoGestor('conceder');
+        }
+      });
     });
 
     it('so GET: qualquer outro metodo nao existe', async () => {
@@ -348,6 +494,142 @@ describe('Plantae (e2e)', () => {
       const response = await admin(`${BASE}/fiscal/issued-invoices?${PERIODO}`).expect(200);
 
       expect(JSON.stringify(response.body)).not.toMatch(/xml|danfe/i);
+    });
+  });
+
+  describe('cache e dados pessoais na resposta', () => {
+    beforeEach(() => {
+      plantaeResponde((p) => jsonResponse(corpoComDocumentos(p)));
+    });
+
+    it.each(ROTAS)('%s: Cache-Control no-store', async (_nome, path) => {
+      const response = await admin(path).expect(200);
+
+      expect(response.headers['cache-control']).toBe('no-store');
+    });
+
+    it.each(ROTAS.filter(([nome]) => nome !== 'status' && nome !== 'me'))(
+      '%s: nenhum CPF/CNPJ completo nem numero de conta inteiro na resposta',
+      async (_nome, path) => {
+        const corpo = JSON.stringify((await admin(path).expect(200)).body);
+
+        for (const proibido of PROIBIDOS) {
+          expect(corpo).not.toContain(proibido);
+        }
+      },
+    );
+
+    it('/people: documento mascarado; id, nome e tipo intactos', async () => {
+      const response = await admin(`${BASE}/people`).expect(200);
+
+      expect((response.body as { data: unknown[] }).data[0]).toEqual({
+        pessoa_id: 6990,
+        nome: 'Pessoa Ficticia 6990',
+        razao_social: null,
+        tipo_pessoa: 'F',
+        cpf_cnpj: CPF_MASCARADO,
+      });
+    });
+
+    it('/financial/entries: pessoa aninhada mascarada; valores, saldo e ids intactos', async () => {
+      const response = await admin(`${BASE}/financial/entries?${PERIODO}`).expect(200);
+      const [parcela] = (
+        response.body as {
+          data: Array<{
+            parcela_id: number;
+            valor: string;
+            saldo_atual: string;
+            data_vencto: string;
+            pessoa: { pessoa_id: number; cpf_cnpj: string };
+            titulo: { titulo_id: number; num_documento: string; valor_total: string };
+          }>;
+        }
+      ).data;
+
+      expect(parcela?.pessoa).toMatchObject({ pessoa_id: 6990, cpf_cnpj: CPF_MASCARADO });
+      expect(parcela).toMatchObject({
+        parcela_id: 482,
+        valor: '8337.10',
+        saldo_atual: '8337.10',
+        data_vencto: '2026-09-10',
+      });
+      expect(parcela?.titulo).toMatchObject({
+        titulo_id: 1293,
+        num_documento: 'DOC-001',
+        valor_total: '25011.30',
+      });
+    });
+
+    it('/financial/movements: pessoa aninhada mascarada; valor, conta e data intactos', async () => {
+      const response = await admin(`${BASE}/financial/movements?${PERIODO}`).expect(200);
+      const [movimento] = (response.body as { data: Array<Record<string, unknown>> }).data;
+
+      expect(movimento?.pessoa).toMatchObject({ pessoa_id: 6990, cpf_cnpj: CPF_MASCARADO });
+      expect(movimento).toMatchObject({
+        mov_conta_id: 2960,
+        data: '2026-09-02',
+        valor: '1503.20',
+        conta: { conta_id: 1496, nome: 'Conta Ficticia' },
+      });
+    });
+
+    it('/financial/account-statement: linha mascarada; saldo da linha e saldos do periodo intactos', async () => {
+      const response = await admin(
+        `${BASE}/financial/account-statement?${PERIODO}&conta_id=11`,
+      ).expect(200);
+      const body = response.body as {
+        data: Array<{ pessoa: { cpf_cnpj: string }; saldo: string; valor: string }>;
+        saldos: unknown;
+      };
+
+      expect(body.data[0]?.pessoa.cpf_cnpj).toBe(CPF_MASCARADO);
+      expect(body.data[0]).toMatchObject({ saldo: '9000.80', valor: '1503.20' });
+      expect(body.saldos).toEqual({ saldo_anterior: '2605.14', saldo_final: '3470.10' });
+    });
+
+    it('/financial/accounts: numero_conta so com os ultimos 4; agencia, banco e ids intactos', async () => {
+      const response = await admin(`${BASE}/financial/accounts`).expect(200);
+
+      expect((response.body as { data: unknown[] }).data[0]).toEqual({
+        conta_id: 1496,
+        nome: 'Conta Ficticia',
+        tipo: { codigo: 2, descricao: 'Conta bancaria' },
+        banco: { banco_id: 5085, nome: 'Banco Ficticio' },
+        agencia: '0000',
+        numero_conta: '****7654',
+        conta_bancaria_id: 8266,
+      });
+    });
+
+    it('/fiscal/issued-invoices: emitente e destinatario mascarados; chave e totais intactos', async () => {
+      const response = await admin(`${BASE}/fiscal/issued-invoices?${PERIODO}`).expect(200);
+      const [nota] = (response.body as { data: Array<Record<string, unknown>> }).data;
+
+      expect(nota?.emitente).toMatchObject({ razao_social_id: 155, cpf_cnpj: CNPJ_MASCARADO });
+      expect(nota?.destinatario).toMatchObject({ pessoa_id: 2775, cpf_cnpj: CPF_MASCARADO });
+      expect(nota?.chave).toBe('0'.repeat(44));
+      expect(nota?.totais).toMatchObject({ total_nota: '8460.66' });
+    });
+
+    it('/organization/legal-entities: CNPJ mascarado; id e razao social intactos', async () => {
+      const response = await admin(`${BASE}/organization/legal-entities`).expect(200);
+
+      expect((response.body as { data: unknown[] }).data[0]).toMatchObject({
+        razao_social_id: 2187,
+        razao_social: 'Razao Social Ficticia',
+        cpf_cnpj: CNPJ_MASCARADO,
+      });
+    });
+
+    it('a resposta de erro do Plantae tambem nao repete documento', async () => {
+      plantaeResponde(() => jsonResponse(`{"message":"CPF ${CPF} invalido"}`, { status: 422 }));
+
+      const response = await admin(`${BASE}/people`);
+
+      expect(response.status).toBe(424);
+      for (const proibido of PROIBIDOS) {
+        expect(JSON.stringify(response.body)).not.toContain(proibido);
+      }
     });
   });
 

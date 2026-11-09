@@ -1,4 +1,4 @@
-import { applyDecorators, Controller, Get, Query } from '@nestjs/common';
+import { applyDecorators, Controller, Get, Header, Query } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   ApiBearerAuth,
@@ -15,13 +15,16 @@ import { AuditAction, AuditModuleName } from '../../audit/audit-action.enum';
 import { AuditService } from '../../audit/audit.service';
 import type { AuditMetadata } from '../../audit/entities/audit-log.entity';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
+import { RequirePermissions } from '../../auth/decorators/require-permissions.decorator';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import type { AuthenticatedUser } from '../../auth/auth.types';
+import { PermissionCode } from '../../permissions/permission-code.enum';
 import { RoleName } from '../../roles/role-name.enum';
 import { IntegrationRegistry } from '../integration-registry';
 import type { IntegrationStatusReport } from '../integration.types';
 import { PlantaeApiError } from './plantae-errors';
 import { failureCode, toHttpException } from './plantae-http-errors';
+import { maskSensitive } from './plantae-mask';
 import {
   parseAccountsQuery,
   parseEntriesQuery,
@@ -48,7 +51,10 @@ import type {
  */
 type RawQuery = Record<string, unknown>;
 
-/** Resposta de listagem: os itens exatamente como o contrato, mais o que se sabe da paginacao. */
+/**
+ * Resposta de listagem: os itens no formato do contrato (com CPF/CNPJ e numero de
+ * conta mascarados, ver `plantae-mask.ts`), mais o que se sabe da paginacao.
+ */
 interface ListResponse<T> {
   readonly data: readonly T[];
   readonly pagination: PlantaePagination;
@@ -94,9 +100,24 @@ function QueryDocs(
 }
 
 /**
- * Consultas ao Plantae. SOMENTE `GET`, SOMENTE ADMIN humano.
+ * Dado financeiro e pessoal nao fica em cache (navegador, proxy, disco). Em TODA
+ * rota: o teste de arquitetura impede uma rota nova sem ele.
+ */
+function NoStore(): MethodDecorator {
+  return Header('Cache-Control', 'no-store');
+}
+
+/**
+ * Consultas ao Plantae. SOMENTE `GET`, SOMENTE pessoa autenticada com `plantae:read`.
  *
- * - `@Roles(Admin)` na classe: qualquer outro perfil recebe 403;
+ * - `@RequirePermissions(plantae:read)` na classe: quem nao tem a permissao recebe
+ *   403 (o ADMIN passa sempre; o GESTOR so se a permissao foi concedida ao perfil);
+ * - SO do ADMIN, com `@Roles(Admin)` no METODO (o `RolesGuard` le o metodo antes da
+ *   classe; a permissao da classe continua exigida): `GET /me` (diagnostico da chave)
+ *   e `GET /fiscal/issued-invoices` (NF-e, fora do pedido financeiro da cliente).
+ *   Nao ha `@Roles` na classe;
+ * - CPF/CNPJ e numero de conta saem MASCARADOS (`plantae-mask.ts`), em qualquer nivel
+ *   da resposta, e nada e guardado em cache (`Cache-Control: no-store`);
  * - NENHUMA rota e `@Public()` nem `@ServiceRoute()`: o token de servico do n8n
  *   NAO autentica aqui (o guard de JWT exige pessoa). O n8n so le dado
  *   financeiro depois de uma fase propria, com resolucao do usuario de origem;
@@ -109,10 +130,12 @@ function QueryDocs(
  */
 @ApiTags('Plantae')
 @ApiBearerAuth('access-token')
-@Roles(RoleName.Admin)
+@RequirePermissions(PermissionCode.PlantaeRead)
 @Controller('integrations/plantae')
 @ApiUnauthorizedResponse({ description: 'Token ausente, invalido ou expirado' })
-@ApiForbiddenResponse({ description: 'Somente ADMIN' })
+@ApiForbiddenResponse({
+  description: 'Sem a permissao plantae:read (em /me e /fiscal/issued-invoices: sem ser ADMIN)',
+})
 @ApiResponse({
   status: 424,
   description:
@@ -128,6 +151,7 @@ export class PlantaeController {
   ) {}
 
   @Get('status')
+  @NoStore()
   @ApiOperation({
     summary: 'Estado da integracao com o Plantae',
     description:
@@ -142,8 +166,11 @@ export class PlantaeController {
   }
 
   @Get('me')
+  @NoStore()
+  // Diagnostico da chave: SO o ADMIN, mesmo para quem tem `plantae:read`.
+  @Roles(RoleName.Admin)
   @ApiOperation({
-    summary: 'GET /me do Plantae: integracao, organizacao e escopos da chave',
+    summary: 'GET /me do Plantae: integracao, organizacao e escopos da chave (somente ADMIN)',
     description: 'Primeiro teste de uma configuracao nova. Nao exige escopo no Plantae.',
   })
   async me(
@@ -162,6 +189,7 @@ export class PlantaeController {
   }
 
   @Get('financial/entries')
+  @NoStore()
   @QueryDocs(
     ...PERIOD_PARAMS,
     ...PAGE_PARAMS,
@@ -192,6 +220,7 @@ export class PlantaeController {
   }
 
   @Get('financial/accounts')
+  @NoStore()
   @QueryDocs(...PAGE_PARAMS, {
     name: 'tipo',
     required: false,
@@ -213,6 +242,7 @@ export class PlantaeController {
   }
 
   @Get('financial/movements')
+  @NoStore()
   @QueryDocs(
     ...PERIOD_PARAMS,
     ...PAGE_PARAMS,
@@ -239,6 +269,7 @@ export class PlantaeController {
   }
 
   @Get('financial/account-statement')
+  @NoStore()
   @QueryDocs(...PERIOD_PARAMS, ...PAGE_PARAMS, {
     name: 'conta_id',
     required: true,
@@ -268,6 +299,10 @@ export class PlantaeController {
   }
 
   @Get('fiscal/issued-invoices')
+  @NoStore()
+  // Fora do escopo autorizado para quem tem so `plantae:read` (o pedido da cliente e
+  // financeiro): SO o ADMIN. A permissao da classe continua exigida.
+  @Roles(RoleName.Admin)
   @QueryDocs(
     ...PERIOD_PARAMS,
     ...PAGE_PARAMS,
@@ -276,7 +311,7 @@ export class PlantaeController {
     { name: 'operacao', required: false, description: 'entrada | saida' },
   )
   @ApiOperation({
-    summary: 'NF-e (modelo 55) emitidas',
+    summary: 'NF-e (modelo 55) emitidas (somente ADMIN)',
     description:
       'Somente DADOS de NF-e de producao, autorizadas ou canceladas. A API nao entrega XML nem ' +
       'DANFE, e isto NAO e NFS-e.',
@@ -293,6 +328,7 @@ export class PlantaeController {
   }
 
   @Get('organization/legal-entities')
+  @NoStore()
   @QueryDocs(...PAGE_PARAMS)
   @ApiOperation({ summary: 'Razoes sociais da organizacao' })
   async legalEntities(
@@ -307,6 +343,7 @@ export class PlantaeController {
   }
 
   @Get('people')
+  @NoStore()
   @QueryDocs(...PAGE_PARAMS, {
     name: 'busca',
     required: false,
@@ -315,7 +352,7 @@ export class PlantaeController {
   @ApiOperation({
     summary: 'Pessoas cadastradas (clientes, fornecedores, colaboradores)',
     description:
-      'Traz CPF/CNPJ: dado pessoal. O termo de `busca` nunca vai para log nem para auditoria.',
+      'CPF/CNPJ sai MASCARADO (dado pessoal). O termo de `busca` nunca vai para log nem para auditoria.',
   })
   async people(
     @Query() query: RawQuery,
@@ -336,7 +373,7 @@ export class PlantaeController {
     call: () => Promise<PlantaePage<T>>,
   ): Promise<ListResponse<T>> {
     const page = await this.execute(endpoint, actor, ip, audited, call, measure);
-    return { data: page.items, pagination: page.pagination };
+    return { data: maskSensitive(page.items), pagination: page.pagination };
   }
 
   /**
@@ -412,7 +449,7 @@ function period(filter: { dataInicio: string; dataFim: string }): AuditMetadata 
 
 function statementResponse(page: PlantaeStatementPage): StatementResponse {
   return {
-    data: page.items,
+    data: maskSensitive(page.items),
     pagination: page.pagination,
     saldos: { saldo_anterior: page.saldoAnterior, saldo_final: page.saldoFinal },
   };

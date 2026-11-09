@@ -74,9 +74,26 @@ export const CONTAS_PAGAR_USAGE =
   'Uso: /contas_pagar  (vencimentos de hoje ate 7 dias)  ou  ' +
   `/contas_pagar AAAA-MM-DD AAAA-MM-DD  (periodo de ate ${String(MAX_CHAT_WINDOW_DAYS)} dias).`;
 
-/** Mensagens de indisponibilidade. Fixas: nada do Plantae e repetido. */
-export const CONTAS_PAGAR_MESSAGES = {
-  chatDisabled: 'A consulta de contas a pagar por este canal esta desativada neste ambiente.',
+export const CONTAS_RECEBER_USAGE =
+  'Uso: /contas_receber  (vencimentos de hoje ate 7 dias)  ou  ' +
+  `/contas_receber AAAA-MM-DD AAAA-MM-DD  (periodo de ate ${String(MAX_CHAT_WINDOW_DAYS)} dias).`;
+
+/** Mensagens de um comando de parcelas. Fixas: nada do Plantae e repetido. */
+export interface EntriesCommandMessages {
+  readonly chatDisabled: string;
+  readonly integrationDisabled: string;
+  readonly organizationNotConfirmed: string;
+  readonly notConfigured: string;
+  readonly credentialRefused: string;
+  readonly rateLimited: string;
+  readonly rejected: string;
+  readonly unavailable: string;
+  readonly throttled: string;
+  readonly empty: string;
+}
+
+/** Comuns aos dois comandos: falhas da integracao nao dependem de pagar ou receber. */
+const SHARED_MESSAGES = {
   integrationDisabled: 'A integracao com o Plantae esta desativada neste ambiente.',
   organizationNotConfirmed:
     'Consulta bloqueada: a organizacao do Plantae ainda nao foi confirmada. Avise quem administra o sistema.',
@@ -86,9 +103,79 @@ export const CONTAS_PAGAR_MESSAGES = {
   rateLimited: 'Limite de consultas ao Plantae atingido. Tente novamente em instantes.',
   rejected: 'O Plantae rejeitou os parametros da consulta.',
   unavailable: 'O Plantae esta indisponivel no momento. Tente novamente mais tarde.',
+} as const;
+
+/** Mensagens de indisponibilidade. Fixas: nada do Plantae e repetido. */
+export const CONTAS_PAGAR_MESSAGES = {
+  ...SHARED_MESSAGES,
+  chatDisabled: 'A consulta de contas a pagar por este canal esta desativada neste ambiente.',
   throttled: 'Muitas consultas de contas a pagar em pouco tempo. Tente novamente em instantes.',
   empty: 'Nenhuma conta a pagar pendente com vencimento no periodo.',
-} as const;
+} as const satisfies EntriesCommandMessages;
+
+export const CONTAS_RECEBER_MESSAGES = {
+  ...SHARED_MESSAGES,
+  chatDisabled: 'A consulta de contas a receber por este canal esta desativada neste ambiente.',
+  throttled: 'Muitas consultas de contas a receber em pouco tempo. Tente novamente em instantes.',
+  empty: 'Nenhuma conta a receber pendente com vencimento no periodo.',
+} as const satisfies EntriesCommandMessages;
+
+/**
+ * O que diferencia `/contas_pagar` de `/contas_receber`. TODO o resto - portoes,
+ * periodo, limite por pessoa, prazo, filtro de pendentes, formatacao, auditoria e
+ * minimizacao de dados - e o MESMO codigo (`PendingEntriesCommandHandler`).
+ */
+export interface EntriesCommandSpec {
+  readonly name: string;
+  readonly description: string;
+  /** Filtro `tipo` do Plantae. */
+  readonly tipo: 'despesa' | 'receita';
+  /** Segunda linha da resposta. */
+  readonly title: string;
+  readonly usage: string;
+  readonly messages: EntriesCommandMessages;
+  /** Aviso de parcela que ja teve `total_pago` diferente de zero. */
+  readonly partialNotice: string;
+  /**
+   * Se `PLANTAE_CHAT_SHOW_PAYEE_NAME` pode mostrar o nome da contraparte. So o
+   * favorecido de contas a pagar; em contas a receber o nome do CLIENTE nunca sai.
+   */
+  readonly counterpartNameAllowed: boolean;
+}
+
+export const CONTAS_PAGAR_SPEC: EntriesCommandSpec = {
+  name: 'contas_pagar',
+  description: 'Contas a pagar pendentes no Plantae (somente consulta)',
+  tipo: 'despesa',
+  title: 'Contas a pagar pendentes (Plantae)',
+  usage: CONTAS_PAGAR_USAGE,
+  messages: CONTAS_PAGAR_MESSAGES,
+  partialNotice: 'JA TEVE PAGAMENTO PARCIAL (confira no Plantae)',
+  counterpartNameAllowed: true,
+};
+
+export const CONTAS_RECEBER_SPEC: EntriesCommandSpec = {
+  name: 'contas_receber',
+  description: 'Contas a receber pendentes no Plantae (somente consulta)',
+  tipo: 'receita',
+  title: 'Contas a receber pendentes (Plantae)',
+  usage: CONTAS_RECEBER_USAGE,
+  messages: CONTAS_RECEBER_MESSAGES,
+  partialNotice: 'JA TEVE RECEBIMENTO PARCIAL (confira no Plantae)',
+  counterpartNameAllowed: false,
+};
+
+/**
+ * Limite de consultas por pessoa COMPARTILHADO pelos comandos de parcelas: pagar e
+ * receber gastam a mesma cota (3/min), para que ter dois comandos nao dobre o
+ * volume que uma identidade pode tirar do Plantae.
+ */
+export function createPlantaeChatLimiter(): SlidingWindowLimiter {
+  return new SlidingWindowLimiter(CHAT_QUERIES_PER_MINUTE, 60_000);
+}
+
+/** Token de injecao do limitador compartilhado (`createPlantaeChatLimiter`). */
+export const PLANTAE_CHAT_LIMITER = 'PLANTAE_CHAT_LIMITER';
 
 /**
  * `/contas_pagar` - contas a pagar PENDENTES do Plantae, por vencimento.
@@ -127,10 +214,14 @@ export const CONTAS_PAGAR_MESSAGES = {
  * ATENCAO DE CONFIDENCIALIDADE: o Telegram NAO e ponta a ponta nas conversas
  * comuns; o texto fica nos servidores dele. Por isso este comando e opt-in e
  * restrito a permissao propria.
+ *
+ * `/contas_receber` e o MESMO handler com `CONTAS_RECEBER_SPEC` (tipo `receita`): mesmos
+ * portoes, flags, periodo, limite, prazo e auditoria. A unica diferenca de dados: o nome
+ * do CLIENTE nunca sai, nem com `PLANTAE_CHAT_SHOW_PAYEE_NAME` ligado.
  */
-export class AccountsPayableCommandHandler implements CommandHandler {
-  readonly name = 'contas_pagar';
-  readonly description = 'Contas a pagar pendentes no Plantae (somente consulta)';
+export class PendingEntriesCommandHandler implements CommandHandler {
+  readonly name: string;
+  readonly description: string;
   readonly permission = PermissionCode.PlantaeRead;
   // Auditoria opt-in do motor: grava QUEM executou e o desfecho, sem texto nem dado
   // de negocio (ver `CommandRouter.recordAudit`).
@@ -140,48 +231,43 @@ export class AccountsPayableCommandHandler implements CommandHandler {
   };
 
   constructor(
+    private readonly spec: EntriesCommandSpec,
     private readonly service: PlantaeService,
     private readonly config: ConfigReader,
     private readonly now: () => Date = (): Date => new Date(),
-    private readonly limiter: SlidingWindowLimiter = new SlidingWindowLimiter(
-      CHAT_QUERIES_PER_MINUTE,
-      60_000,
-    ),
-  ) {}
+    private readonly limiter: SlidingWindowLimiter = createPlantaeChatLimiter(),
+  ) {
+    this.name = spec.name;
+    this.description = spec.description;
+  }
 
   async handle(context: CommandContext): Promise<CommandResult> {
+    const messages = this.spec.messages;
     if (this.config.get<unknown>(PLANTAE_CHAT_COMMANDS_KEY) !== true) {
-      return unavailable(CONTAS_PAGAR_MESSAGES.chatDisabled, 'comando_desligado');
+      return unavailable(messages.chatDisabled, 'comando_desligado');
     }
     // FAIL-CLOSED: sem o atestado da organizacao nao se consulta o Plantae.
     if (this.config.get<unknown>(PLANTAE_ORGANIZATION_CONFIRMED_KEY) !== true) {
-      return unavailable(
-        CONTAS_PAGAR_MESSAGES.organizationNotConfirmed,
-        'organizacao_nao_confirmada',
-      );
+      return unavailable(messages.organizationNotConfirmed, 'organizacao_nao_confirmada');
     }
     if (!resolvePlantaeSettings(this.config).enabled) {
-      return unavailable(CONTAS_PAGAR_MESSAGES.integrationDisabled, 'integracao_desligada');
+      return unavailable(messages.integrationDisabled, 'integracao_desligada');
     }
 
     const period = this.resolvePeriod(context.text);
     if (period === null) {
-      return commandFailure(
-        CommandOutcome.MalformedCommand,
-        CONTAS_PAGAR_USAGE,
-        'periodo_invalido',
-      );
+      return commandFailure(CommandOutcome.MalformedCommand, this.spec.usage, 'periodo_invalido');
     }
 
     // Por PESSOA (nao global): quem insiste so se limita a si. So conta consulta valida.
     if (!this.limiter.take(context.user.id).allowed) {
-      return unavailable(CONTAS_PAGAR_MESSAGES.throttled, 'limite_pessoa');
+      return unavailable(messages.throttled, 'limite_pessoa');
     }
 
     try {
       const page = await withDeadline(
         this.service.listEntries({
-          tipo: 'despesa',
+          tipo: this.spec.tipo,
           status: [0],
           dataInicio: period.from,
           dataFim: period.to,
@@ -195,9 +281,13 @@ export class AccountsPayableCommandHandler implements CommandHandler {
       const shown = pending.slice(0, CHAT_PAGE_SIZE);
       const ignored = page.items.length - pending.length;
       const hasMore = pending.length > shown.length ? true : page.pagination.hasMore;
-      const showPayee = this.config.get<unknown>(PLANTAE_CHAT_SHOW_PAYEE_KEY) === true;
+      // Nome da contraparte: so onde a especificacao permite E com a politica ligada.
+      const showPayee =
+        this.spec.counterpartNameAllowed &&
+        this.config.get<unknown>(PLANTAE_CHAT_SHOW_PAYEE_KEY) === true;
       return commandOk(
         formatReply(period, shown, hasMore, {
+          spec: this.spec,
           showPayee,
           ignored,
           environment: resolvePlantaeSettings(this.config).environment,
@@ -206,17 +296,13 @@ export class AccountsPayableCommandHandler implements CommandHandler {
       );
     } catch (error) {
       if (error instanceof PlantaeInputError) {
-        return commandFailure(
-          CommandOutcome.MalformedCommand,
-          CONTAS_PAGAR_USAGE,
-          'periodo_invalido',
-        );
+        return commandFailure(CommandOutcome.MalformedCommand, this.spec.usage, 'periodo_invalido');
       }
       if (error instanceof PlantaeApiError) {
-        return unavailable(messageFor(error), detailFor(error));
+        return unavailable(messageFor(error, messages), detailFor(error));
       }
       if (error instanceof DeadlineError) {
-        return unavailable(CONTAS_PAGAR_MESSAGES.unavailable, 'prazo_excedido');
+        return unavailable(messages.unavailable, 'prazo_excedido');
       }
       throw error; // bug de programacao: o router responde com o texto generico
     }
@@ -247,6 +333,30 @@ export class AccountsPayableCommandHandler implements CommandHandler {
   }
 }
 
+/** `/contas_pagar`: parcelas PENDENTES de despesa. */
+export class AccountsPayableCommandHandler extends PendingEntriesCommandHandler {
+  constructor(
+    service: PlantaeService,
+    config: ConfigReader,
+    now?: () => Date,
+    limiter?: SlidingWindowLimiter,
+  ) {
+    super(CONTAS_PAGAR_SPEC, service, config, now, limiter);
+  }
+}
+
+/** `/contas_receber`: parcelas PENDENTES de receita. Nunca mostra o nome do cliente. */
+export class AccountsReceivableCommandHandler extends PendingEntriesCommandHandler {
+  constructor(
+    service: PlantaeService,
+    config: ConfigReader,
+    now?: () => Date,
+    limiter?: SlidingWindowLimiter,
+  ) {
+    super(CONTAS_RECEBER_SPEC, service, config, now, limiter);
+  }
+}
+
 /** Status documentado do Plantae para parcela PENDENTE (1 quitada, 2 substituida). */
 const PENDING_STATUS = 0;
 
@@ -274,21 +384,21 @@ function detailFor(error: PlantaeApiError): string {
   }
 }
 
-function messageFor(error: PlantaeApiError): string {
+function messageFor(error: PlantaeApiError, messages: EntriesCommandMessages): string {
   switch (error.kind) {
     case 'disabled':
-      return CONTAS_PAGAR_MESSAGES.integrationDisabled;
+      return messages.integrationDisabled;
     case 'not-configured':
-      return CONTAS_PAGAR_MESSAGES.notConfigured;
+      return messages.notConfigured;
     case 'unauthorized':
     case 'forbidden':
-      return CONTAS_PAGAR_MESSAGES.credentialRefused;
+      return messages.credentialRefused;
     case 'rate-limited':
-      return CONTAS_PAGAR_MESSAGES.rateLimited;
+      return messages.rateLimited;
     case 'rejected-parameters':
-      return CONTAS_PAGAR_MESSAGES.rejected;
+      return messages.rejected;
     default:
-      return CONTAS_PAGAR_MESSAGES.unavailable;
+      return messages.unavailable;
   }
 }
 
@@ -322,6 +432,8 @@ function withDeadline<T>(promise: Promise<T>, ms: number): Promise<T> {
 // --- formatacao --------------------------------------------------------------
 
 interface ReplyOptions {
+  readonly spec: EntriesCommandSpec;
+  /** Ja combina a politica com o que a especificacao permite. */
   readonly showPayee: boolean;
   /** Itens devolvidos pelo Plantae que NAO eram pendentes e foram descartados. */
   readonly ignored: number;
@@ -335,16 +447,17 @@ function formatReply(
   hasMore: boolean | null,
   options: ReplyOptions,
 ): string {
-  const head = `${bannerFor(options.environment)}\nContas a pagar pendentes (Plantae)\nVencimento: ${formatDate(period.from)} a ${formatDate(period.to)}`;
+  const head = `${bannerFor(options.environment)}\n${options.spec.title}\nVencimento: ${formatDate(period.from)} a ${formatDate(period.to)}`;
   const note =
     options.ignored > 0
       ? [`Obs.: ${String(options.ignored)} item(ns) fora do status pendente foram ignorados.`]
       : [];
   if (items.length === 0) {
-    return [head, CONTAS_PAGAR_MESSAGES.empty, ...note].join('\n');
+    return [head, options.spec.messages.empty, ...note].join('\n');
   }
   const lines = items.map(
-    (entry, index) => `${String(index + 1)}) ${formatLine(entry, options.showPayee)}`,
+    (entry, index) =>
+      `${String(index + 1)}) ${formatLine(entry, options.showPayee, options.spec.partialNotice)}`,
   );
   const tail =
     hasMore === true
@@ -360,7 +473,7 @@ function isNonZeroDecimal(value: string | null): boolean {
   return value !== null && !/^-?0*(\.0*)?$/.test(value);
 }
 
-function formatLine(entry: PlantaeEntry, showPayee: boolean): string {
+function formatLine(entry: PlantaeEntry, showPayee: boolean, partialNotice: string): string {
   const due = entry.data_vencto === null ? 'sem vencimento' : formatDate(entry.data_vencto);
   const symbol = cleanText(entry.titulo.moeda?.simbolo ?? '', SYMBOL_MAX);
   const money =
@@ -376,9 +489,7 @@ function formatLine(entry: PlantaeEntry, showPayee: boolean): string {
     ? ` - ${cleanText(entry.pessoa?.nome ?? entry.pessoa?.razao_social ?? '', NAME_MAX) || 'sem nome'}`
     : '';
   // Nao se calcula saldo (semantica de `saldo_atual` nao documentada): so se avisa.
-  const partial = isNonZeroDecimal(entry.total_pago)
-    ? ' - JA TEVE PAGAMENTO PARCIAL (confira no Plantae)'
-    : '';
+  const partial = isNonZeroDecimal(entry.total_pago) ? ` - ${partialNotice}` : '';
   return `${due} - ${money}${installment}${reference}${who}${partial}`;
 }
 

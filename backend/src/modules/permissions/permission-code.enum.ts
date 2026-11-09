@@ -30,10 +30,12 @@ export enum PermissionCode {
   DocumentsRead = 'documents:read',
   DocumentsCreate = 'documents:create',
 
-  // Consulta a dados financeiros EXTERNOS (Plantae) pelos canais de mensageria.
+  // Consulta a dados financeiros EXTERNOS (Plantae): rotas HTTP do painel
+  // (`/integrations/plantae/*`, exceto `/me`, que e so do ADMIN) e canais de mensageria.
   // Permissao propria, e nao `finance:read`: aquela cobre o financeiro LOCAL, e
   // reaproveita-la daria ao GESTOR (que a tem) acesso aos dados da cliente no
-  // Plantae sem decisao nenhuma. So o ADMIN a tem por padrao; ampliar e decisao.
+  // Plantae sem decisao nenhuma. So o ADMIN a tem por padrao; ampliar e decisao
+  // (concedida a um perfil direto no banco, com autorizacao do contratante).
   PlantaeRead = 'plantae:read',
 
   // NFS-e. Documento fiscal tem efeito legal: permissoes PROPRIAS e sem nenhum perfil que as tenha
@@ -59,7 +61,7 @@ export const PERMISSION_DESCRIPTIONS: Record<PermissionCode, string> = {
   [PermissionCode.DocumentsRead]: 'Listar e baixar documentos',
   [PermissionCode.DocumentsCreate]: 'Enviar documentos',
   [PermissionCode.PlantaeRead]:
-    'Consultar dados financeiros do Plantae pelos canais (somente leitura)',
+    'Consultar dados financeiros do Plantae no painel e pelos canais (somente leitura)',
   [PermissionCode.NfseEmit]: 'Solicitar e confirmar a emissao de NFS-e pelos canais',
   [PermissionCode.NfseRead]: 'Consultar a situacao de NFS-e emitidas pelos canais',
 };

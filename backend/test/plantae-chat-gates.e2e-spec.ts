@@ -14,7 +14,10 @@ import {
   signEnvelope,
   type TelegramEnvelope,
 } from '../src/modules/integrations/telegram/telegram-envelope';
-import { CONTAS_PAGAR_MESSAGES } from '../src/modules/integrations/plantae/plantae-accounts-payable.command';
+import {
+  CONTAS_PAGAR_MESSAGES,
+  CONTAS_RECEBER_MESSAGES,
+} from '../src/modules/integrations/plantae/plantae-accounts-payable.command';
 import { RoleName } from '../src/modules/roles/role-name.enum';
 import {
   addCredential,
@@ -219,15 +222,52 @@ describe('Portoes do comando financeiro no chat (e2e)', () => {
     expect(chamadasAoPlantae()).toBe(0);
   });
 
-  it('vinculo REVOGADO corta o acesso na mensagem seguinte', async () => {
+  describe('/contas_receber passa pelos MESMOS portoes', () => {
+    it('organizacao nao confirmada: bloqueado, Plantae nao e chamado, auditado com o comando', async () => {
+      const out = await ingerir(adminTg, '/contas_receber');
+
+      expect(out.outcome).toBe('FAILED');
+      expect(out.reply).toBe(CONTAS_RECEBER_MESSAGES.organizationNotConfirmed);
+      expect(chamadasAoPlantae()).toBe(0);
+      const eventos = await auditoria('PLANTAE_QUERIED');
+      expect(
+        eventos.find((e) => e.usuarioId === adminId && e.metadados?.comando === 'contas_receber')
+          ?.metadados,
+      ).toMatchObject({ canal: 'telegram', detalhe: 'organizacao_nao_confirmada' });
+    });
+
+    it('OPERADOR vinculado sem plantae:read: negado pelo RBAC, sem Plantae', async () => {
+      const out = await ingerir(operadorTg, '/contas_receber');
+
+      expect(out.outcome).toBe('DENIED');
+      expect(out.reply).not.toContain('Contas a receber');
+      expect(chamadasAoPlantae()).toBe(0);
+    });
+
+    it('usuario NAO vinculado: UNLINKED, nada consultado', async () => {
+      const out = await ingerir(novoTg(), '/contas_receber');
+
+      expect(out.outcome).toBe('UNLINKED');
+      expect(chamadasAoPlantae()).toBe(0);
+    });
+
+    it('token de servico sem o escopo do Telegram: 403', async () => {
+      await enviar(adminTg, '/contas_receber', tokenIdentity).expect(403);
+      expect(chamadasAoPlantae()).toBe(0);
+    });
+  });
+
+  it('vinculo REVOGADO corta o acesso na mensagem seguinte (pagar e receber)', async () => {
     await request(server())
       .delete(`/users/${adminId}/external-identities/${linkAdminId}`)
       .set('Authorization', `Bearer ${adminJwt}`)
       .expect(204);
 
     const out = await ingerir(adminTg, '/contas_pagar');
+    const receber = await ingerir(adminTg, '/contas_receber');
 
     expect(out.outcome).toBe('UNLINKED');
+    expect(receber.outcome).toBe('UNLINKED');
     expect(chamadasAoPlantae()).toBe(0);
   });
 });

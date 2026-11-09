@@ -17,7 +17,11 @@ import {
 } from '../src/modules/integrations/telegram/telegram-envelope';
 import { TelegramAdapter } from '../src/modules/integrations/telegram/telegram.adapter';
 import { TelegramApiClient } from '../src/modules/integrations/telegram/telegram-api.client';
+import { PermissionCode } from '../src/modules/permissions/permission-code.enum';
+import { PermissionsService } from '../src/modules/permissions/permissions.service';
 import { RoleName } from '../src/modules/roles/role-name.enum';
+import { RolesRepository } from '../src/modules/roles/roles.repository';
+import { RolesService } from '../src/modules/roles/roles.service';
 import {
   addCredential,
   EMPTY_CREDENTIALS_FILE,
@@ -441,6 +445,75 @@ describe('Entrada do Telegram pelo n8n (e2e)', () => {
       expect(out.outcome).toBe('DENIED');
       expect(chamadasAoPlantae()).toBe(0);
       expect(out.reply).not.toContain('Contas a pagar pendentes');
+    });
+
+    it('NAO vinculado + /contas_receber: nao consulta o Plantae', async () => {
+      const out = await ingerir({
+        userId: naoVinculado,
+        chatId: naoVinculado,
+        text: '/contas_receber',
+      });
+
+      expect(out.outcome).toBe('UNLINKED');
+      expect(chamadasAoPlantae()).toBe(0);
+    });
+
+    it('OPERADOR vinculado SEM plantae:read + /contas_receber: DENIED e o Plantae nem e chamado', async () => {
+      const out = await ingerir({
+        userId: operadorTelegram,
+        chatId: operadorTelegram,
+        text: '/contas_receber',
+      });
+
+      expect(out.outcome).toBe('DENIED');
+      expect(chamadasAoPlantae()).toBe(0);
+    });
+
+    it('vinculado COM plantae:read + /contas_receber pelo envelope do n8n: receitas pendentes, sem dado pessoal', async () => {
+      // Usa o OPERADOR (cota propria do limitador por pessoa), com `plantae:read` concedida ao
+      // PERFIL so durante o teste - como foi feito com o GESTOR em producao.
+      const roles = app.get(RolesService, { strict: false });
+      const todas = await app.get(PermissionsService, { strict: false }).findAll();
+      const plantaeRead = todas.filter((p) => p.code === String(PermissionCode.PlantaeRead));
+      await roles.addPermissions(await roles.getByName(RoleName.Operador), plantaeRead);
+      fetchSpy.mockImplementation(() =>
+        Promise.resolve(
+          jsonResponse(
+            listJson([entryJson(482, { statusCode: 0 })], { endpoint: 'financial/entries' }),
+          ),
+        ),
+      );
+
+      try {
+        const out = await ingerir({
+          userId: operadorTelegram,
+          chatId: operadorTelegram,
+          text: '/contas_receber',
+        });
+
+        expect(out.outcome).toBe('EXECUTED');
+        expect(out.reply).toContain('Contas a receber pendentes');
+        expect(out.reply).not.toContain('Contas a pagar');
+        expect(out.reply).toContain('8.337,10');
+        expect(out.reply).toMatch(/ref 482/);
+        expect(out.reply).not.toContain('000.000.000-00');
+        expect(out.reply).not.toContain('Pessoa Ficticia');
+        expect(out.reply).not.toContain('DOC-001');
+        expect(chamadasAoPlantae()).toBe(1);
+        const [url, init] = fetchSpy.mock.calls[0] as [string | URL, RequestInit];
+        expect(init.method).toBe('GET');
+        const u = new URL(String(url));
+        expect(u.pathname).toBe('/api/v1/external/financial/entries');
+        expect(u.searchParams.get('tipo')).toBe('receita');
+        expect(u.searchParams.getAll('status[]')).toEqual(['0']);
+        expect(u.searchParams.get('per_page')).toBe('5');
+      } finally {
+        const operadorRole = await roles.getByName(RoleName.Operador);
+        operadorRole.permissions = operadorRole.permissions.filter(
+          (p) => p.code !== String(PermissionCode.PlantaeRead),
+        );
+        await app.get(RolesRepository, { strict: false }).save(operadorRole);
+      }
     });
 
     it('comando desconhecido e texto comum: resposta de ajuda, sem executar nada', async () => {
