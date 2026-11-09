@@ -15,9 +15,14 @@ export function PrivacyPolicyPage(): ReactNode {
           <p className="brand">VastaFlow</p>
           <h1>Política de Privacidade</h1>
           <p className="muted">
-            Data de vigência: 28/10/2026. Texto aprovado em 28/10/2026 por
-            Rizola, responsável indicada pela Vasta para o contato sobre
-            privacidade.
+            <strong>Atualização pendente de aprovação.</strong> Esta versão
+            acrescenta a descrição das consultas ao Plantae (item 3.5) e ainda
+            não foi aprovada pela Vasta.
+          </p>
+          <p className="muted">
+            Versão anterior: data de vigência 28/10/2026, texto aprovado em
+            28/10/2026 por Rizola, responsável indicada pela Vasta para o
+            contato sobre privacidade.
           </p>
         </header>
 
@@ -57,8 +62,9 @@ export function PrivacyPolicyPage(): ReactNode {
             usuário.
           </p>
           <p>
-            Além dos usuários, os documentos e lançamentos do sistema podem
-            conter dados pessoais de clientes, fornecedores e colaboradores.
+            Além dos usuários, os documentos e lançamentos do sistema, assim
+            como as informações consultadas no Plantae (item 3.5), podem conter
+            dados pessoais de clientes, fornecedores e colaboradores.
           </p>
         </section>
 
@@ -144,11 +150,73 @@ export function PrivacyPolicyPage(): ReactNode {
             sistema não possui campos específicos para esses dados.
           </p>
           <p>
-            Recursos de emissão de nota fiscal de serviço (NFS-e) e de consulta
-            à Plantae existem no código, mas estão <strong>desligados</strong>.
-            Se forem ativados, esta política será atualizada antes (a NFS-e
-            trataria nome e CPF/CNPJ do tomador do serviço).
+            Recursos de emissão de nota fiscal de serviço (NFS-e) existem no
+            código, mas estão <strong>desligados</strong>. Se forem ativados,
+            esta política será atualizada antes (a NFS-e trataria nome e
+            CPF/CNPJ do tomador do serviço).
           </p>
+
+          <h3>3.5 Consultas ao Plantae</h3>
+          <p>
+            A Vasta utiliza o Plantae como sistema de gestão financeira. O
+            VastaFlow consulta o Plantae <strong>em tempo real</strong> e{" "}
+            <strong>somente para leitura</strong>: não cria, altera nem exclui
+            informações no Plantae.
+          </p>
+          <ul>
+            <li>
+              As consultas são permitidas apenas a usuários com permissão
+              específica para isso, concedida pela Vasta.
+            </li>
+            <li>
+              No painel do sistema, esses usuários podem consultar contas a
+              pagar e a receber, movimentações, extratos, contas bancárias e
+              cadastros de pessoas e empresas. Os resultados incluem valores,
+              datas, descrições e os nomes de pessoas e empresas (clientes,
+              fornecedores e colaboradores) registrados no Plantae.
+            </li>
+            <li>
+              CPF, CNPJ e números de contas bancárias são exibidos{" "}
+              <strong>mascarados</strong>, com apenas parte dos dígitos visível.
+              O mascaramento é feito pelo servidor do VastaFlow, antes de a
+              informação chegar ao navegador.
+            </li>
+            <li>
+              O VastaFlow não armazena os resultados das consultas financeiras
+              em suas tabelas operacionais. Os registros de auditoria são
+              mantidos separadamente. As informações transmitidas pelos canais
+              de mensagens também estão sujeitas ao tratamento e à retenção
+              técnica descritos nesta política. No navegador, os resultados
+              ficam apenas na tela enquanto a consulta está aberta, sem
+              armazenamento local, e as respostas são enviadas com a instrução
+              de não serem guardadas em cache.
+            </li>
+            <li>
+              Pelos canais de mensagens, os comandos de contas a pagar e a
+              receber devolvem um resumo financeiro (vencimento, valor, parcela
+              e um número de referência), sem CPF/CNPJ e sem o nome de clientes.
+              O nome de fornecedores só seria exibido se essa opção fosse
+              ativada na configuração do sistema; na configuração atual, ela
+              está desativada.
+            </li>
+            <li>
+              As conversas com o assistente no Telegram{" "}
+              <strong>
+                não são protegidas por criptografia de ponta a ponta
+              </strong>
+              : as mensagens, inclusive essas respostas, ficam nos servidores do
+              Telegram, conforme a política dele. O caminho dessas mensagens
+              dentro do sistema está descrito no item 6.
+            </li>
+            <li>
+              Registros de auditoria: cada consulta gera um registro de quem
+              consultou, quando, qual consulta ou comando foi usado e o
+              resultado (sucesso ou falha); nas consultas pelo painel, também o
+              período pesquisado e a quantidade de itens retornados. Esses
+              registros são distintos das informações consultadas e não guardam
+              valores, nomes, documentos nem os termos de busca.
+            </li>
+          </ul>
         </section>
 
         <section>
@@ -159,6 +227,11 @@ export function PrivacyPolicyPage(): ReactNode {
               fazer.
             </li>
             <li>Operar a gestão financeira e documental da empresa.</li>
+            <li>
+              Consultar, em tempo real e somente para leitura, as informações
+              financeiras da Vasta registradas no Plantae, por usuários
+              autorizados.
+            </li>
             <li>
               Permitir consultas e comandos pelo WhatsApp e pelo Telegram por
               usuários vinculados.
@@ -200,6 +273,13 @@ export function PrivacyPolicyPage(): ReactNode {
               mensagens.
             </li>
             <li>
+              Plantae, sistema de gestão financeira utilizado pela Vasta, onde
+              as informações financeiras já estão registradas. O VastaFlow envia
+              ao Plantae apenas os parâmetros de cada consulta (como período,
+              filtros e, na busca de cadastros, o termo pesquisado) e recebe os
+              resultados (item 3.5).
+            </li>
+            <li>
               Hostinger, como provedora terceirizada de hospedagem do servidor
               (VPS) em que o sistema funciona. Localização do datacenter:
               Campinas, São Paulo, Brasil.
@@ -216,10 +296,18 @@ export function PrivacyPolicyPage(): ReactNode {
             do Brasil, conforme as suas próprias políticas.
           </p>
           <p>
-            O sistema usa o n8n para orquestrar o fluxo do Telegram. O conteúdo
-            transitório das mensagens do Telegram fica registrado nele por
-            alguns minutos antes de ser apagado, conforme a configuração de
-            limpeza existente.
+            O sistema usa o n8n, instalado no próprio servidor, para orquestrar
+            o fluxo do Telegram. Cada mensagem enviada ao assistente passa por
+            ele, e a resposta do sistema também passa por ele para ser entregue
+            (nas consultas ao Plantae, essa resposta contém o resumo financeiro
+            descrito no item 3.5). O n8n não é configurado para manter o
+            histórico dessas execuções, mas grava temporariamente, no seu banco
+            de dados interno, o texto do comando recebido e identificadores do
+            Telegram. O conteúdo transitório das mensagens do Telegram fica
+            registrado nele por alguns minutos antes de ser apagado, conforme a
+            configuração de limpeza existente. Resquícios técnicos podem
+            permanecer por mais tempo em estruturas internas desse banco de
+            dados e em cópias de segurança feitas nesse intervalo.
           </p>
           <p>
             Transferência internacional: a análise jurídica sobre eventual
@@ -264,6 +352,12 @@ export function PrivacyPolicyPage(): ReactNode {
               Verificação de assinatura das notificações recebidas da Meta.
             </li>
             <li>Registros de auditoria sem o conteúdo das mensagens.</li>
+            <li>
+              Consultas ao Plantae restritas a usuários com permissão
+              específica, com CPF/CNPJ e números de contas bancárias mascarados
+              pelo servidor e sem armazenamento dos resultados nas tabelas
+              operacionais do sistema.
+            </li>
             <li>Documentos em área privada, sem acesso público direto.</li>
           </ul>
           <p>

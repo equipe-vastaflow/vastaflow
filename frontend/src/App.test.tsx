@@ -320,6 +320,92 @@ describe('/privacidade: descricao fiel ao estado operacional', () => {
   });
 });
 
+describe('/privacidade: Plantae ativo, descrito como realmente funciona', () => {
+  const texto = (): string => {
+    mockApi({});
+    renderAt('/privacidade');
+    return document.body.textContent ?? '';
+  };
+
+  it('nao diz mais que o Plantae esta desligado; a NFS-e continua desligada', () => {
+    const text = texto();
+    expect(text).not.toMatch(/consulta\s+à Plantae existem no código/);
+    expect(text).not.toMatch(/Plantae[^.]*desligad/);
+    expect(text).toMatch(/nota fiscal de serviço \(NFS-e\) existem no código, mas estão desligados/);
+    expect(screen.getByRole('heading', { name: '3.5 Consultas ao Plantae' })).toBeInTheDocument();
+  });
+
+  it('consulta em tempo real, somente leitura, so para usuarios autorizados', () => {
+    const text = texto();
+    expect(text).toMatch(/consulta o Plantae em tempo real e somente para leitura/);
+    expect(text).toMatch(/não cria, altera nem exclui informações no Plantae/);
+    expect(text).toMatch(/apenas a usuários com permissão específica/);
+    expect(text).toMatch(/nomes de pessoas e empresas \(clientes, fornecedores e colaboradores\)/);
+  });
+
+  it('CPF/CNPJ e contas mascarados pelo servidor; armazenamento descrito sem afirmacao absoluta', () => {
+    const text = texto();
+    expect(text).toMatch(/CPF, CNPJ e números de contas bancárias são exibidos mascarados/);
+    expect(text).toMatch(/feito pelo servidor do VastaFlow, antes de a informação chegar ao navegador/);
+    expect(text).toMatch(
+      /O VastaFlow não armazena os resultados das consultas financeiras em suas tabelas operacionais\. Os registros de auditoria são mantidos separadamente\. As informações transmitidas pelos canais de mensagens também estão sujeitas ao tratamento e à retenção técnica descritos nesta política\./,
+    );
+    expect(text).toMatch(/sem armazenamento dos resultados nas tabelas operacionais do sistema/);
+    expect(text).not.toMatch(/não são gravadas no banco de dados|sem gravação das informações consultadas/);
+    expect(text).toMatch(/não serem guardadas em cache/);
+  });
+
+  it('comandos de chat: resumo sem CPF/CNPJ nem nome de clientes; fornecedor so por configuracao', () => {
+    const text = texto();
+    expect(text).toMatch(/sem CPF\/CNPJ e sem o nome de clientes/);
+    expect(text).toMatch(/na configuração atual, ela está desativada/);
+  });
+
+  it('Telegram: nunca afirma criptografia de ponta a ponta', () => {
+    const text = texto();
+    expect(text).toMatch(/não são protegidas por criptografia de ponta a ponta/);
+    expect(text).not.toMatch(/(?<!não são protegidas por )criptografia de ponta a ponta/);
+  });
+
+  it('n8n: a resposta passa por ele, gravacao transitoria, sem prometer retencao zero', () => {
+    const text = texto();
+    expect(text).toMatch(/a resposta do sistema também passa por ele/);
+    expect(text).toMatch(/grava temporariamente, no seu banco de dados interno/);
+    expect(text).toMatch(/Resquícios técnicos podem permanecer/);
+    expect(text).not.toMatch(/retenção zero|nunca é gravad|não fica registrad|removido em segundos/i);
+  });
+
+  it('auditoria distinta dos dados consultados; Plantae entre os compartilhamentos', () => {
+    const text = texto();
+    expect(text).toMatch(/Esses registros são distintos das informações consultadas/);
+    expect(text).toMatch(/não guardam valores, nomes, documentos nem os termos de busca/);
+    const compartilhamento = screen.getByRole('heading', { name: /Compartilhamento/ }).parentElement;
+    expect(compartilhamento).toHaveTextContent(/Plantae, sistema de gestão financeira utilizado pela Vasta/);
+  });
+});
+
+describe('/privacidade: identificacao da versao', () => {
+  it('a versao atual esta pendente de aprovacao, sem data de aprovacao inventada', () => {
+    mockApi({});
+    renderAt('/privacidade');
+    const cabecalho = document.querySelector('.policy-header')?.textContent ?? '';
+    expect(cabecalho).toMatch(/Atualização pendente de aprovação\./);
+    expect(cabecalho).toMatch(/ainda não foi aprovada pela Vasta/);
+    // Nenhuma data aparece associada a versao atual: so a da versao anterior.
+    expect(cabecalho.match(/\d{2}\/\d{2}\/\d{4}/g)).toEqual(['28/10/2026', '28/10/2026']);
+  });
+
+  it('a aprovacao de 28/10/2026 por Rizola e atribuida SO a versao anterior', () => {
+    mockApi({});
+    renderAt('/privacidade');
+    const paragrafos = [...document.querySelectorAll('.policy-header p')].map((p) => p.textContent ?? '');
+    const comAprovacao = paragrafos.filter((p) => /aprovado em 28\/10\/2026 por Rizola/.test(p));
+    expect(comAprovacao).toHaveLength(1);
+    expect(comAprovacao[0]).toMatch(/^Versão anterior: data de vigência 28\/10\/2026/);
+    expect(document.body.textContent).not.toMatch(/^Data de vigência: 28\/10\/2026/m);
+  });
+});
+
 describe('/privacidade: dados confirmados pela empresa', () => {
   it('traz CNPJ, endereco, titulares, vigencia aprovada e responsavel pelo contato', () => {
     mockApi({});
@@ -330,8 +416,6 @@ describe('/privacidade: dados confirmados pela empresa', () => {
     expect(text).toContain('CEP 35.628-000');
     expect(text).toMatch(/sócios e funcionários/);
     expect(text).toMatch(/clientes, fornecedores e colaboradores/);
-    expect(text).toMatch(/Data de vigência: 28\/10\/2026/);
-    expect(text).toMatch(/aprovado em 28\/10\/2026 por Rizola/);
     expect(text).not.toMatch(/vigência proposta|condicionada/);
     expect(text).toMatch(/Responsável indicada pela Vasta para o contato sobre privacidade: Rizola/);
   });

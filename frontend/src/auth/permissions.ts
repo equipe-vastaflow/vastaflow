@@ -16,6 +16,9 @@ export const Permission = {
   SettingsUpdate: 'settings:update',
   DocumentsRead: 'documents:read',
   DocumentsCreate: 'documents:create',
+  // Consultas ao Plantae (somente leitura). O backend checa de novo em cada
+  // requisicao; algumas rotas (NF-e, diagnostico) seguem so do ADMIN.
+  PlantaeRead: 'plantae:read',
 } as const;
 
 export type PermissionCode = (typeof Permission)[keyof typeof Permission];

@@ -15,6 +15,7 @@ import { LoginPage } from './pages/LoginPage';
 import { PrivacyPolicyPage } from './pages/PrivacyPolicyPage';
 import { ProfilePage } from './pages/profile/ProfilePage';
 import { NotificationsPage } from './pages/notifications/NotificationsPage';
+import { PlantaePage } from './pages/plantae/PlantaePage';
 import { SettingsPage } from './pages/settings/SettingsPage';
 import { UserDetailPage } from './pages/users/UserDetailPage';
 import { UserFormPage } from './pages/users/UserFormPage';
@@ -70,6 +71,12 @@ export function App(): ReactNode {
         </Route>
         <Route element={<RequirePermission permission={Permission.FinanceUpdate} />}>
           <Route path="/finance/:id/editar" element={<FinanceEntryFormPage key="editar" />} />
+        </Route>
+
+        {/* Consultas ao Plantae (somente leitura). O backend exige `plantae:read`
+            de novo em cada requisicao. */}
+        <Route element={<RequirePermission permission={Permission.PlantaeRead} />}>
+          <Route path="/plantae" element={<PlantaePage />} />
         </Route>
 
         {/* Documentos. Enviar exige `documents:create`, checado no backend em

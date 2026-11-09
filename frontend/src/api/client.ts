@@ -434,6 +434,174 @@ export interface ReadAllResult {
   atualizadas: number;
 }
 
+// --- Plantae (somente leitura) ----------------------------------------------
+// Espelham `backend/src/modules/integrations/plantae/plantae.types.ts`. Valores
+// monetarios chegam como TEXTO decimal exato (`"8337.10"`), nunca `number`: o
+// frontend so formata, sem converter nem somar. CPF/CNPJ ja chega MASCARADO.
+
+/** Texto decimal exato vindo do Plantae (`-?digitos(.digitos)?`). */
+export type PlantaeDecimal = string;
+
+/** Valor codificado da API: `{ codigo, descricao }`. */
+export interface PlantaeCodedValue<C extends string | number> {
+  codigo: C;
+  descricao: string | null;
+}
+
+export interface PlantaePerson {
+  pessoa_id: number;
+  nome: string | null;
+  razao_social: string | null;
+  tipo_pessoa: string | null;
+  /** Mascarado pelo backend (`***.456.789-**`, `12.345.678/****-**`). */
+  cpf_cnpj: string | null;
+}
+
+export interface PlantaeCurrency {
+  moeda_id: number;
+  nome: string | null;
+  simbolo: string | null;
+}
+
+export interface PlantaeEntryTitle {
+  titulo_id: number;
+  tipo: PlantaeCodedValue<number> | null;
+  origem: PlantaeCodedValue<number> | null;
+  num_documento: string | null;
+  data_emissao: string | null;
+  valor_total: PlantaeDecimal | null;
+  moeda: PlantaeCurrency | null;
+  descricao: string | null;
+  observacao: string | null;
+}
+
+/**
+ * Uma PARCELA de titulo a pagar/receber. Nao traz se e receita ou despesa: isso
+ * e o filtro `tipo` da consulta. `status.codigo`: 0 pendente, 1 quitada,
+ * 2 substituida (renegociada; NAO e cancelada).
+ *
+ * `rateio` e `razao_social` existem no contrato mas nao sao usados pela tela.
+ */
+export interface PlantaeEntry {
+  parcela_id: number;
+  numero: number | null;
+  total_parcelas: number | null;
+  data_vencto: string | null;
+  valor: PlantaeDecimal | null;
+  total_pago: PlantaeDecimal | null;
+  total_juros: PlantaeDecimal | null;
+  total_multa: PlantaeDecimal | null;
+  total_desconto: PlantaeDecimal | null;
+  total_abatido: PlantaeDecimal | null;
+  saldo_atual: PlantaeDecimal | null;
+  data_ult_pagto: string | null;
+  status: PlantaeCodedValue<number>;
+  titulo: PlantaeEntryTitle;
+  pessoa: PlantaePerson | null;
+}
+
+/** O que o backend sabe sobre o resto da listagem. */
+export interface PlantaePagination {
+  perPage: number | null;
+  /** Cursor OPACO: devolvido como veio, nunca montado nem alterado. */
+  nextCursor: string | null;
+  /** `null` = o Plantae nao informou (nunca se afirma que acabou). */
+  hasMore: boolean | null;
+  pagesFetched: number;
+}
+
+export interface PlantaeList<T> {
+  data: T[];
+  pagination: PlantaePagination;
+}
+
+export type PlantaeEntryKind = 'receita' | 'despesa';
+export type PlantaeEntryStatusCode = 0 | 1 | 2;
+
+/** Consulta de parcelas. Periodo `AAAA-MM-DD`, extremos incluidos. */
+export interface PlantaeEntriesQuery {
+  dataInicio: string;
+  dataFim: string;
+  tipo: PlantaeEntryKind;
+  status?: PlantaeEntryStatusCode;
+  cursor?: string;
+}
+
+/** `1` caixa, `2` bancaria, `3` aplicacao, `4` numerario em transito. */
+export type PlantaeAccountType = 1 | 2 | 3 | 4;
+
+/** Conta de caixa, bancaria, aplicacao ou numerario em transito. Nao traz saldo. */
+export interface PlantaeAccount {
+  conta_id: number;
+  nome: string | null;
+  tipo: PlantaeCodedValue<number>;
+  banco: { banco_id: number; nome: string | null } | null;
+  agencia: string | null;
+  /** Mascarado pelo backend: `****` + os ultimos 4 caracteres. */
+  numero_conta: string | null;
+  conta_bancaria_id: number | null;
+}
+
+/**
+ * Movimentacao (entrada ou saida de uma conta); tambem e a linha do extrato.
+ * Valores sem moeda no contrato (a documentacao da API diz "em reais").
+ */
+export interface PlantaeMovement {
+  mov_conta_id: number;
+  cheque_id: number | null;
+  data: string | null;
+  /** `C` credito (entrada) ou `D` debito (saida). */
+  natureza: PlantaeCodedValue<'C' | 'D'>;
+  valor: PlantaeDecimal;
+  conta: { conta_id: number; nome: string | null; tipo: PlantaeCodedValue<number> | null };
+  origem: PlantaeCodedValue<number> | null;
+  descricao: string | null;
+  forma_pagamento: PlantaeCodedValue<number> | null;
+  numero_cheque: string | null;
+  pessoa: PlantaePerson | null;
+  titulo_id: number | null;
+  parcela_id: number | null;
+  conta_contrapartida: { conta_id: number; nome: string | null } | null;
+  conciliado: boolean;
+  data_conciliacao: string | null;
+  /** Saldo da conta DEPOIS da linha: vem no EXTRATO; na listagem de movimentacoes e `null`. */
+  saldo: PlantaeDecimal | null;
+}
+
+/** Extrato: `saldos` sao do PERIODO inteiro, iguais em todas as paginas. */
+export interface PlantaeStatement extends PlantaeList<PlantaeMovement> {
+  saldos: { saldo_anterior: PlantaeDecimal; saldo_final: PlantaeDecimal };
+}
+
+export interface PlantaeAccountsQuery {
+  tipo?: PlantaeAccountType;
+  cursor?: string;
+}
+
+export interface PlantaeMovementsQuery {
+  dataInicio: string;
+  dataFim: string;
+  natureza?: 'C' | 'D';
+  conciliado?: boolean;
+  cursor?: string;
+}
+
+export interface PlantaeStatementQuery {
+  contaId: number;
+  dataInicio: string;
+  dataFim: string;
+  cursor?: string;
+}
+
+export interface PlantaePeopleQuery {
+  /** Nome, razao social ou CPF/CNPJ (2 a 100 caracteres). Nunca vai para log nem auditoria. */
+  busca?: string;
+  cursor?: string;
+}
+
+/** Itens por pagina nas consultas do Plantae pelo painel. */
+export const PLANTAE_PAGE_SIZE = 50;
+
 /** Erro devolvido pela API (status HTTP diferente de 2xx). */
 export class ApiError extends Error {
   constructor(
@@ -455,7 +623,13 @@ export class NetworkError extends Error {
 
 async function request<T>(
   path: string,
-  options: { method?: 'GET' | 'POST' | 'PATCH' | 'DELETE'; body?: unknown; token?: string } = {},
+  options: {
+    method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+    body?: unknown;
+    token?: string;
+    /** So as consultas do Plantae usam (`no-store`): dado financeiro nao fica em cache. */
+    cache?: RequestCache;
+  } = {},
 ): Promise<T> {
   const headers: Record<string, string> = {};
   if (options.body !== undefined) {
@@ -471,6 +645,7 @@ async function request<T>(
       method: options.method ?? 'GET',
       headers,
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      ...(options.cache === undefined ? {} : { cache: options.cache }),
     });
   } catch {
     throw new NetworkError();
@@ -606,6 +781,81 @@ function financeFilterParams(filter: FinanceFilter): URLSearchParams {
   }
   return params;
 }
+/**
+ * Query de `GET /integrations/plantae/financial/entries`.
+ *
+ * So parametros que o backend aceita (parametro desconhecido = 400): periodo,
+ * `tipo`, um `status`, `per_page` fixo, UMA pagina por chamada e o cursor opaco
+ * da resposta anterior, quando houver. Nenhum filtro de pessoa.
+ */
+export function plantaeEntriesParams(query: PlantaeEntriesQuery): URLSearchParams {
+  const params = new URLSearchParams({
+    data_inicio: query.dataInicio,
+    data_fim: query.dataFim,
+    tipo: query.tipo,
+    per_page: String(PLANTAE_PAGE_SIZE),
+    paginas: '1',
+  });
+  if (query.status !== undefined) {
+    params.set('status', String(query.status));
+  }
+  if (query.cursor !== undefined) {
+    params.set('cursor', query.cursor);
+  }
+  return params;
+}
+
+/** `per_page` fixo, UMA pagina por chamada e, se houver, o cursor opaco anterior. */
+function plantaePageParams(cursor: string | undefined): URLSearchParams {
+  const params = new URLSearchParams({ per_page: String(PLANTAE_PAGE_SIZE), paginas: '1' });
+  if (cursor !== undefined) {
+    params.set('cursor', cursor);
+  }
+  return params;
+}
+
+/** Query de `financial/accounts`: um `tipo` opcional. */
+export function plantaeAccountsParams(query: PlantaeAccountsQuery): URLSearchParams {
+  const params = plantaePageParams(query.cursor);
+  if (query.tipo !== undefined) {
+    params.set('tipo', String(query.tipo));
+  }
+  return params;
+}
+
+/** Query de `financial/movements`: periodo, `natureza` e `conciliado` opcionais. Sem conta nem origem. */
+export function plantaeMovementsParams(query: PlantaeMovementsQuery): URLSearchParams {
+  const params = plantaePageParams(query.cursor);
+  params.set('data_inicio', query.dataInicio);
+  params.set('data_fim', query.dataFim);
+  if (query.natureza !== undefined) {
+    params.set('natureza', query.natureza);
+  }
+  if (query.conciliado !== undefined) {
+    params.set('conciliado', query.conciliado ? 'true' : 'false');
+  }
+  return params;
+}
+
+/** Query de `financial/account-statement`: UMA conta (id de `financial/accounts`) e o periodo. */
+export function plantaeStatementParams(query: PlantaeStatementQuery): URLSearchParams {
+  const params = plantaePageParams(query.cursor);
+  params.set('data_inicio', query.dataInicio);
+  params.set('data_fim', query.dataFim);
+  params.set('conta_id', String(query.contaId));
+  return params;
+}
+
+/** Query de `people`: `busca` so quando informada (aparada; vazio nao vai). */
+export function plantaePeopleParams(query: PlantaePeopleQuery): URLSearchParams {
+  const params = plantaePageParams(query.cursor);
+  const busca = query.busca?.trim();
+  if (busca) {
+    params.set('busca', busca);
+  }
+  return params;
+}
+
 const settingPath = (chave: string): string => `/settings/${encodeURIComponent(chave)}`;
 const notificationPath = (id: string): string => `/notifications/${encodeURIComponent(id)}`;
 
@@ -832,5 +1082,44 @@ export const api = {
           fallbackFilename: `vastaflow-financeiro-${filter.de}-a-${filter.ate}.xlsx`,
         }),
     },
+  },
+
+  /**
+   * Consultas ao Plantae em tempo real (somente leitura, `plantae:read`).
+   * Sempre `cache: 'no-store'`: o backend tambem responde `Cache-Control: no-store`.
+   */
+  plantae: {
+    entries: (token: string, query: PlantaeEntriesQuery): Promise<PlantaeList<PlantaeEntry>> =>
+      request(`/integrations/plantae/financial/entries?${plantaeEntriesParams(query).toString()}`, {
+        token,
+        cache: 'no-store',
+      }),
+
+    accounts: (token: string, query: PlantaeAccountsQuery): Promise<PlantaeList<PlantaeAccount>> =>
+      request(`/integrations/plantae/financial/accounts?${plantaeAccountsParams(query).toString()}`, {
+        token,
+        cache: 'no-store',
+      }),
+
+    movements: (
+      token: string,
+      query: PlantaeMovementsQuery,
+    ): Promise<PlantaeList<PlantaeMovement>> =>
+      request(
+        `/integrations/plantae/financial/movements?${plantaeMovementsParams(query).toString()}`,
+        { token, cache: 'no-store' },
+      ),
+
+    statement: (token: string, query: PlantaeStatementQuery): Promise<PlantaeStatement> =>
+      request(
+        `/integrations/plantae/financial/account-statement?${plantaeStatementParams(query).toString()}`,
+        { token, cache: 'no-store' },
+      ),
+
+    people: (token: string, query: PlantaePeopleQuery): Promise<PlantaeList<PlantaePerson>> =>
+      request(`/integrations/plantae/people?${plantaePeopleParams(query).toString()}`, {
+        token,
+        cache: 'no-store',
+      }),
   },
 };
