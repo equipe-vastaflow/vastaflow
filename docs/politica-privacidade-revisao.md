@@ -1,8 +1,8 @@
 # Política de Privacidade do VastaFlow — registro de revisão e aprovação
 
 **Para:** Rizola, responsável indicada pela Vasta para o contato sobre privacidade
-**Situação:** **aprovada administrativamente por Rizola em 28/10/2026** e preparada para publicação, com **três pendências jurídicas ainda abertas** (bases legais, retenção de dados e transferência internacional), declaradas de forma transparente no próprio texto
-**Data de vigência:** 28/10/2026
+**Situação:** a versão de 28/10/2026 foi **aprovada administrativamente por Rizola em 28/10/2026**. Em **09/11/2026** foi publicada uma **atualização sobre as consultas ao Plantae**, identificada na página como **"Atualização pendente de aprovação"**: ela **ainda não foi aprovada formalmente** (seção 6). As **três pendências jurídicas** (bases legais, retenção de dados e transferência internacional) continuam abertas e declaradas no próprio texto
+**Data de vigência da versão aprovada:** 28/10/2026. **A atualização de 09/11/2026 não tem data de aprovação.**
 
 Este documento reúne, para leitura sem conhecimento técnico:
 
@@ -11,12 +11,13 @@ Este documento reúne, para leitura sem conhecimento técnico:
 3. [As três pendências jurídicas](#3-pendências-jurídicas)
 4. [Termos técnicos explicados](#4-termos-técnicos-explicados)
 5. [Registro de aprovação](#5-registro-de-aprovação)
+6. [Atualização de 09/11/2026: consultas ao Plantae (pendente de aprovação)](#6-atualização-de-09112026-consultas-ao-plantae-pendente-de-aprovação)
 
 ---
 
 ## 1. Como ler este documento
 
-- A **seção 2** é a política exatamente como aparece na página pública (`/privacidade`). Nada foi acrescentado ou retirado dela.
+- A **seção 2** é a política **aprovada em 28/10/2026**, exatamente como foi publicada naquela data. Desde 09/11/2026 a página pública (`/privacidade`) mostra a **atualização sobre o Plantae**, descrita na **seção 6** e ainda pendente de aprovação. Onde as duas diferem, vale o que está na página e na seção 6.
 - Depois da aprovação, a página **não exibe mais** o aviso “Versão em revisão” nem marcadores internos `[A CONFIRMAR]`. Os três pontos ainda pendentes de validação jurídica continuam ditos no texto, em linguagem para o público (seções 4, 6 e 7 da política).
 - Algumas frases descrevem limites reais do sistema hoje (por exemplo, que a exclusão definitiva de cadastros não é automática e que as respostas automáticas do WhatsApp ainda não foram comprovadas). Elas foram escritas assim de propósito, para a política não prometer o que o sistema ainda não faz.
 - A seção 3 resume as pendências jurídicas e a seção 5 registra a sua decisão.
@@ -24,6 +25,10 @@ Este documento reúne, para leitura sem conhecimento técnico:
 ---
 
 ## 2. Texto completo da política
+
+*Versão aprovada em 28/10/2026, mantida aqui como registro. Na página pública ela foi substituída em 09/11/2026 pela
+atualização da seção 6. Em especial, a frase do item 3.4 que diz que a consulta à Plantae está "desligada" **não vale
+mais**: o Plantae está em uso desde então.*
 
 > **VastaFlow**
 > # Política de Privacidade
@@ -213,3 +218,98 @@ Nenhuma das três pendências foi validada até a data deste registro.
 1. A página `/privacidade` foi atualizada: sem o aviso “Versão em revisão”, sem o marcador de aprovação pendente e sem marcadores internos `[A CONFIRMAR]`, com a data de vigência 28/10/2026.
 2. As três pendências jurídicas continuam descritas na página como pendentes, e não como resolvidas.
 3. Quando a assessoria jurídica validar cada pendência: preencher a tabela acima, atualizar o texto das seções 4, 6 e 7 da política, mudar a data de vigência da nova versão e pedir nova aprovação administrativa.
+
+---
+
+## 6. Atualização de 09/11/2026: consultas ao Plantae (pendente de aprovação)
+
+**Situação: publicada na página como "Atualização pendente de aprovação". Ainda não foi aprovada formalmente.**
+
+O VastaFlow passou a consultar o Plantae com dados reais, e a versão de 28/10/2026 dizia que essa consulta estava
+desligada. Para a página não continuar afirmando algo falso, o texto foi atualizado e publicado em 09/11/2026, junto com
+o painel Plantae, **identificado claramente como pendente de aprovação**. A aprovação de 28/10/2026 **não se aplica** a
+este texto novo.
+
+### 6.1 Como a página identifica a versão
+
+> **Atualização pendente de aprovação.** Esta versão acrescenta a descrição das consultas ao Plantae (item 3.5) e ainda
+> não foi aprovada pela Vasta.
+>
+> Versão anterior: data de vigência 28/10/2026, texto aprovado em 28/10/2026 por Rizola, responsável indicada pela Vasta
+> para o contato sobre privacidade.
+
+### 6.2 O que mudou em relação à versão de 28/10/2026
+
+| Item da política | Mudança |
+|---|---|
+| Topo | A data de vigência e a aprovação passaram a ser apresentadas como da **versão anterior**; a versão atual aparece como pendente de aprovação |
+| 2. A quem o sistema se destina | Passa a citar as informações consultadas no Plantae como possível fonte de dados de clientes, fornecedores e colaboradores |
+| 3.4 Dados de gestão | Retirado o trecho que dizia que a consulta à Plantae estava desligada. A frase sobre a NFS-e continua igual (desligada) |
+| **3.5 Consultas ao Plantae** | **Item novo** (texto completo em 6.3) |
+| 4. Finalidades | Nova finalidade: consultar, em tempo real e somente para leitura, as informações financeiras da Vasta no Plantae, por usuários autorizados |
+| 6. Compartilhamento | O Plantae entra na lista: o VastaFlow envia a ele só os parâmetros de cada consulta e recebe os resultados. O parágrafo do n8n passa a dizer que a resposta do sistema também passa por ele e que ele grava temporariamente o texto do comando e identificadores do Telegram; mantém "por alguns minutos" e avisa sobre resquícios técnicos e cópias de segurança |
+| 8. Segurança | Nova medida: consultas ao Plantae restritas a usuários com permissão específica, com CPF/CNPJ e contas mascarados e sem armazenamento dos resultados nas tabelas operacionais |
+
+As seções 1, 3.1, 3.2, 3.3 (WhatsApp), 5 (WhatsApp e Meta), 7, 9, 10 e 11 **não mudaram**.
+
+### 6.3 Texto novo do item 3.5
+
+> **3.5 Consultas ao Plantae**
+>
+> A Vasta utiliza o Plantae como sistema de gestão financeira. O VastaFlow consulta o Plantae **em tempo real** e
+> **somente para leitura**: não cria, altera nem exclui informações no Plantae.
+>
+> - As consultas são permitidas apenas a usuários com permissão específica para isso, concedida pela Vasta.
+> - No painel do sistema, esses usuários podem consultar contas a pagar e a receber, movimentações, extratos, contas
+>   bancárias e cadastros de pessoas e empresas. Os resultados incluem valores, datas, descrições e os nomes de pessoas e
+>   empresas (clientes, fornecedores e colaboradores) registrados no Plantae.
+> - CPF, CNPJ e números de contas bancárias são exibidos **mascarados**, com apenas parte dos dígitos visível. O
+>   mascaramento é feito pelo servidor do VastaFlow, antes de a informação chegar ao navegador.
+> - O VastaFlow não armazena os resultados das consultas financeiras em suas tabelas operacionais. Os registros de
+>   auditoria são mantidos separadamente. As informações transmitidas pelos canais de mensagens também estão sujeitas ao
+>   tratamento e à retenção técnica descritos nesta política. No navegador, os resultados ficam apenas na tela enquanto a
+>   consulta está aberta, sem armazenamento local, e as respostas são enviadas com a instrução de não serem guardadas em
+>   cache.
+> - Pelos canais de mensagens, os comandos de contas a pagar e a receber devolvem um resumo financeiro (vencimento, valor,
+>   parcela e um número de referência), sem CPF/CNPJ e sem o nome de clientes. O nome de fornecedores só seria exibido se
+>   essa opção fosse ativada na configuração do sistema; na configuração atual, ela está desativada.
+> - As conversas com o assistente no Telegram **não são protegidas por criptografia de ponta a ponta**: as mensagens,
+>   inclusive essas respostas, ficam nos servidores do Telegram, conforme a política dele. O caminho dessas mensagens
+>   dentro do sistema está descrito no item 6.
+> - Registros de auditoria: cada consulta gera um registro de quem consultou, quando, qual consulta ou comando foi usado e
+>   o resultado (sucesso ou falha); nas consultas pelo painel, também o período pesquisado e a quantidade de itens
+>   retornados. Esses registros são distintos das informações consultadas e não guardam valores, nomes, documentos nem os
+>   termos de busca.
+
+A fonte oficial do texto completo é a própria página (`frontend/src/pages/PrivacyPolicyPage.tsx`).
+
+### 6.4 Pontos para a aprovação
+
+Antes de aprovar, confira se o texto descreve corretamente o que a empresa faz e deseja, em especial:
+
+1. Que usuários autorizados vejam no painel **nomes** de clientes, fornecedores e colaboradores (CPF/CNPJ só mascarado).
+2. Que o nome de fornecedores continue **oculto** no Telegram (configuração atual) e o de clientes nunca apareça.
+3. A descrição da passagem das mensagens pelo **n8n** e pelo **Telegram** (sem criptografia de ponta a ponta).
+4. O Plantae na lista de compartilhamento. A localização do datacenter do Plantae **não é informada** no texto, porque
+   não foi confirmada; ela entra na análise de transferência internacional, que continua pendente (seção 3).
+
+Esta aprovação, como a de 28/10/2026, **não substitui a validação jurídica** das três pendências da seção 3.
+
+### 6.5 Registro de aprovação da atualização (pendente)
+
+| Campo | Valor |
+|---|---|
+| Situação | **Pendente de aprovação formal** |
+| Nome da aprovadora | (a preencher) |
+| Data da aprovação | (a preencher) |
+| Data efetiva de vigência da atualização | (a preencher na aprovação) |
+| Comprovante da aprovação | A arquivar pela empresa (mensagem ou e-mail) |
+
+### 6.6 Depois da aprovação
+
+1. Na página, trocar o parágrafo "Atualização pendente de aprovação" pela nova data de vigência e de aprovação. Manter ou
+   retirar a linha da versão anterior, conforme a decisão da empresa.
+2. Ajustar os testes da página que conferem o topo (`frontend/src/App.test.tsx`, "/privacidade: identificacao da versao").
+3. Implantar a página por um deploy seletivo, com a mesma trava por hash usada em 09/11/2026
+   (`docs/deploy-2026-11-09-plantae-painel.md`).
+4. Preencher a tabela 6.5 e atualizar o topo deste documento.

@@ -1,6 +1,18 @@
 # Integracao Plantae (API externa, somente leitura)
 
-> **Estado: IMPLEMENTADA, testada com mocks e VALIDADA PARCIALMENTE contra a
+> **Estado atual (09/11/2026): EM PRODUCAO** no host `web.plantae.agr.br`, somente leitura.
+> - Painel Plantae com cinco abas (contas a pagar e receber, movimentacoes, extratos, contas bancarias, pessoas)
+>   e os comandos `/contas_pagar` e `/contas_receber` no Telegram, implantados em 09/11/2026 e testados em producao
+>   (secao 12; registro do deploy em [`deploy-2026-11-09-plantae-painel.md`](deploy-2026-11-09-plantae-painel.md)).
+> - Acesso por permissao `plantae:read` (ADMIN e o perfil GESTOR, concedida no banco de producao com autorizacao do
+>   contratante); `/me` e `fiscal/issued-invoices` seguem so do ADMIN.
+> - CPF/CNPJ e numero de conta saem mascarados pelo backend; respostas com `Cache-Control: no-store`.
+> - Nada de escrita, pagamento, baixa, boleto, PIX, PDF ou emissao de documento.
+>
+> Os blocos de estado e as secoes 7, 10 e 11 abaixo sao **registro historico** das fases anteriores (homologacao,
+> preparacao do chat e suporte ao host de producao) e foram mantidos como estavam, com notas onde o estado mudou.
+
+> **Historico - estado da Fase 4: IMPLEMENTADA, testada com mocks e VALIDADA PARCIALMENTE contra a
 > homologacao real (Fases 4.1 a 4.4).** Ver [Validacao real](#71-validacao-real-fases-41-a-44):
 > 7 dos 8 endpoints foram chamados; **`issued-invoices` nao** (a chave nao tem o
 > escopo), e do **extrato** so o envelope e os saldos foram validados: a conta
@@ -20,7 +32,8 @@
 
 ## 1. O que existe
 
-Oito consultas `GET` ao Plantae, expostas **somente a ADMIN humano** pelo VastaFlow:
+Oito consultas `GET` ao Plantae, expostas a **pessoa autenticada com `plantae:read`** (desde 09/11/2026; antes,
+somente ADMIN humano). `/me` e `fiscal/issued-invoices` continuam **somente ADMIN** (secao 12.2):
 
 | # | Plantae | VastaFlow (`GET`) |
 | --- | --- | --- |
@@ -37,8 +50,11 @@ Oito consultas `GET` ao Plantae, expostas **somente a ADMIN humano** pelo VastaF
 **Fase 5 - `/contas_pagar` no chat.** Existe **um** comando de conversa, somente leitura, sobre o
 `PlantaeService` (`/financial/entries`, despesas pendentes): permissao propria `plantae:read` (so ADMIN),
 opt-in `PLANTAE_CHAT_COMMANDS_ENABLED` (desligado), uma pagina de 5 itens, **sem CPF/CNPJ, observacao,
-descricao ou rateio**. **Nunca consultou o Plantae real** (testes com `fetch` simulado; no Docker o Plantae
-esta desligado). Detalhes em [`telegram-n8n.md`](telegram-n8n.md), secao 7.
+descricao ou rateio**. *(Historico da Fase 5: naquela fase o comando nunca consultou o Plantae real. Hoje
+`/contas_pagar` e `/contas_receber` estao em producao, com o GESTOR autorizado: secao 12.4.)* Detalhes em
+[`telegram-n8n.md`](telegram-n8n.md), secao 7.
+
+**Painel Plantae (09/11/2026).** Rota `/plantae` do frontend, com cinco abas sobre as rotas acima: secao 12.1.
 
 **Nao existe**: escrita de qualquer tipo, NFS-e, XML, DANFE, baixa, conciliacao,
 sincronizacao, cache, tabela, migration, workflow, canal. A API do Plantae nao
@@ -114,7 +130,12 @@ variavel que alguem troque por engano e aponte a integracao para o lugar errado.
   `service:identity` apenas. O token de servico **nao** autentica estas rotas
   (testado). O acesso do n8n a dados financeiros exige fase propria, com
   resolucao do usuario de origem.
-- **Somente ADMIN humano**, sem rota publica, sem rota de servico.
+- **Somente pessoa com `plantae:read`** (antes de 09/11/2026: somente ADMIN humano), sem rota publica, sem rota de
+  servico; `/me` e `fiscal/issued-invoices` so do ADMIN.
+- **Mascaramento no backend** (`plantae-mask.ts`): `cpf_cnpj`, `cpf` e `cnpj` (em qualquer nivel da resposta) e
+  `numero_conta` (so os ultimos 4) saem mascarados; formato inesperado vira mascara total, nunca o valor original.
+- **`Cache-Control: no-store`** em todas as rotas; o frontend tambem pede `cache: 'no-store'` e nao grava nada em
+  `localStorage`/`sessionStorage`.
 - **Redirect nao e seguido** (`redirect: 'manual'`); TLS nao e enfraquecido (nao ha
   opcao); `links.next` nunca e seguido como destino.
 - **Nada e gravado**: sem cache, tabela ou copia no MySQL.
@@ -341,7 +362,9 @@ Declaradas explicitamente; nenhuma foi omitida:
 | Lancar pagamento, dar baixa, criar lancamento | - | NOT SUPPORTED | API somente leitura |
 | Conciliar extrato automaticamente | - | NOT SUPPORTED | Nao existe na API |
 | Criar/alterar pessoas, contas, razoes sociais | - | NOT SUPPORTED | API somente leitura |
-| Perguntar por WhatsApp/Telegram | - | NOT IMPLEMENTED | Exige fase propria: resolver o usuario de origem e autorizar; o n8n nao tem acesso |
+| Perguntar por WhatsApp/Telegram | `entries` | **PARTIAL** (09/11/2026) | `/contas_pagar` e `/contas_receber` (pendentes, 5 itens, sem nomes de clientes nem CPF/CNPJ), pessoa resolvida pelo vinculo; o n8n so repassa. Em producao validado pelo Telegram |
+| Consultar tudo isso num painel | todos exceto `me` e `issued-invoices` | SUPPORTED (09/11/2026) | Painel `/plantae`, cinco abas, `plantae:read` (secao 12) |
+| Classificar cadastro como cliente ou fornecedor | - | NOT SUPPORTED | `people` nao informa o papel; so o lancamento indica (despesa = favorecido, receita = cliente) |
 | Dados sempre sincronizados / historico local | - | NOT SUPPORTED | Consulta sob demanda; sem copia local, por decisao |
 
 ## 9. Testes
@@ -358,6 +381,9 @@ Declaradas explicitamente; nenhuma foi omitida:
   configurado.
 - Fixtures sanitizadas (`test/support/plantae-fixtures.ts`): dados ficticios; nenhum
   valor da colecao real.
+- Desde 09/11/2026 (secao 12.5): `plantae-mask.spec.ts`, `plantae-accounts-receivable.command.spec.ts`,
+  `test/plantae-receivables-chat.e2e-spec.ts` e casos novos em `plantae.architecture.spec.ts`, `plantae.e2e-spec.ts`,
+  `plantae-chat-gates.e2e-spec.ts` e `telegram-ingest.e2e-spec.ts`; no frontend, `frontend/src/pages/plantae/*.test.ts(x)`.
 - **Nao ha teste automatizado contra o Plantae**, de proposito. A validacao de TLS e
   coberta por classificacao de erro simulada; o handshake real contra
   `rc.plantae.agr.br` esta na lista de pendencias.
@@ -465,7 +491,11 @@ Rollback: `PLANTAE_CHAT_COMMANDS_ENABLED=false` (e/ou `PLANTAE_ENABLED=false`), 
 
 ## 11. Host de PRODUCAO (`web.plantae.agr.br`): suporte adicionado, SEM nenhuma consulta real
 
-> **Estado: o codigo aceita o host; NADA foi consultado, nenhuma flag foi ligada e o token nao foi usado nem configurado.**
+> **Nota (09/11/2026):** esta secao registra o momento em que o suporte ao host foi adicionado. Desde entao a
+> integracao foi ligada em producao e usada com dados reais (secao 12). A confirmacao escrita do fornecedor e o registro
+> da conferencia da organizacao (itens 1 e 6 de 11.3) nao estao documentados neste repositorio; guarde-os fora dele.
+
+> **Historico - estado na epoca: o codigo aceita o host; NADA foi consultado, nenhuma flag foi ligada e o token nao foi usado nem configurado.**
 > O fornecedor enviou oficialmente `https://web.plantae.agr.br/api/v1/external`. O endereco *aparenta* ser de producao, mas
 > essa classificacao **ainda precisa de confirmacao escrita do fornecedor**. Ate la, o VastaFlow trata os dados desse host
 > como **reais** (nunca como teste) e nao o rotula de homologacao.
@@ -521,3 +551,83 @@ Rollback: `PLANTAE_CHAT_COMMANDS_ENABLED=false` (e/ou `PLANTAE_ENABLED=false`), 
 
 Rollback: `PLANTAE_CHAT_COMMANDS_ENABLED=false` e/ou `PLANTAE_ENABLED=false`, recriar so o backend; revogar o token na
 Plantae se houve exposicao.
+
+## 12. Estado de producao (09/11/2026): painel, permissoes e `/contas_receber`
+
+> Implantado em 09/11/2026 por deploy seletivo de 19 arquivos de runtime, sem migration. Registro tecnico, hashes, backups
+> e rollback: [`deploy-2026-11-09-plantae-painel.md`](deploy-2026-11-09-plantae-painel.md).
+
+### 12.1 Painel Plantae (frontend `/plantae`)
+
+Item **Plantae** no menu, visivel para quem tem `plantae:read` (ou ADMIN). Aviso fixo: "Dados consultados no Plantae em tempo
+real. Somente leitura." Cinco abas:
+
+| Aba | Rota do backend | Filtros | Observacoes |
+| --- | --- | --- | --- |
+| Contas a pagar e receber (inicial) | `financial/entries` | `tipo` obrigatorio (a parcela nao informa o tipo), vencimento de/ate (padrao: mes corrente), `status` 0/1/2 | Valor e saldo na moeda do titulo; status 2 = "Substituida (renegociada)", nunca cancelada |
+| Movimentacoes | `financial/movements` | periodo, `natureza` C/D, `conciliado` | Aviso: a API exclui estornos e compras no cartao; valor sem simbolo (o contrato nao traz moeda) |
+| Extratos | `financial/accounts` + `financial/account-statement` | conta (carregada sob demanda), periodo | Saldos e saldo por linha exatamente os da API; nada somado |
+| Contas bancarias | `financial/accounts` | `tipo` 1 a 4 | Numero da conta mascarado |
+| Pessoas | `people` | `busca` opcional (2 a 100 caracteres) | Aviso: o Plantae nao informa se o cadastro e cliente ou fornecedor; nenhuma classificacao e inventada |
+
+Regras comuns: consulta so ao clicar em **Consultar** (sem polling), uma por vez, `per_page=50` e `paginas=1`, "Carregar
+mais" pelo cursor opaco com os filtros ORIGINAIS, `cache: 'no-store'`, dados so na memoria da aba (descartados ao trocar de
+aba ou sair), erros mostrados por codigo `PLANTAE_*` com texto amigavel (o texto do backend nunca aparece), documento ou conta
+que chegasse sem mascara e ocultado pela tela (defesa em profundidade).
+
+### 12.2 Permissoes
+
+| Rota (`/integrations/plantae/...`) | Quem acessa |
+| --- | --- |
+| `status`, `financial/entries`, `financial/accounts`, `financial/movements`, `financial/account-statement`, `organization/legal-entities`, `people` | `plantae:read` (ADMIN sempre) |
+| `me` (diagnostico da chave) | **somente ADMIN**, mesmo com `plantae:read` |
+| `fiscal/issued-invoices` (NF-e) | **somente ADMIN** (fora do pedido financeiro da cliente), mesmo com `plantae:read` |
+
+- `@RequirePermissions(plantae:read)` na classe, sem `@Roles` na classe; `@Roles(Admin)` so nos metodos `me` e `invoices`.
+  O `RolesGuard` le o metodo antes da classe e o `PermissionsGuard` le as permissoes do banco a cada requisicao (conceder ou
+  revogar vale na requisicao seguinte, sem novo login).
+- **Producao:** `plantae:read` foi concedida ao **perfil GESTOR** diretamente no banco, com autorizacao do contratante. Nao ha
+  migration nem mudanca em `role-defaults.ts` (o padrao do codigo continua: so o ADMIN). A Rizola (GESTOR) esta autorizada a
+  consultar as quatro empresas da organizacao Plantae 292.
+- A mesma permissao libera `/contas_pagar` e `/contas_receber` no chat.
+
+### 12.3 Mascaramento e cache
+
+- `plantae-mask.ts`, aplicado no controller as duas saidas de itens (6 listagens e o extrato): CPF `***.456.789-**`, CNPJ
+  `12.345.678/****-**`, conta `****` + ultimos 4. Vale tambem para `issued-invoices` e `legal-entities`. A chave de acesso da
+  NF-e (identificador tecnico) nao e mascarada. Nomes e razoes sociais nao sao mascarados.
+- O servico e os parsers continuam com o dado integral; o chat nao passa pelo controller.
+- `Cache-Control: no-store` em todas as rotas (401/403 dos guards saem sem o cabecalho, sem dado).
+
+### 12.4 Comandos de chat
+
+- `/contas_pagar` (despesas) e `/contas_receber` (receitas): MESMO handler (`PendingEntriesCommandHandler`) com duas
+  especificacoes. Parcelas pendentes (status 0), hoje ate +7 dias ou periodo de ate 31 dias, no maximo 5 itens, aviso de
+  PRODUCAO na primeira linha; cada linha: vencimento, valor na moeda do titulo, parcela, `ref <parcela_id>`; pagamento ou
+  recebimento parcial so sinalizado (saldo nao e calculado).
+- Nome: o favorecido de `/contas_pagar` so com `PLANTAE_CHAT_SHOW_PAYEE_NAME=true` (**producao: `false`**); o cliente de
+  `/contas_receber` **nunca**. CPF/CNPJ, documento, descricao, observacao e rateio nunca saem.
+- Mesmos portoes: vinculo ativo, `plantae:read`, `PLANTAE_CHAT_COMMANDS_ENABLED`, `PLANTAE_ORGANIZATION_CONFIRMED`,
+  `PLANTAE_ENABLED`. Auditoria `PLANTAE_QUERIED` com `comando`, `canal` e desfecho.
+- **Limite por pessoa compartilhado:** 3 consultas por minuto **somando** os dois comandos (um so `SlidingWindowLimiter`,
+  provider `PLANTAE_CHAT_LIMITER`).
+- O workflow do n8n nao mudou (repasse generico); o `/ajuda` lista os comandos a partir do catalogo, filtrado por permissao.
+  O motor e compartilhado com o WhatsApp: se as respostas por la estiverem ativas, as mesmas regras valem.
+
+### 12.5 Testes
+
+| Etapa | Resultado |
+| --- | --- |
+| Backend local (antes do deploy) | 3566 unitarios (133 suites) e 1036 e2e (35 suites), typecheck e lint |
+| Frontend local (antes do deploy) | 468 testes (19 arquivos), typecheck, lint e build de producao |
+| Validacao em producao antes do painel, com scripts de Console que so mostram status, quantidade e nomes/tipos de campos | `financial/accounts` 200 (5 registros); `financial/movements` 200 (5); `financial/account-statement` 200 (5 linhas); `people` 200 (5); `financial/entries` `tipo=receita` 200 (2); `financial/entries` `tipo=despesa`, `status=1`, 01/10/2026 a 08/11/2026: 200 (5) |
+| Producao depois do deploy (09/11/2026) | backend e Nginx saudaveis; MySQL, PostgreSQL e n8n saudaveis; cinco abas testadas; `/contas_pagar` e `/contas_receber` funcionando no Telegram; mascaramento confirmado |
+
+### 12.6 Pendencias
+
+- Aprovacao formal da politica de privacidade atualizada (publicada como "Atualizacao pendente de aprovacao"):
+  [`politica-privacidade-revisao.md`](politica-privacidade-revisao.md), secao 6.
+- Confirmacao escrita do fornecedor sobre o host e os escopos de producao, e registro da conferencia da organizacao (11.3):
+  guardar fora do repositorio.
+- Semantica de `saldo_atual` em parcela parcialmente paga (o chat continua sem mostrar saldo; o painel mostra o valor da API).
+- Commit das alteracoes implantadas: ate este registro, o pacote foi gerado a partir do diretorio de trabalho, nao de um commit.
